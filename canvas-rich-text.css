@@ -1,0 +1,227 @@
+/* Canvas rich text controls */
+
+.canvas-slash-menu {
+    position: fixed;
+    z-index: 3200;
+    min-width: 196px;
+    background: #1b1b1b;
+    border: 1px solid #2f2f2f;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.45);
+    display: none;
+}
+
+.canvas-slash-menu.open {
+    display: block;
+}
+
+.canvas-slash-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: transparent;
+    border: none;
+    color: var(--muted2);
+    text-align: left;
+    cursor: pointer;
+}
+
+.canvas-slash-item:hover,
+.canvas-slash-item.active {
+    background: #262626;
+    color: var(--text-main);
+}
+
+.canvas-slash-icon {
+    width: 18px;
+    flex: 0 0 auto;
+    text-align: center;
+    color: var(--muted3);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.canvas-slash-label {
+    font-size: 13px;
+}
+
+.block-body h1,
+.block-body h2,
+.block-body h3,
+.frame-item-text-content h1,
+.frame-item-text-content h2,
+.frame-item-text-content h3,
+.container-body h1,
+.container-body h2,
+.container-body h3,
+.canvas-toggle-content h1,
+.canvas-toggle-content h2,
+.canvas-toggle-content h3 {
+    margin: 8px 0 4px;
+    color: var(--text-main);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.block-body h1,
+.frame-item-text-content h1,
+.container-body h1,
+.canvas-toggle-content h1 {
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.block-body h2,
+.frame-item-text-content h2,
+.container-body h2,
+.canvas-toggle-content h2 {
+    font-size: 19px;
+    font-weight: 650;
+}
+
+.block-body h3,
+.frame-item-text-content h3,
+.container-body h3,
+.canvas-toggle-content h3 {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.block-body ul,
+.block-body ol,
+.frame-item-text-content ul,
+.frame-item-text-content ol,
+.container-body ul,
+.container-body ol {
+    margin: 4px 0;
+    padding-left: 18px;
+    white-space: normal;
+}
+
+.block-body ul.canvas-rich-list,
+.block-body ol.canvas-rich-list,
+.frame-item-text-content ul.canvas-rich-list,
+.frame-item-text-content ol.canvas-rich-list,
+.container-body ul.canvas-rich-list,
+.container-body ol.canvas-rich-list {
+    margin: 4px 0;
+}
+
+.block-body li,
+.frame-item-text-content li,
+.container-body li {
+    margin: 4px 0;
+}
+
+.block-body li::marker,
+.frame-item-text-content li::marker,
+.container-body li::marker {
+    color: var(--muted3);
+}
+
+.canvas-toggle-list {
+    margin: 4px 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.canvas-toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 22px;
+}
+
+.canvas-toggle-handle {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin: 1px 0 0 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.canvas-toggle-handle::before {
+    content: "";
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 5px 0 5px 7px;
+    border-color: transparent transparent transparent rgba(207,196,178,0.78);
+    transform-origin: 35% 50%;
+    transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), border-left-color 180ms ease;
+}
+
+.canvas-toggle-list.is-open > .canvas-toggle-row .canvas-toggle-handle::before {
+    transform: rotate(90deg);
+    border-left-color: var(--text-main);
+}
+
+.canvas-toggle-handle:hover::before,
+.canvas-toggle-handle:focus-visible::before {
+    border-left-color: var(--text-main);
+}
+
+.canvas-toggle-summary {
+    flex: 1;
+    min-width: 0;
+    min-height: 22px;
+    color: var(--muted2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    cursor: text;
+    outline: none;
+}
+
+.canvas-toggle-summary:empty::before {
+    content: "Toggle";
+    opacity: 0.34;
+    pointer-events: none;
+}
+
+.canvas-toggle-summary:focus,
+.canvas-toggle-content:focus {
+    color: var(--text-main);
+}
+
+.canvas-toggle-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+}
+
+.canvas-toggle-list.is-open > .canvas-toggle-body {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.canvas-toggle-content {
+    min-height: 0;
+    overflow: hidden;
+    margin-left: 28px;
+    padding-top: 2px;
+    color: var(--muted2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    cursor: text;
+    outline: none;
+}
+
+.canvas-toggle-content > :first-child {
+    margin-top: 0;
+}
+
+.canvas-toggle-content > :last-child {
+    margin-bottom: 0;
+}

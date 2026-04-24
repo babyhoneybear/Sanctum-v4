@@ -1,0 +1,935 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="document.css">
+  <link rel="stylesheet" href="canvas-rich-text.css">
+  <title>Sanctum v3</title>
+</head>
+
+<body>
+
+    <aside class="sidebar"  id="sidebar" aria-hidden="true">
+    <div class="sidebar-top">
+        <div class="profile">
+            <div class="pfp" aria-hidden="true"></div>
+            <div class="profile-name">Your Name</div>
+        </div>
+        
+        <button id="closeBtn" aria-label="Close menu">&laquo;</button>
+    </div>
+
+    <hr class="divider">
+    
+  
+    <nav class="sidebar-nav">
+        <a href="#" class="nav-item row" id="navSearch">Search</a> 
+        <a href="#" class="nav-item row" id="navInbox">Inbox</a>
+        <a href="#" class="nav-item row" id="navNotes">Notes</a>
+        <a href="#" class="nav-item row" id="navHome">Home</a>
+    </nav>
+    
+
+    <hr class="divider">
+
+    <div class="sidebar-content">
+        <div class="section">
+            <div class="section-header">
+                <span class="section-title">Favorites</span>
+                <span class="section-arrow">˅</span>
+                <span class="section-menu">⋯</span>
+            </div>
+        <div class="section-items" id="favoritesList">
+        </div>
+    </div>
+
+     <div class="section">
+        <div class="section-header">
+            <span class="section-title">Pins</span>
+            <span class="section-arrow">˅</span>
+            <span class="section-menu">⋯</span>
+        </div>
+          <div class="section-items" id="pinsList"></div>
+        </div>
+
+    <div class="section section-domains">
+        <div class="section-header">
+            <span class="section-title">Domains</span>
+            <span class="section-arrow">˅</span>
+            <span class="section-add" id="domainAddBtn" title="New domain">+</span>
+        </div>
+        <div class="section-items"></div>
+    </div>
+
+</div><!-- end sidebar-content -->
+
+<div class="sidebar-bottom">
+    <div class="bottom-item" id="settingsBtn">
+        <span class="bottom-icon"></span>
+        <span class="bottom-name">Settings</span>
+    </div>
+    <div class="bottom-item" id="trashBtn">
+        <span class="bottom-icon"></span>
+        <span class="bottom-name">Trash</span>
+    </div>
+</div>
+</aside>
+
+
+<!-- Pin Panel -->
+<div class="pin-panel" id="pinPanel">
+  <div class="pin-panel-header" id="pinPanelHeader">
+    <span class="pin-panel-title" id="pinPanelTitle">Pins</span>
+    <div class="pin-panel-header-right" id="pinPanelHeaderRight">
+        <button class="pin-panel-close" id="pinPanelClose">✕</button>
+    </div>
+</div>
+  <div class="pin-content" id="pinContent"></div>
+</div>
+
+
+<main class="main" id="main">
+    <div class="topbar">
+    <div class="topbar-left">
+        <button class="icon-btn" id="menuBtn" aria-label="Open menu">☰</button>
+        <div class="page-title" id="pageTitle">Home</div>
+        <div id="breadcrumbBar" class="breadcrumb-bar"></div>
+    </div>
+
+    <div class="topbar-center" id="topbarCenter"></div>
+
+    <div class="topbar-right">
+        <button class="icon-btn" id="bookmarkBtn" aria-label="Bookmark">🔖</button>
+        <div class="doc-view-switcher" id="docViewSwitcher" style="display:none;">
+          <button class="doc-view-btn active" data-view="edit">Edit</button>
+          <button class="doc-view-btn" data-view="view">View</button>
+          <button class="doc-view-btn" data-view="annotate">Annotate</button>
+        </div>
+        <button class="icon-btn" id="pinCurrentBtn" aria-label="Pin this page">📌</button>
+        <button class="icon-btn" id="PinsBtn" aria-label="Open pins">⎘</button>
+        <button class="icon-btn" id="moreBtn" aria-label="More">⋯</button>
+
+        <div class="edit-wrap"> 
+            <button class="icon-btn" id="editToggle" aria-label="Toggle edit mode">✎</button>
+
+            <aside class="edit-dock" id="editorDock">
+              <div class="dock-mode dock-mode-create">
+                <button class="dock-btn" id="addBlockBtn" aria-label="Add block" data-label="Add">+</button>
+                <button class="dock-btn" id="addUndoBtn" aria-label="Undo" data-label="Undo">↺</button>
+                <button class="dock-btn" id="addRedoBtn" aria-label="Redo" data-label="Redo">↻</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" id="toolText" aria-label="Text preset" data-label="Text">T</button>
+                <button class="dock-btn" id="toolList" aria-label="List preset" data-label="List">•</button>
+                <button class="dock-btn" id="toolImage" aria-label="Image preset" data-label="Image">🖼</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" id="toolPage" aria-label="Page card" data-label="Page">⊞</button>
+                <button class="dock-btn" id="toolDomain" aria-label="Domain card" data-label="Domain">⌂</button>
+                <button class="dock-btn" id="toolDivider" aria-label="Divider tools" data-label="Dividers">┆</button>
+                <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame">▤</button>
+                <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table">⊞</button>
+                <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker">✦</button>
+              </div>
+
+              <div class="dock-mode dock-mode-text">
+                <button class="dock-btn" id="blockBgBtn" aria-label="Color" data-label="Color">▣</button>
+                <button class="dock-btn" id="blockTextColorBtn" aria-label="Text color" data-label="Text">A</button>
+                <button class="dock-btn" id="blockBorderBtn" aria-label="Block border" data-label="Border">⬚</button>
+                <button class="dock-btn" id="blockPaddingBtn" aria-label="Block padding" data-label="Padding">▥</button>
+                <button class="dock-btn" id="blockRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
+                <button class="dock-btn" id="blockNoteBtn" aria-label="Add note" data-label="Note">✎</button>
+                <button class="dock-btn" id="blockDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+              </div>
+
+              <div class="dock-mode dock-mode-list">
+                <button class="dock-btn" id="listBgBtn" aria-label="List background" data-label="Color">▣</button>
+                <button class="dock-btn" id="listBorderBtn" aria-label="List border" data-label="Border">⬚</button>
+                <button class="dock-btn" id="listRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
+                <button class="dock-btn" id="listNoteBtn" aria-label="Add note" data-label="Note">✎</button>
+                <button class="dock-btn" id="listDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+              </div>
+
+              <div class="dock-mode dock-mode-image">
+                <button class="dock-btn" id="imageReplaceBtn" aria-label="Replace image" data-label="Replace">🖼</button>
+              </div>
+              <div class="dock-mode dock-mode-table">
+                <button class="dock-btn" id="tableStructureBtn" aria-label="Rows and columns" data-label="Grid">▤</button>
+                <button class="dock-btn" id="tableBordersBtn" aria-label="Table borders" data-label="Border">⬚</button>
+                <button class="dock-btn" id="tableMathBtn" aria-label="Table math" data-label="Math">∑</button>
+                <button class="dock-btn" id="tableSelectBtn" aria-label="Select multiple cells" data-label="Select">▦</button>
+                <button class="dock-btn" id="tableDeleteBtn" aria-label="Delete table" data-label="Delete">🗑</button>
+              </div>
+              <div class="dock-mode dock-mode-container">
+                <button class="dock-btn" id="containerBgBtn" aria-label="Container background" data-label="Color">▣</button>
+                <button class="dock-btn" id="containerBorderBtn" aria-label="Container border" data-label="Border">⬚</button>
+                <button class="dock-btn" id="containerRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
+                <button class="dock-btn" id="containerDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+              </div>
+            </aside>
+            <div class="canvas-color-popover" id="canvasColorPopover" hidden></div>
+        </div>
+    </div>
+</div>
+
+<div class="doc-editor" id="docEditor">
+  <div class="doc-sidebar" id="docSidebar">
+    <div class="doc-sidebar-header">
+      <span class="doc-sidebar-title">Sections</span>
+      <button class="doc-sidebar-add" id="docAddSection" title="Add section">+</button>
+    </div>
+    <div class="doc-sections-list" id="docSectionsList"></div>
+  </div>
+  <div class="doc-main" id="docMain">
+    <div class="doc-toolbar" id="docToolbar">
+      <div class="doc-toolbar-group doc-toolbar-group-text">
+        <select id="docHeadingSelect" class="doc-select">
+          <option value="p">Paragraph</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+          <option value="h4">Heading 4</option>
+        </select>
+
+        <select id="docFontSelect" class="doc-select" title="Font family">
+          <option value="system-ui, sans-serif">System</option>
+          <option value="'Arial', sans-serif">Arial</option>
+          <option value="'Times New Roman', serif">Times New Roman</option>
+          <option value="'Courier New', monospace">Courier New</option>
+          <option value="'Georgia', serif">Georgia</option>
+          <option value="'Palatino', serif">Palatino</option>
+          <option value="'Garamond', serif">Garamond</option>
+        </select>
+
+        <select id="docFontSizeSelect" class="doc-select" title="Font size">
+          <option value="10px">10px</option>
+          <option value="12px">12px</option>
+          <option value="13px">13px</option>
+          <option value="14px">14px</option>
+          <option value="15px">15px</option>
+          <option value="16px">16px</option>
+          <option value="18px">18px</option>
+          <option value="20px">20px</option>
+          <option value="24px">24px</option>
+          <option value="28px">28px</option>
+          <option value="32px">32px</option>
+          <option value="36px">36px</option>
+          <option value="48px">48px</option>
+          <option value="64px">64px</option>
+        </select>
+
+        <button class="doc-tool-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+        <button class="doc-tool-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+        <button class="doc-tool-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+
+        <div class="doc-toolbar-divider"></div>
+
+        <div class="doc-color-wrap" id="docTextColorWrap">
+          <button class="doc-tool-btn" id="docTextColorBtn" title="Text color">
+            <span class="doc-color-preview" id="docTextColorPreview"></span>
+            A
+          </button>
+        </div>
+        <div class="doc-color-wrap" id="docHighlightWrap">
+          <button class="doc-tool-btn" id="docHighlightBtn" title="Highlight">
+            <span class="doc-color-preview" id="docHighlightPreview"></span>
+            H
+          </button>
+        </div>
+
+        <div id="docColorPicker" class="doc-color-dropdown">
+          <div class="doc-color-section">
+            <div class="doc-color-section-title">Colors</div>
+            <div class="doc-color-swatches" id="docColorPresets"></div>
+          </div>
+
+          <div class="doc-color-section">
+            <button id="docColorMoreBtn" class="doc-color-more">＋ Custom Color</button>
+          </div>
+
+          <div class="doc-color-section hidden" id="docColorAdvanced">
+            <input type="color" id="docColorInput" />
+            <input type="text" id="docColorHex" placeholder="#000000" />
+          </div>
+        </div>
+
+        <div class="doc-toolbar-divider"></div>
+
+        <div class="doc-list-wrap">
+          <button class="doc-tool-btn" id="docListMenuBtn" title="Lists & alignment">≣</button>
+          <div class="doc-list-menu" id="docListMenu">
+            <button class="doc-list-item" data-cmd="insertUnorderedList">Bullet List</button>
+            <button class="doc-list-item" data-cmd="insertOrderedList">Numbered List</button>
+            <button class="doc-list-item" data-cmd="justifyLeft">Align Left</button>
+            <button class="doc-list-item" data-cmd="justifyCenter">Align Center</button>
+            <button class="doc-list-item" data-cmd="justifyRight">Align Right</button>
+          </div>
+        </div>
+
+        <div class="doc-format-wrap">
+          <button class="doc-tool-btn" id="docFormatMenuBtn" title="Format">⋯</button>
+          <div class="doc-format-menu" id="docFormatMenu">
+            <div class="doc-format-item doc-has-submenu" id="docStyleKitBtn">
+              <span>🎨 Writing Style</span><span class="doc-submenu-arrow">▸</span>
+            </div>
+            <div class="doc-format-item doc-has-submenu" id="docPagePresetBtn">
+              <span>📄 Page Preset</span><span class="doc-submenu-arrow">▸</span>
+            </div>
+            <div class="doc-list-divider"></div>
+            <div class="doc-list-section-label">Paragraph Style</div>
+            <button class="doc-format-item" data-format="p">¶ Paragraph</button>
+            <button class="doc-format-item" data-format="h1">H1 Heading 1</button>
+            <button class="doc-format-item" data-format="h2">H2 Heading 2</button>
+            <button class="doc-format-item" data-format="h3">H3 Heading 3</button>
+            <button class="doc-format-item" data-format="h4">H4 Heading 4</button>
+            <button class="doc-format-item" data-format="blockquote">" Quote Block</button>
+            <div class="doc-list-divider"></div>
+            <div class="doc-list-section-label">Lines & Spacing</div>
+            <button class="doc-format-item" data-spacing="1.4">Tight (1.4)</button>
+            <button class="doc-format-item" data-spacing="1.8">Normal (1.8)</button>
+            <button class="doc-format-item" data-spacing="2.2">Relaxed (2.2)</button>
+            <button class="doc-format-item" data-spacing="2.8">Double (2.8)</button>
+            <div class="doc-list-divider"></div>
+            <div class="doc-list-section-label">Alignment</div>
+            <button class="doc-format-item" data-cmd="justifyLeft">⬤← Left</button>
+            <button class="doc-format-item" data-cmd="justifyCenter">⬤ Center</button>
+            <button class="doc-format-item" data-cmd="justifyRight">→⬤ Right</button>
+            <button class="doc-format-item" data-cmd="justifyFull">⬤⬤ Justify</button>
+            <div class="doc-list-divider"></div>
+            <div class="doc-list-section-label">Insert</div>
+            <button class="doc-format-item" data-action="divider">─ Divider</button>
+            <button class="doc-format-item" data-action="pagenum"># Page Numbers</button>
+            <div class="doc-list-divider"></div>
+            <div class="doc-list-section-label">Page Setup</div>
+            <button class="doc-format-item" data-action="margins">⊟ Margins</button>
+            <button class="doc-format-item" data-action="header">▤ Header & Footer (coming soon)</button>
+          </div>
+          <!-- Writing Style Kit submenu -->
+          <div class="doc-submenu" id="docStyleKitSubmenu">
+            <div class="doc-submenu-header">
+              <span>Writing Style</span>
+              <button class="doc-submenu-new" id="docNewStyleKit">+ New</button>
+            </div>
+            <div class="doc-submenu-list" id="docStyleKitList"></div>
+          </div>
+
+          <!-- Page Preset submenu -->
+          <div class="doc-submenu" id="docPagePresetSubmenu">
+            <div class="doc-submenu-header">
+              <span>Page Preset</span>
+              <button class="doc-submenu-new" id="docNewPagePreset">+ New</button>
+            </div>
+            <div class="doc-submenu-list" id="docPagePresetList"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="doc-toolbar-group doc-toolbar-group-meta">
+        <button class="doc-tool-btn doc-insert-toggle" id="docInsertToggle" title="Insert">＋ Insert</button>
+        <button class="doc-tool-btn" id="docFindBtn" title="Find / Replace">Find</button>
+        <button class="doc-tool-btn" id="docStatsToggle" title="Writing stats">Stats</button>
+        <button class="doc-tool-btn" id="docLexiconToggle" title="Lexicon">📚</button>
+        <button class="doc-tool-btn" id="docToggleSidebar" title="Sections">☰</button>
+        <button class="doc-tool-btn" id="docToggleInspector" title="Inspector">⊙</button>
+      </div>
+      <div class="doc-stats-panel" id="docStatsPanel">
+        <div class="doc-stats-header">
+          <span class="doc-stats-title">Writing Stats</span>
+          <button class="doc-stats-close" id="docStatsClose">✕</button>
+        </div>
+
+        <div class="doc-stats-tabs" id="docStatsTabs">
+          <button class="doc-stats-tab active" data-tab="overview">Overview</button>
+          <button class="doc-stats-tab" data-tab="goals">Goals</button>
+          <button class="doc-stats-tab" data-tab="patterns">Patterns</button>
+          <button class="doc-stats-tab" data-tab="history">History</button>
+        </div>
+
+        <div class="doc-stats-body" id="docStatsBody"></div>
+      </div>
+    </div>
+
+    <div class="doc-suggestion-tray" id="docSuggestionTray"></div>
+
+    <div class="doc-lexicon-panel" id="docLexiconPanel">
+      <div class="doc-lexicon-header">
+        <span>Lexicon</span>
+        <div class="doc-lexicon-header-actions">
+          <button id="docLexiconSaveSelection" title="Add selected text as entry">＋ Add Entry</button>
+          <button id="docLexiconClose">✕</button>
+        </div>
+      </div>
+
+      <input
+        id="docLexiconSearch"
+        class="doc-lexicon-search"
+        placeholder="Search groups, sections, or entries..."
+      />
+
+      <div class="doc-lexicon-controls">
+        <select id="docLexiconShelfSelect" class="doc-lexicon-control-select" aria-label="Lexicon category">
+          <option value="all">All Categories</option>
+          <option value="action">Actions</option>
+          <option value="description">Descriptions</option>
+          <option value="emotion">Emotions</option>
+          <option value="word">Words</option>
+        </select>
+
+        <div class="doc-lexicon-sort-wrap">
+          <button id="docLexiconSortBtn" class="doc-lexicon-control-btn" type="button" aria-haspopup="true" aria-expanded="false">
+            Sort: All
+          </button>
+          <div id="docLexiconSortMenu" class="doc-lexicon-sort-menu">
+            <button data-view="all" class="active" type="button">All</button>
+            <button data-view="favorites" type="button">Favorites</button>
+            <button data-view="recent" type="button">Recent</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="doc-lexicon-breadcrumb" id="docLexiconBreadcrumb">Groups</div>
+
+      <div class="doc-lexicon-list" id="docLexiconList"></div>
+
+      <div class="doc-lexicon-footer">
+        <div class="doc-lexicon-footer-left">
+          <button id="lexBackBtn" class="doc-lexicon-footer-btn" style="display:none;">← Back</button>
+          <button id="lexAddGroupBtn" class="doc-lexicon-footer-btn">+ Group</button>
+          <button id="lexAddSectionBtn" class="doc-lexicon-footer-btn" style="display:none;">+ Section</button>
+          <button id="lexAddEntryBtn" class="doc-lexicon-footer-btn" style="display:none;">+ Entry</button>
+        </div>
+        <button id="lexInsertSelectedBtn" class="doc-lexicon-footer-btn primary" style="display:none;">Insert</button>
+      </div>
+
+      <div class="doc-lexicon-composer" id="docLexiconComposer" style="display:none;">
+        <div class="doc-lexicon-composer-title" id="lexComposerTitle">New Group</div>
+        <input id="lexComposerName" placeholder="Name" />
+        <select id="lexComposerGroupSelect" style="display:none;"></select>
+        <select id="lexComposerSectionSelect" style="display:none;"></select>
+        <select id="lexComposerType" style="display:none;">
+          <option value="description">Description</option>
+          <option value="action">Action</option>
+          <option value="emotion">Emotion</option>
+          <option value="word">Word</option>
+          <option value="phrase">Phrase</option>
+        </select>
+        <textarea id="lexComposerText" placeholder="Entry text..." style="display:none;"></textarea>
+        <div class="doc-lexicon-composer-actions">
+          <button id="lexComposerSaveBtn">Save</button>
+          <button id="lexComposerCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-margin-panel" id="docMarginPanel">
+      <div class="doc-margin-group">
+        <div class="doc-margin-group-title">Page Setup</div>
+        <label>Paper Size
+          <select id="docPaperSize">
+            <option value="letter" selected>US Letter (8.5 x 11 in)</option>
+            <option value="a4">A4 (8.27 x 11.69 in)</option>
+            <option value="legal">US Legal (8.5 x 14 in)</option>
+          </select>
+        </label>
+        <label>Orientation
+          <select id="docPageOrientation">
+            <option value="portrait" selected>Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </label>
+        <label>Layout Mode
+          <select id="docPageMode">
+            <option value="paged" selected>Normal Pages</option>
+            <option value="pageless">Pageless</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="doc-margin-group">
+        <div class="doc-margin-group-title">Screen Preview</div>
+        <label>Preview Width
+          <select id="docPageWidthPreset">
+            <option value="560">Compact</option>
+            <option value="680" selected>Standard</option>
+            <option value="820">Wide</option>
+            <option value="940">Full</option>
+          </select>
+          <span id="docPageWidthVal">680px</span>
+        </label>
+      </div>
+
+      <div class="doc-margin-group">
+        <div class="doc-margin-group-title">Margins (inches)</div>
+        <div class="doc-margin-presets">
+          <button class="doc-margin-preset" type="button" data-doc-margin-preset="narrow">Narrow</button>
+          <button class="doc-margin-preset" type="button" data-doc-margin-preset="normal">Normal</button>
+          <button class="doc-margin-preset" type="button" data-doc-margin-preset="wide">Wide</button>
+        </div>
+
+        <div class="doc-margin-grid">
+          <label>Top (in) <input type="number" id="docPageMarginTop" min="0.25" max="3" value="1.00" step="0.01" /> <span id="docPageMarginTopVal">1.00 in</span></label>
+          <label>Right (in) <input type="number" id="docPageMarginRight" min="0.25" max="3" value="1.00" step="0.01" /> <span id="docPageMarginRightVal">1.00 in</span></label>
+          <label>Bottom (in) <input type="number" id="docPageMarginBottom" min="0.25" max="3" value="1.00" step="0.01" /> <span id="docPageMarginBottomVal">1.00 in</span></label>
+          <label>Left (in) <input type="number" id="docPageMarginLeft" min="0.25" max="3" value="1.00" step="0.01" /> <span id="docPageMarginLeftVal">1.00 in</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-find-panel" id="docFindPanel">
+      <div class="doc-find-row">
+        <input id="docFindInput" class="doc-find-input" type="text" placeholder="Find" />
+        <span id="docFindCount" class="doc-find-count">0/0</span>
+      </div>
+      <div class="doc-find-row">
+        <input id="docReplaceInput" class="doc-find-input" type="text" placeholder="Replace with" />
+      </div>
+      <div class="doc-find-actions">
+        <button id="docFindPrevBtn" class="doc-find-btn" type="button">Prev</button>
+        <button id="docFindNextBtn" class="doc-find-btn" type="button">Next</button>
+        <button id="docReplaceBtn" class="doc-find-btn" type="button">Replace</button>
+        <button id="docReplaceAllBtn" class="doc-find-btn" type="button">All</button>
+        <button id="docFindCloseBtn" class="doc-find-btn" type="button">✕</button>
+      </div>
+    </div>
+    <div class="doc-body-wrap" id="docBodyWrap">
+      <div class="doc-pages-host" id="docPagesHost"></div>
+    </div>
+    <div class="doc-footer">
+      <span class="doc-wordcount" id="docWordCount">0 words</span>
+      <span class="doc-charcount" id="docCharCount">0 characters</span>
+      <button class="doc-stats-btn" id="docStatsBtn" title="Document Statistics" style="display:none">📊 Stats</button>
+    </div>
+  </div>
+
+  <!-- Inspector Panel -->
+  <div class="doc-inspector" id="docInspector">
+    <div class="doc-inspector-header">
+      <div class="doc-inspector-title">Section Inspector</div>
+      <button class="doc-inspector-close" id="docInspectorCloseBtn">✕</button>
+    </div>
+    <div class="doc-inspector-body">
+      <div class="doc-inspector-group">
+        <div class="doc-inspector-group-title">Section</div>
+
+        <label class="doc-inspector-label">Title</label>
+        <input id="inspectorSectionTitle" class="doc-inspector-input" type="text" placeholder="Section title" />
+
+        <label class="doc-inspector-label">Status</label>
+        <select id="inspectorStatus" class="doc-inspector-input">
+          <option value="brainstorming">Brainstorming</option>
+          <option value="draft">Draft</option>
+          <option value="editing">Editing</option>
+          <option value="final">Final</option>
+        </select>
+      </div>
+
+      <div class="doc-inspector-group">
+        <div class="doc-inspector-group-title">Story</div>
+
+        <label class="doc-inspector-label">POV</label>
+        <input id="inspectorPOV" class="doc-inspector-input" type="text" list="inspectorPOVList" placeholder="Type or select POV" />
+        <datalist id="inspectorPOVList"></datalist>
+        <div class="doc-link-row" id="inspectorPOVLinkRow">
+          <span class="doc-link-state" id="inspectorPOVLinkState">No linked page</span>
+          <div class="doc-link-actions">
+            <button type="button" class="doc-link-btn" id="inspectorPOVOpenBtn">Open</button>
+            <button type="button" class="doc-link-btn" id="inspectorPOVCreateBtn">Create</button>
+          </div>
+        </div>
+
+        <label class="doc-inspector-label">Location</label>
+        <input id="inspectorLocation" class="doc-inspector-input" type="text" list="inspectorLocationList" placeholder="Type or select location" />
+        <datalist id="inspectorLocationList"></datalist>
+        <div class="doc-link-row" id="inspectorLocationLinkRow">
+          <span class="doc-link-state" id="inspectorLocationLinkState">No linked page</span>
+          <div class="doc-link-actions">
+            <button type="button" class="doc-link-btn" id="inspectorLocationOpenBtn">Open</button>
+            <button type="button" class="doc-link-btn" id="inspectorLocationCreateBtn">Create</button>
+          </div>
+        </div>
+
+        <label class="doc-inspector-label">Chapter</label>
+        <input id="inspectorChapter" class="doc-inspector-input" type="text" placeholder="Chapter or grouping" />
+      </div>
+
+      <div class="doc-inspector-group">
+        <div class="doc-inspector-group-title">Purpose</div>
+
+        <label class="doc-inspector-label">Purpose</label>
+        <input id="inspectorPurpose" class="doc-inspector-input" type="text" placeholder="Why this section exists" />
+
+        <label class="doc-inspector-label">Notes</label>
+        <textarea id="inspectorNotes" class="doc-inspector-textarea" placeholder="Section notes"></textarea>
+
+        <!-- Threads Section (directly under Notes) -->
+        <div class="doc-inspector-group" id="docThreadsInspectorGroup">
+          <div class="doc-inspector-group-title">Threads</div>
+          <div id="docThreadsList" class="doc-inspector-thread-list"></div>
+          <div class="doc-inspector-thread-add-row">
+            <label for="docThreadNameInput" class="doc-inspector-label" style="margin-bottom:0;">Name</label>
+            <input id="docThreadNameInput" class="doc-inspector-input" type="text" placeholder="Add thread..." maxlength="32" autocomplete="off" />
+            <label for="docThreadColorInput" class="doc-inspector-label" style="margin-bottom:0; margin-left:8px;">Color</label>
+            <div class="thread-color-row" id="docThreadColorRow">
+              <button class="thread-color-swatch" data-color="#ffb347" style="background:#ffb347;"></button>
+              <button class="thread-color-swatch" data-color="#ffd966" style="background:#ffd966;"></button>
+              <button class="thread-color-swatch" data-color="#aee571" style="background:#aee571;"></button>
+              <button class="thread-color-swatch" data-color="#7fcfff" style="background:#7fcfff;"></button>
+              <button class="thread-color-swatch" data-color="#e57373" style="background:#e57373;"></button>
+              <button class="thread-color-swatch" data-color="#b47cff" style="background:#b47cff;"></button>
+              <button class="thread-color-swatch thread-color-custom" title="Custom color">+</button>
+              <input id="docThreadColorInput" type="color" style="display:none;" value="#ffb347" />
+            </div>
+            <button id="docThreadAddBtn" class="doc-inspector-action-btn">＋ Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-inspector-footer">
+      <div class="doc-export-wrap">
+        <button id="docExportCanvasBtn" class="doc-inspector-action-btn">Export to Canvas</button>
+
+        <div class="doc-export-menu" id="docExportMenu">
+          <label class="doc-export-label" for="docExportBreakdown">Break down by</label>
+          <select id="docExportBreakdown" class="doc-inspector-input">
+            <option value="sections">Sections</option>
+            <option value="headings">Headings</option>
+            <option value="paragraphs">Paragraphs</option>
+          </select>
+
+          <div class="doc-export-row">
+            <button id="docExportNewCanvas" class="doc-export-btn">New Canvas</button>
+            <button id="docExportExistingCanvas" class="doc-export-btn">Existing Canvas</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    <section class="page-canvas" id="pageCanvas">
+    <div class="page-hero" id="pageHero">
+        <div class="page-hero-img-wrap" id="pageHeroImgWrap">
+            <img class="page-hero-img" id="pageHeroImg" src="" alt="" />
+            <button class="page-hero-change-btn" id="pageHeroChangeBtn">+ Add Header</button>
+        <div class="page-hero-controls" id="pageHeroControls" aria-label="Header controls">
+          <div class="page-hero-controls-row" role="group" aria-label="Header size">
+            <button class="page-hero-ctrl-btn" data-hero-size="sm" title="Compact header">S</button>
+            <button class="page-hero-ctrl-btn" data-hero-size="md" title="Medium header">M</button>
+            <button class="page-hero-ctrl-btn" data-hero-size="lg" title="Large header">L</button>
+          </div>
+          <div class="page-hero-controls-row page-hero-position-row" role="group" aria-label="Header position">
+            <span class="page-hero-control-label">Focus</span>
+            <input class="page-hero-pos-slider" id="pageHeroPosSlider" type="range" min="0" max="100" step="1" value="50" title="Adjust header image position" />
+            <span class="page-hero-pos-value" id="pageHeroPosValue">50%</span>
+          </div>
+        </div>
+        </div>
+        <div class="page-hero-below" id="pageHeroBelow">
+            <div class="page-hero-icon" id="pageHeroIcon"></div>
+            <div class="page-hero-title" id="pageHeroTitle" contenteditable="false" spellcheck="false"></div>
+        </div>
+    </div>
+    <div id="pageContent" class="hint"></div>
+    <div class="grid" id="grid"></div>
+</section>
+
+<!-- Search View -->
+<section class="search-view" id="searchView">
+    <div class="search-top">
+        <div class="search-bar-wrap">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none">
+                <circle cx="11" cy="11" r="7" stroke-width="2" stroke-linecap="round"/>
+                <path d="M16.5 16.5L21 21" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input class="search-input" id="searchInput" placeholder="Search your notes..." autocomplete="off"/>
+            <button class="search-clear" id="searchClear">✕</button>
+        </div>
+    </div>
+
+    <div class="search-filters" id="searchFilters">
+        <span class="search-tab active" data-filter="all">All</span>
+        <span class="search-tab" data-filter="text">Text</span>
+        <span class="search-tab" data-filter="list">Inkpad</span>
+        <span class="search-tab" data-filter="image">Images</span>
+        <span class="search-tab" data-filter="page">Pages</span>
+    </div>
+
+    <div class="search-body" id="searchBody">
+        <div class="search-empty" id="searchEmpty">Type something to search.</div>
+        <div class="search-results" id="searchResults"></div>
+    </div>
+</section>
+
+<div class="sticker-panel" id="stickerPanel">
+  <div class="sticker-panel-header">
+    <span class="sticker-panel-title">Stickers</span>
+    <button class="sticker-panel-close" id="stickerPanelClose">✕</button>
+  </div>
+  <div class="sticker-panel-books" id="stickerBooks">
+    <button class="sticker-book-tab active" data-book="nature">Nature</button>
+    <button class="sticker-book-tab" data-book="space">Space</button>
+    <button class="sticker-book-tab" data-book="mood">Mood</button>
+    <button class="sticker-book-tab" data-book="study">Study</button>
+    <button class="sticker-book-tab" data-book="custom">My Stickers</button>
+  </div>
+  <div class="sticker-panel-grid" id="stickerGrid"></div>
+  <div class="sticker-panel-upload" id="stickerUploadWrap">
+    <button class="sticker-upload-btn" id="stickerUploadBtn">+ Upload Sticker</button>
+  </div>
+</div>
+
+<div class="soundbar" id="soundbar">
+  <div class="soundbar-bar" id="soundbarBar">
+    <div class="soundbar-bar-left">
+      <button class="soundbar-btn" id="soundPrevBtn" title="Previous">⏮</button>
+      <button class="soundbar-btn soundbar-play-btn" id="soundPlayBtn" title="Play/Pause">▶</button>
+      <button class="soundbar-btn" id="soundNextBtn" title="Next">⏭</button>
+      <button class="soundbar-btn" id="soundLoopBtn" title="Loop">🔂</button>
+    </div>
+    <div class="soundbar-track-info">
+      <span class="soundbar-track-name" id="soundbarTrackName">No track loaded</span>
+      <div class="soundbar-progress-wrap" id="soundbarProgressWrap">
+        <div class="soundbar-progress-bar" id="soundbarProgressBar"></div>
+      </div>
+    </div>
+    <div class="soundbar-bar-right">
+      <div class="soundbar-ambient-dots" id="soundbarAmbientDots"></div>
+      <input type="range" class="soundbar-volume" id="soundbarVolume" min="0" max="1" step="0.02" value="0.8" title="Volume" />
+      <button class="soundbar-btn" id="soundbarToggleBtn" title="Expand">⌃</button>
+    </div>
+  </div>
+  <div class="soundbar-panel" id="soundbarPanel">
+    <div class="soundbar-tabs">
+      <button class="soundbar-tab active" data-tab="music">🎵 Music</button>
+      <button class="soundbar-tab" data-tab="ambience">🌿 Ambience</button>
+    </div>
+    <div class="soundbar-content" id="soundbarMusicTab">
+      <div class="soundbar-upload-row">
+        <button class="soundbar-upload-btn" id="soundUploadBtn">+ Add Music</button>
+      </div>
+      <div class="soundbar-playlist" id="soundbarPlaylist"></div>
+    </div>
+    <div class="soundbar-content hidden" id="soundbarAmbienceTab">
+      <div class="ambient-grid" id="ambientGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="app-toast" id="appToast" aria-live="polite"></div>
+
+</main>
+
+
+<div class="trash-overlay" id="trashOverlay">
+  <div class="trash-modal">
+    <div class="trash-header">
+      <div>
+        <div class="trash-title">Trash</div>
+        <div class="trash-subtitle">Deleted pages and domains can be restored from here.</div>
+      </div>
+      <button class="trash-close" id="trashCloseBtn">✕</button>
+    </div>
+    <div class="trash-empty" id="trashEmpty">Trash is empty.</div>
+    <div class="trash-list" id="trashList"></div>
+    <div class="trash-footer">
+      <button class="trash-footer-btn danger" id="trashEmptyAllBtn">Empty Trash</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-modal" id="settingsModal">
+    
+    <div class="settings-left">
+      <div class="settings-brand">Settings</div>
+      <nav class="settings-nav">
+        <button class="settings-nav-item active" data-section="operator">Operator</button>
+        <button class="settings-nav-item" data-section="workspace">Workspace</button>
+        <button class="settings-nav-item" data-section="editor">Editor</button>
+        <button class="settings-nav-item" data-section="navigation">Navigation</button>
+        <button class="settings-nav-item" data-section="data">Data</button>
+        <button class="settings-nav-item" data-section="about">About</button>
+      </nav>
+    </div>
+
+    <div class="settings-right" id="settingsRight">
+      <!-- content loads here -->
+    </div>
+
+    <button class="settings-close" id="settingsClose">✕</button>
+  </div>
+</div>
+
+<!-- Page Creation Modal -->
+<div class="page-create-overlay" id="pageCreateOverlay">
+  <div class="page-create-modal" id="pageCreateModal">
+    <div class="page-create-title">New Page</div>
+    <div class="page-create-context" id="pageCreateContext"></div>
+    <div class="page-create-hint" id="pageCreateHint"></div>
+    <input class="page-create-input" id="pageCreateName" placeholder="Page title..." autocomplete="off" />
+    <button class="page-create-icon-toggle" id="pageCreateHideIconBtn" type="button">Remove card icon</button>
+    <div class="page-create-results" id="pageCreateResults"></div>
+    
+    <div class="page-create-section-label">Type</div>
+    <div class="page-create-types" id="pageCreateContainerTypes">
+      <button class="page-type-btn active" data-container="page">Page</button>
+      <button class="page-type-btn" data-container="hub">Hub</button>
+      <button class="page-type-btn" data-container="project">Project</button>
+      <button class="page-type-btn" data-container="detail">Detail</button>
+    </div>
+
+    <div class="page-create-section-label">Layout</div>
+    <div class="page-create-types" id="pageCreateLayouts">
+      <button class="page-type-btn active" data-layout="board-canvas">Board Canvas</button>
+      <button class="page-type-btn" data-layout="document">Document</button>
+      <button class="page-type-btn" data-layout="sheet">Database</button>
+      <button class="page-type-btn page-type-future" data-layout="map" disabled>Map</button>
+      <button class="page-type-btn page-type-future" data-layout="infinite-canvas" disabled>Infinite Canvas</button>
+    </div>
+
+    <div class="page-create-section-label">Category</div>
+    <select class="page-create-select" id="pageCreateCategory">
+      <option value="none">None</option>
+      <option value="character">Character</option>
+      <option value="spell">Spell</option>
+      <option value="item">Item</option>
+      <option value="location">Location</option>
+      <option value="event">Event</option>
+      <option value="medication">Medication</option>
+      <option value="condition">Condition</option>
+      <option value="note">Note</option>
+    </select>
+
+    <div class="page-create-actions">
+      <button class="page-create-cancel" id="pageCreateCancel">Cancel</button>
+      <button class="page-create-confirm" id="pageCreateConfirm">Create</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Page Details Modal -->
+<div class="page-details-overlay" id="pageDetailsOverlay">
+  <div class="page-details-modal">
+    <div class="page-details-title">Page Details</div>
+    <div class="page-details-row">
+      <label>Icon</label>
+      <input class="page-details-input" id="pageDetailsIcon" placeholder="Emoji, /remove, or image/GIF URL" />
+    </div>
+    <div class="page-details-row">
+      <label>Title</label>
+      <input class="page-details-input" id="pageDetailsName" placeholder="Page title..." />
+    </div>
+    <div class="page-details-row">
+      <label>Layout</label>
+      <select class="page-details-select" id="pageDetailsLayout">
+        <option value="board-canvas">Board Canvas</option>
+        <option value="document">Document</option>
+        <option value="sheet">Database</option>
+        <option value="map">Map</option>
+        <option value="infinite-canvas">Infinite Canvas</option>
+      </select>
+    </div>
+    <div class="page-details-row">
+      <label>Category</label>
+      <select class="page-details-select" id="pageDetailsCategory">
+        <option value="none">None</option>
+        <option value="character">Character</option>
+        <option value="spell">Spell</option>
+        <option value="item">Item</option>
+        <option value="location">Location</option>
+        <option value="event">Event</option>
+        <option value="medication">Medication</option>
+        <option value="condition">Condition</option>
+        <option value="note">Note</option>
+      </select>
+    </div>
+    <div class="page-details-row">
+      <label>Summary</label>
+      <textarea class="page-details-input page-details-textarea" id="pageDetailsSummary" placeholder="Short description..."></textarea>
+    </div>
+    <div class="page-details-actions">
+      <button class="page-details-cancel" id="pageDetailsCancel">Cancel</button>
+      <button class="page-details-confirm" id="pageDetailsConfirm">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-details-overlay" id="pageIconOverlay">
+  <div class="page-icon-modal">
+    <div class="page-icon-head">
+      <div>
+        <div class="page-icon-title">Page Icon</div>
+        <div class="page-icon-subtitle">Use an emoji, a pasted image/GIF URL, or upload a file.</div>
+      </div>
+      <button class="page-icon-close" id="pageIconClose" aria-label="Close icon picker">✕</button>
+    </div>
+
+    <div class="page-icon-preview-wrap">
+      <div class="page-icon-preview" id="pageIconPreview">📄</div>
+    </div>
+
+    <div class="page-details-row">
+      <label>Icon or image URL</label>
+      <input class="page-details-input" id="pageIconInput" placeholder="Emoji or image/GIF URL" autocomplete="off" />
+    </div>
+
+    <div class="page-icon-helper">
+      Tip: paste an emoji like `🧙`, a web image URL, or upload a local PNG/GIF.
+    </div>
+
+    <div class="page-icon-row">
+      <button class="page-icon-btn" id="pageIconUploadBtn">Upload image/GIF</button>
+      <button class="page-icon-btn" id="pageIconClearBtn">Remove icon</button>
+    </div>
+
+    <div class="page-icon-actions">
+      <button class="page-icon-btn" id="pageIconCancel">Cancel</button>
+      <button class="page-icon-btn primary" id="pageIconSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="storage.js"></script>
+<script>
+  (function () {
+    const scriptQueue = [
+      "soundbar.js",
+      "stickers.js",
+      "document.js",
+      "ui-core.js",
+      "sidebar.js",
+      "canvas.js",
+      "history-state.js",
+      "app-core.js",
+      "page-info-ui.js",
+      "page-database.js",
+      "canvas-rich-text.js",
+      "smart-notes.js"
+    ];
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.body.appendChild(script);
+      });
+    }
+
+    window.SanctumStorageReady
+      .then(() => scriptQueue.reduce((p, src) => p.then(() => loadScript(src)), Promise.resolve()))
+      .catch((err) => {
+        console.error("Sanctum failed to boot", err);
+        alert("Sanctum couldn't finish loading its storage layer.");
+      });
+  })();
+</script>
+</body>
+</html>
