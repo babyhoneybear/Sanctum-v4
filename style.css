@@ -7543,6 +7543,38 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     gap: 6px;
 }
 
+.page-database-board-card-fields {
+    gap: 7px;
+}
+
+.page-database-board-card-field {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.page-database-board-card-field-label {
+    color: var(--muted3);
+    font-size: 10px;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.page-database-board-card-field-value {
+    color: var(--muted2);
+    font-size: 11px;
+    line-height: 1.35;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.page-database-board-card-field.is-tag .page-database-board-card-field-value .page-db-cell-tag-list {
+    gap: 4px;
+}
+
 .page-database-board.size-medium {
     grid-auto-columns: 184px;
     gap: 8px;
@@ -7581,25 +7613,59 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .page-database-board-card.size-small {
-    padding: 7px;
-    gap: 6px;
+    padding: 4px 6px;
+    gap: 3px;
+    min-height: 28px;
 }
 
 .page-database-board-card.size-small .page-database-board-card-preview {
-    height: 40px;
+    display: none;
 }
 
 .page-database-board-card.size-small .page-database-board-card-meta {
-    gap: 4px;
+    display: none;
+}
+
+.page-database-board-card.size-small .page-database-board-card-body {
+    gap: 0;
 }
 
 .page-database-board-card.size-small .page-database-board-card-title-row {
-    gap: 5px;
+    gap: 0;
+    align-items: center;
 }
 
 .page-database-board-card.size-small .page-database-board-card-icon {
-    width: 14px;
-    height: 14px;
+    display: none;
+}
+
+.page-database-board-card.size-small .page-database-board-card-title {
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 600;
+}
+
+.page-database-board-card.size-large {
+    padding: 12px;
+    gap: 10px;
+    min-height: 176px;
+}
+
+.page-database-board-card.size-large .page-database-board-card-preview {
+    height: 184px;
+}
+
+.page-database-board-card.size-large .page-database-board-card-body {
+    gap: 9px;
+}
+
+.page-database-board-card.size-large .page-database-board-card-title {
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.page-database-board-card.size-large .page-database-board-card-meta {
+    gap: 8px;
 }
 
 .page-database-board.layout-compact .page-database-board-column-body {

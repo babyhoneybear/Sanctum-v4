@@ -49,16 +49,130 @@ window.closeSidebar = closeSidebar;
 menuBtn.addEventListener("click", openSidebar);
 closeBtn.addEventListener("click", closeSidebar);
 
-// == Section collapse/expand ==
-document.querySelectorAll(".section-header").forEach((header) => {
-  header.addEventListener("click", (e) => {
-    if (e.target.closest(".section-add") || e.target.closest(".section-menu")) return;
-    const section = header.closest(".section");
-    const items = section.querySelector(".section-items");
-    items.classList.toggle("collapsed");
-    section.classList.toggle("collapsed");
+// == Section collapse/expand (Favorites / Pins / Domains) ==
+const SIDEBAR_COLLAPSIBLE_SECTION_KEYS = new Set(["favorites", "pins", "domains"]);
+const sidebarSectionExpandedState = new Map();
+const SIDEBAR_SECTION_ANIMATION_MS = 220;
+
+function getSidebarSectionKey(section) {
+  if (!section) return "";
+  if (section.querySelector("#favoritesList")) return "favorites";
+  if (section.querySelector("#pinsList")) return "pins";
+  if (section.classList.contains("section-domains")) return "domains";
+  return "";
+}
+
+function isSidebarSectionExpanded(sectionKey) {
+  if (!sectionKey) return true;
+  if (!sidebarSectionExpandedState.has(sectionKey)) return true;
+  return sidebarSectionExpandedState.get(sectionKey) !== false;
+}
+
+function setSidebarSectionExpanded(sectionKey, expanded) {
+  if (!sectionKey) return;
+  sidebarSectionExpandedState.set(sectionKey, !!expanded);
+}
+
+function animateSidebarSection(section, expanded, options = {}) {
+  const items = section?.querySelector(".section-items");
+  if (!section || !items) return;
+
+  const immediate = !!options.immediate;
+  const nextExpanded = !!expanded;
+
+  section.classList.toggle("collapsed", !nextExpanded);
+  items.style.overflow = "hidden";
+  items.style.transition = `height ${SIDEBAR_SECTION_ANIMATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${SIDEBAR_SECTION_ANIMATION_MS}ms ease`;
+  items.style.willChange = "height, opacity";
+
+  if (items._sidebarTransitionCleanup) {
+    items.removeEventListener("transitionend", items._sidebarTransitionCleanup);
+    items._sidebarTransitionCleanup = null;
+  }
+
+  if (immediate) {
+    items.style.height = nextExpanded ? "auto" : "0px";
+    items.style.opacity = nextExpanded ? "1" : "0";
+    return;
+  }
+
+  if (nextExpanded) {
+    items.style.height = "0px";
+    items.style.opacity = "0";
+    // force style flush before target values
+    items.getBoundingClientRect();
+    const targetHeight = items.scrollHeight;
+    items.style.height = `${targetHeight}px`;
+    items.style.opacity = "1";
+  } else {
+    const startHeight = items.getBoundingClientRect().height || items.scrollHeight;
+    items.style.height = `${Math.max(0, Math.round(startHeight))}px`;
+    items.style.opacity = "1";
+    // force style flush before target values
+    items.getBoundingClientRect();
+    items.style.height = "0px";
+    items.style.opacity = "0";
+  }
+
+  const cleanup = (event) => {
+    if (event && event.target !== items) return;
+    if (nextExpanded) {
+      items.style.height = "auto";
+      items.style.opacity = "1";
+    } else {
+      items.style.height = "0px";
+      items.style.opacity = "0";
+    }
+    items.style.willChange = "";
+    items.removeEventListener("transitionend", cleanup);
+    items._sidebarTransitionCleanup = null;
+  };
+
+  items._sidebarTransitionCleanup = cleanup;
+  items.addEventListener("transitionend", cleanup);
+}
+
+function wireSidebarSectionCollapse() {
+  document.querySelectorAll(".sidebar-content .section").forEach((section) => {
+    const sectionKey = getSidebarSectionKey(section);
+    if (!SIDEBAR_COLLAPSIBLE_SECTION_KEYS.has(sectionKey)) return;
+
+    const header = section.querySelector(".section-header");
+    if (!header || header.dataset.collapseWired === "true") return;
+
+    header.dataset.collapseWired = "true";
+    header.setAttribute("role", "button");
+    header.setAttribute("tabindex", "0");
+
+    const syncAria = () => {
+      const expanded = isSidebarSectionExpanded(sectionKey);
+      header.setAttribute("aria-expanded", expanded ? "true" : "false");
+      animateSidebarSection(section, expanded, { immediate: true });
+    };
+
+    syncAria();
+
+    const toggle = () => {
+      const nextExpanded = !isSidebarSectionExpanded(sectionKey);
+      setSidebarSectionExpanded(sectionKey, nextExpanded);
+      header.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+      animateSidebarSection(section, nextExpanded);
+    };
+
+    header.addEventListener("click", (e) => {
+      if (e.target.closest(".section-add") || e.target.closest(".section-menu")) return;
+      toggle();
+    });
+
+    header.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      toggle();
+    });
   });
-});
+}
+
+wireSidebarSectionCollapse();
 
 // == Active item highlight ==
 document.querySelectorAll(".item").forEach((item) => {
@@ -769,4 +883,3 @@ function createPage(title, parentId, layout = "board-canvas", category = "none",
   }, 0);
   return page;
 }
-
