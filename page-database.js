@@ -3915,26 +3915,70 @@
     const previewSource = previewMode === "page-cover" ? getBoardCardPreviewSource(row) : "";
     const cardSize = getBoardCardSize(database);
     const cardLayout = getBoardCardLayout(database);
-    const iconHTML = hasPageIcon(database)
+    const iconHTML = cardSize !== "small" && hasPageIcon(database)
       ? `<span class="page-database-board-card-icon-wrap" aria-hidden="true">${buildRowIconHTML(row)}</span>`
       : "";
-    const dateHTML = dateValue
+    const boardFields = cardSize === "large"
+      ? (database.properties || [])
+          .filter((property) => isPropertyVisibleInTable(property))
+          .filter((property) => property.type !== "title" && property.type !== "status")
+          .map((property) => {
+            const rawValue = property.type === "summary"
+              ? getComputedPropertyRawValue(database, row, property)
+              : property.type === "relation"
+                ? getComparablePropertyValue(database, row, property)
+                : getRowValue(row, property.id);
+            const displayValue = String(formatCellDisplay(property, rawValue) || "").trim();
+            if (!displayValue) return null;
+            if (property.type === "tag") {
+              const pillHTML = buildValuePillHTML(property, displayValue);
+              if (!pillHTML) return null;
+              return `
+                <div class="page-database-board-card-field is-tag">
+                  <span class="page-database-board-card-field-label">${escapeHTML(property.name)}</span>
+                  <span class="page-database-board-card-field-value">${pillHTML}</span>
+                </div>
+              `;
+            }
+            return `
+              <div class="page-database-board-card-field">
+                <span class="page-database-board-card-field-label">${escapeHTML(property.name)}</span>
+                <span class="page-database-board-card-field-value">${escapeHTML(displayValue)}</span>
+              </div>
+            `;
+          })
+          .filter(Boolean)
+          .slice(0, 3)
+      : [];
+    const legacyDateHTML = dateValue
       ? `<div class="page-database-board-card-date">${escapeHTML(formatCellDisplay(dateProperty, dateValue))}</div>`
       : "";
-    const tagHTML = tagValue
+    const legacyTagHTML = tagValue
       ? `<div class="page-database-board-card-tags">${buildValuePillHTML(tagProperty, tagValue)}</div>`
       : "";
+    const metaHTML = cardSize === "small"
+      ? ""
+      : cardSize === "large"
+        ? (boardFields.length
+            ? `<div class="page-database-board-card-meta page-database-board-card-fields">${boardFields.join("")}</div>`
+            : "")
+        : (legacyDateHTML || legacyTagHTML
+            ? `<div class="page-database-board-card-meta">${legacyDateHTML}${legacyTagHTML}</div>`
+            : "");
 
     const coverActionLabel = previewSource ? "Replace cover" : "Add cover";
+    const showPreview = previewMode === "page-cover"
+      && cardSize !== "small"
+      && (cardSize !== "large" || !!previewSource);
 
     return `
       <div class="page-database-board-card size-${escapeHTML(cardSize)} layout-${escapeHTML(cardLayout)}${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""} draggable="true">
-        ${previewMode === "page-cover"
+        ${showPreview
           ? `<button type="button" class="page-database-board-card-preview${previewSource ? " has-image" : " is-empty"}" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="${escapeHTML(coverActionLabel)}">${previewSource ? `<img src="${escapeHTML(previewSource)}" alt="" />` : `<span class="page-database-board-card-preview-placeholder">${escapeHTML(coverActionLabel)}</span>`}</button>`
           : ""}
         <div class="page-database-board-card-body">
           <div class="page-database-board-card-title-row">${iconHTML}<div class="page-database-board-card-title">${escapeHTML(getRowTitle(database, row))}</div></div>
-          ${dateHTML || tagHTML ? `<div class="page-database-board-card-meta">${dateHTML}${tagHTML}</div>` : ""}
+          ${metaHTML}
         </div>
       </div>
     `;
