@@ -7306,10 +7306,12 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 
 
 .page-database-board {
+    --page-db-board-column-width: 272px;
+    --page-db-board-column-gap: 12px;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 272px;
-    gap: 12px;
+    grid-auto-columns: var(--page-db-board-column-width);
+    gap: var(--page-db-board-column-gap);
     width: max-content;
     min-width: 100%;
     align-items: start;
@@ -7320,7 +7322,6 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 
 .page-database-board-column {
     min-width: 0;
-    min-height: 180px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -7384,18 +7385,22 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     flex-direction: column;
     gap: 8px;
     padding: 0 12px;
-    min-height: 92px;
+    min-height: 0;
 }
 
 .page-database-board-card {
+    --page-db-board-card-pad-y: 9px;
+    --page-db-board-card-pad-x: 9px;
     border: 1px solid #2d2d2d;
     background: #1a1a1a;
     color: var(--text-main);
     border-radius: 2px;
-    padding: 9px;
+    padding: var(--page-db-board-card-pad-y) var(--page-db-board-card-pad-x);
     display: flex;
     flex-direction: column;
     gap: 8px;
+    position: relative;
+    overflow: hidden;
     cursor: grab;
 }
 
@@ -7451,6 +7456,12 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     cursor: pointer;
 }
 
+.page-database-board-card.has-preview:not(.layout-list) .page-database-board-card-preview {
+    width: calc(100% + (var(--page-db-board-card-pad-x) * 2));
+    margin: calc(var(--page-db-board-card-pad-y) * -1) calc(var(--page-db-board-card-pad-x) * -1) 0;
+    border-radius: 1px 1px 0 0;
+}
+
 .page-database-board-card-preview img {
     width: 100%;
     height: 100%;
@@ -7462,6 +7473,9 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 38px;
+    height: auto;
+    padding: 10px 12px;
     background: rgba(255,255,255,0.04);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
@@ -7479,6 +7493,39 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 
 .page-database-board-card-preview.is-empty:hover {
     background: rgba(255,255,255,0.07);
+}
+
+.page-database-board-card-cover-btn {
+    position: absolute;
+    top: var(--page-db-board-card-pad-y);
+    right: var(--page-db-board-card-pad-x);
+    z-index: 2;
+    height: 20px;
+    padding: 0 7px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px;
+    background: rgba(11,11,11,0.88);
+    color: rgba(255,255,255,0.82);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.page-database-board-card.can-add-cover:hover .page-database-board-card-cover-btn,
+.page-database-board-card.can-add-cover:focus-within .page-database-board-card-cover-btn {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.page-database-board-card-cover-btn:hover {
+    background: rgba(24,24,24,0.96);
+    border-color: rgba(255,255,255,0.18);
 }
 
 .page-database-board-card:hover {
@@ -7531,8 +7578,8 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 
 .page-database-board-card-title {
     min-width: 0;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 12px; 
+    font-weight: 400;
     line-height: 1.35;
     word-break: break-word;
 }
@@ -7575,51 +7622,93 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     gap: 4px;
 }
 
+.page-database-board.size-large {
+    --page-db-board-column-width: 248px;
+    --page-db-board-column-gap: 10px;
+}
+
 .page-database-board.size-medium {
-    grid-auto-columns: 184px;
-    gap: 8px;
+    --page-db-board-column-width: 208px;
+    --page-db-board-column-gap: 8px;
 }
 
 .page-database-board.size-small {
-    grid-auto-columns: 128px;
-    gap: 6px;
+    --page-db-board-column-width: 168px;
+    --page-db-board-column-gap: 7px;
 }
 
-.page-database-board.size-medium .page-database-board-column-head {
+.page-database-board.size-large .page-database-board-column-head {
+    gap: 9px;
     padding: 8px 8px 0;
 }
 
-.page-database-board.size-medium .page-database-board-column-body {
-    gap: 7px;
+.page-database-board.size-large .page-database-board-column-body {
+    gap: 6px;
     padding: 0 8px;
 }
 
-.page-database-board.size-small .page-database-board-column-head {
+.page-database-board.size-medium .page-database-board-column-head {
+    gap: 7px;
     padding: 6px 6px 0;
 }
 
-.page-database-board.size-small .page-database-board-column-body {
+.page-database-board.size-medium .page-database-board-column-body {
+    gap: 5px;
+    padding: 0 6px;
+}
+
+.page-database-board.size-small .page-database-board-column-head {
     gap: 6px;
-    padding: 0 7px;
+    padding: 5px 6px 0;
+}
+
+.page-database-board.size-small .page-database-board-column-body {
+    gap: 4px;
+    padding: 0 6px;
+}
+
+.page-database-board.size-small .page-database-board-column {
+    gap: 6px;
+}
+
+.page-database-board.size-small .page-database-board-column-title {
+    gap: 5px;
+    font-size: 10px;
+}
+
+.page-database-board.size-small .page-database-board-column-title .page-database-color-swatch {
+    width: 6px;
+    height: 6px;
+}
+
+.page-database-board.size-small .page-database-board-column-count {
+    min-width: 14px;
+    height: 14px;
+    padding: 0 4px;
+    font-size: 9px;
 }
 
 .page-database-board-card.size-medium {
-    padding: 7px;
-    gap: 7px;
+    --page-db-board-card-pad-y: 5px;
+    --page-db-board-card-pad-x: 5px;
+    padding: var(--page-db-board-card-pad-y) var(--page-db-board-card-pad-x);
+    gap: 5px;
 }
 
 .page-database-board-card.size-medium .page-database-board-card-preview {
-    height: 86px;
+    height: 64px;
 }
 
 .page-database-board-card.size-small {
-    padding: 4px 6px;
+    --page-db-board-card-pad-y: 4px;
+    --page-db-board-card-pad-x: 6px;
+    padding: var(--page-db-board-card-pad-y) var(--page-db-board-card-pad-x);
     gap: 3px;
-    min-height: 28px;
 }
 
 .page-database-board-card.size-small .page-database-board-card-preview {
-    display: none;
+    display: block;
+    height: 42px;
 }
 
 .page-database-board-card.size-small .page-database-board-card-meta {
@@ -7642,21 +7731,37 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 .page-database-board-card.size-small .page-database-board-card-title {
     font-size: 11px;
     line-height: 1.2;
-    font-weight: 600;
+    font-weight: 400;
 }
 
 .page-database-board-card.size-large {
-    padding: 12px;
-    gap: 10px;
-    min-height: 176px;
+    --page-db-board-card-pad-y: 8px;
+    --page-db-board-card-pad-x: 8px;
+    padding: var(--page-db-board-card-pad-y) var(--page-db-board-card-pad-x);
+    gap: 7px;
+}
+
+.page-database-board-card.size-medium .page-database-board-card-preview.is-empty {
+    min-height: 24px;
+    padding: 5px 7px;
+}
+
+.page-database-board-card.size-small .page-database-board-card-preview.is-empty {
+    min-height: 20px;
+    padding: 4px 6px;
+}
+
+.page-database-board-card.size-large .page-database-board-card-preview.is-empty {
+    min-height: 30px;
+    padding: 6px 8px;
 }
 
 .page-database-board-card.size-large .page-database-board-card-preview {
-    height: 184px;
+    height: 120px;
 }
 
 .page-database-board-card.size-large .page-database-board-card-body {
-    gap: 9px;
+    gap: 6px;
 }
 
 .page-database-board-card.size-large .page-database-board-card-title {
@@ -7665,7 +7770,7 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .page-database-board-card.size-large .page-database-board-card-meta {
-    gap: 8px;
+    gap: 5px;
 }
 
 .page-database-board.layout-compact .page-database-board-column-body {
@@ -7682,7 +7787,7 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .page-database-board-card.layout-compact .page-database-board-card-preview {
-    height: 76px;
+    height: 64px;
 }
 
 .page-database-board-card.layout-compact .page-database-board-card-meta {
@@ -7702,12 +7807,12 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .page-database-board-card.layout-list.has-preview {
-    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-columns: 48px minmax(0, 1fr);
 }
 
 .page-database-board-card.layout-list .page-database-board-card-preview {
-    width: 56px;
-    height: 56px;
+    width: 48px;
+    height: 48px;
 }
 
 .page-database-board-card.layout-list .page-database-board-card-body {
@@ -7719,20 +7824,24 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .page-database-board-card.layout-compact.size-medium .page-database-board-card-preview {
-    height: 68px;
+    height: 56px;
+}
+
+.page-database-board-card.layout-compact.size-large .page-database-board-card-preview {
+    height: 64px;
 }
 
 .page-database-board-card.layout-compact.size-small .page-database-board-card-preview {
-    height: 34px;
+    height: 40px;
 }
 
 .page-database-board-card.layout-list.size-medium.has-preview {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr);
 }
 
 .page-database-board-card.layout-list.size-medium .page-database-board-card-preview {
-    width: 44px;
-    height: 44px;
+    width: 38px;
+    height: 38px;
 }
 
 .page-database-board-card.layout-list.size-small.has-preview {
@@ -7768,7 +7877,7 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 }
 
 .block[data-type="calendar"] .page-database-board {
-    grid-auto-columns: minmax(220px, 1fr);
+    grid-auto-columns: minmax(var(--page-db-board-column-width), 1fr);
     width: max-content;
     min-width: 0;
     padding: 0 8px 8px;
@@ -7797,6 +7906,18 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     text-align: left;
     padding: 0 10px;
     cursor: pointer;
+}
+
+.page-database-board.size-small .page-database-board-empty {
+    font-size: 10px;
+    line-height: 1.2;
+}
+
+.page-database-board.size-small .page-database-board-add-btn {
+    margin: 0 6px 6px;
+    min-height: 24px;
+    padding: 0 6px;
+    font-size: 10px;
 }
 
 .page-database-board-add-btn:hover {

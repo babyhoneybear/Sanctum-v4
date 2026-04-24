@@ -3966,15 +3966,16 @@
             ? `<div class="page-database-board-card-meta">${legacyDateHTML}${legacyTagHTML}</div>`
             : "");
 
-    const coverActionLabel = previewSource ? "Replace cover" : "Add cover";
-    const showPreview = previewMode === "page-cover"
-      && cardSize !== "small"
-      && (cardSize !== "large" || !!previewSource);
+    const showPreview = previewMode === "page-cover" && !!previewSource;
+    const showAddCoverButton = previewMode === "page-cover" && !previewSource;
 
     return `
-      <div class="page-database-board-card size-${escapeHTML(cardSize)} layout-${escapeHTML(cardLayout)}${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""} draggable="true">
+      <div class="page-database-board-card size-${escapeHTML(cardSize)} layout-${escapeHTML(cardLayout)}${previewSource ? " has-preview" : ""}${showAddCoverButton ? " can-add-cover" : ""}${row.color ? " has-row-color" : ""}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""} draggable="true">
         ${showPreview
-          ? `<button type="button" class="page-database-board-card-preview${previewSource ? " has-image" : " is-empty"}" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="${escapeHTML(coverActionLabel)}">${previewSource ? `<img src="${escapeHTML(previewSource)}" alt="" />` : `<span class="page-database-board-card-preview-placeholder">${escapeHTML(coverActionLabel)}</span>`}</button>`
+          ? `<button type="button" class="page-database-board-card-preview has-image" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Replace cover"><img src="${escapeHTML(previewSource)}" alt="" /></button>`
+          : ""}
+        ${showAddCoverButton
+          ? `<button type="button" class="page-database-board-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
           : ""}
         <div class="page-database-board-card-body">
           <div class="page-database-board-card-title-row">${iconHTML}<div class="page-database-board-card-title">${escapeHTML(getRowTitle(database, row))}</div></div>
