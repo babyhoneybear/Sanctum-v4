@@ -290,9 +290,9 @@
 
   function normalizeEmbedView(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
-    if (safe === "board") return "board";
-    if (safe === "table") return "table";
-    return fallback === "board" ? "board" : "table";
+    if (safe === "gallery" || safe === "board" || safe === "table") return safe;
+    if (fallback === "gallery" || fallback === "board") return fallback;
+    return "table";
   }
 
   function getEmbedSourceTarget(record = {}) {
@@ -345,6 +345,7 @@
 
   function getInlineDatabaseViewData(database) {
     if (database.view === "board") return buildBoardViewHTML(database, { readOnly: true });
+    if (database.view === "gallery") return buildGalleryViewHTML(database, { readOnly: true });
     return buildTableViewHTML(database, { readOnly: true });
   }
 
@@ -384,7 +385,9 @@
   }
 
   function getInlineViewLabel(view = "table") {
-    return normalizeEmbedView(view, "table") === "board" ? "Board" : "Table";
+    const normalized = normalizeEmbedView(view, "table");
+    if (normalized === "gallery") return "Gallery";
+    return normalized === "board" ? "Board" : "Table";
   }
 
   function normalizeDatabaseTitle(value = "") {
@@ -393,8 +396,8 @@
 
   function normalizeViewMode(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
-    if (safe === "calendar" || safe === "table" || safe === "board") return safe;
-    if (fallback === "calendar" || fallback === "board") return fallback;
+    if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board") return safe;
+    if (fallback === "calendar" || fallback === "gallery" || fallback === "board") return fallback;
     return "table";
   }
 
@@ -2257,7 +2260,7 @@
     let matchedCell = false;
     let matchedHeader = false;
 
-    surfaceEl.querySelectorAll('.page-database-row-shell[data-db-row-shell-id], .page-database-board-card[data-item-id]').forEach((entry) => {
+    surfaceEl.querySelectorAll('.page-database-row-shell[data-db-row-shell-id], .page-database-board-card[data-item-id], .page-database-gallery-card[data-item-id]').forEach((entry) => {
       const entryRowId = String(entry.dataset.dbRowShellId || entry.dataset.itemId || "").trim();
       const isActive = !!selectedRowId && !selectedPropId && entryRowId === selectedRowId;
       entry.classList.toggle('is-row-selected', isActive);
@@ -4047,11 +4050,89 @@
     };
   }
 
+  function getGalleryCardFields(database, row, limit = 2) {
+    return (database.properties || [])
+      .filter((property) => isPropertyVisibleInTable(property))
+      .filter((property) => property.type !== "title")
+      .map((property) => {
+        const rawValue = property.type === "summary"
+          ? getComputedPropertyRawValue(database, row, property)
+          : property.type === "relation"
+            ? getComparablePropertyValue(database, row, property)
+            : getRowValue(row, property.id);
+        const displayValue = String(formatCellDisplay(property, rawValue) || "").trim();
+        if (!displayValue) return null;
+        if (property.type === "tag") {
+          const pillHTML = buildValuePillHTML(property, displayValue);
+          if (!pillHTML) return null;
+          return {
+            property,
+            valueHTML: pillHTML,
+            isHTML: true
+          };
+        }
+        return {
+          property,
+          valueHTML: escapeHTML(displayValue),
+          isHTML: false
+        };
+      })
+      .filter(Boolean)
+      .slice(0, limit);
+  }
+
+  function buildGalleryCardHTML(database, row) {
+    const previewSource = getBoardCardPreviewSource(row);
+    const cardFields = getGalleryCardFields(database, row, 2);
+
+    return `
+      <button type="button" class="page-database-gallery-card${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
+        ${previewSource
+          ? `<div class="page-database-gallery-card-preview"><img src="${escapeHTML(previewSource)}" alt="" /></div>`
+          : ""}
+        <div class="page-database-gallery-card-body">
+          <div class="page-database-gallery-card-title">${escapeHTML(getRowTitle(database, row))}</div>
+          ${cardFields.length
+            ? `<div class="page-database-gallery-card-fields">${cardFields.map((entry) => `
+                <div class="page-database-gallery-card-field${entry.property.type === "tag" ? " is-tag" : ""}">
+                  <span class="page-database-gallery-card-field-label">${escapeHTML(entry.property.name)}</span>
+                  <span class="page-database-gallery-card-field-value">${entry.valueHTML}</span>
+                </div>
+              `).join("")}</div>`
+            : ""}
+        </div>
+      </button>
+    `;
+  }
+
+  function buildGalleryViewHTML(database, options = {}) {
+    const readOnly = !!options.readOnly;
+    const visibleRows = getVisibleRows(database);
+    const cardsHTML = visibleRows.length
+      ? visibleRows.map((row) => buildGalleryCardHTML(database, row)).join("")
+      : `
+          <div class="page-calendar-empty">
+            <div class="page-calendar-empty-title">This view is empty.</div>
+            <div class="page-calendar-empty-copy">Rows are created on the source database page and can be shown here as a view.</div>
+            ${readOnly ? "" : `<button type="button" class="page-calendar-add-btn" data-db-action="add-row">+ New row</button>`}
+          </div>
+        `;
+
+    return {
+      weekdaysHTML: "",
+      bodyHTML: `<div class="page-database-gallery">${cardsHTML}</div>`,
+      metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
+      monthLabel: "Gallery view"
+    };
+  }
+
   function buildPageEditorHTML(database) {
     return database.view === "calendar"
       ? buildPageCalendarShellHTML(database)
       : database.view === "board"
         ? buildBoardViewHTML(database).bodyHTML
+        : database.view === "gallery"
+          ? buildGalleryViewHTML(database).bodyHTML
       : buildPageTableEditorHTML(database);
   }
 
@@ -4485,6 +4566,12 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { active: database.view === "board" });
+    appendMenuButton(menuEl, "Gallery", () => {
+      database.view = "gallery";
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+      closeDatabaseMenus();
+    }, { active: database.view === "gallery" });
   }
 
   function getInlineDatabaseHost(context) {
@@ -4610,6 +4697,12 @@
           rerenderCalendarContext(context);
           closeDatabaseMenus();
         }, { active: activeView === "board" });
+        appendMenuButton(submenuEl, "Gallery", () => {
+          database.view = "gallery";
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: activeView === "gallery" });
       });
     });
 
@@ -4663,6 +4756,8 @@
       ? "Calendar"
       : database.view === "board"
         ? "Board"
+        : database.view === "gallery"
+          ? "Gallery"
         : "Table";
   }
 
@@ -5638,15 +5733,18 @@
             </div>
           </div>
         `;
-        contentEl.classList.remove("board-mode", "table-mode");
+        contentEl.classList.remove("board-mode", "table-mode", "gallery-mode");
         syncInlineDatabaseBlockSize(surfaceEl);
         return;
       }
 
       contentEl.innerHTML = activeView === "board"
         ? buildBoardViewHTML({ ...database, view: "board" }).bodyHTML
-        : buildPageTableEditorHTML({ ...database, view: "table" });
+        : activeView === "gallery"
+          ? buildGalleryViewHTML({ ...database, view: "gallery" }).bodyHTML
+          : buildPageTableEditorHTML({ ...database, view: "table" });
       contentEl.classList.toggle("board-mode", activeView === "board");
+      contentEl.classList.toggle("gallery-mode", activeView === "gallery");
       contentEl.classList.toggle("table-mode", activeView === "table");
 
       const blockScroll = surfaceEl.querySelector(".page-database-block-scroll");
@@ -5687,6 +5785,8 @@
       ? "🗓 Calendar"
       : database.view === "board"
         ? "▥ Board"
+        : database.view === "gallery"
+          ? "◫ Gallery"
         : "▦ Table";
   }
 
@@ -5819,7 +5919,7 @@
       return;
     }
 
-    const selectedRowTarget = event.target.closest('.block[data-type="calendar"] .page-database-row-shell[data-db-row-shell-id], .block[data-type="calendar"] .page-database-board-card[data-item-id]');
+    const selectedRowTarget = event.target.closest('.block[data-type="calendar"] .page-database-row-shell[data-db-row-shell-id], .block[data-type="calendar"] .page-database-board-card[data-item-id], .block[data-type="calendar"] .page-database-gallery-card[data-item-id]');
     if (selectedRowTarget) {
       const hostEl = selectedRowTarget.closest('.block[data-type="calendar"]');
       const rowId = selectedRowTarget.dataset.dbRowShellId || selectedRowTarget.dataset.itemId || "";
@@ -6525,7 +6625,7 @@
       return;
     }
 
-    const itemEl = event.target.closest('.page-calendar-event, .page-calendar-row, .page-database-board-card');
+    const itemEl = event.target.closest('.page-calendar-event, .page-calendar-row, .page-database-board-card, .page-database-gallery-card');
     if (!itemEl) return;
 
     const context = getCalendarContext(itemEl);
