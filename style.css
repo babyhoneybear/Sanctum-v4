@@ -7550,6 +7550,16 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     border-color: color-mix(in srgb, var(--inline-db-accent) 30%, #383838);
 }
 
+.block[data-type="calendar"].has-inline-db-accent .page-database-gallery-card {
+    background: color-mix(in srgb, var(--inline-db-accent) 12%, #1a1a1a);
+    border-color: color-mix(in srgb, var(--inline-db-accent) 28%, #2d2d2d);
+}
+
+.block[data-type="calendar"].has-inline-db-accent .page-database-gallery-card:hover {
+    background: color-mix(in srgb, var(--inline-db-accent) 16%, #202020);
+    border-color: color-mix(in srgb, var(--inline-db-accent) 30%, #383838);
+}
+
 .page-database-board-card.has-row-color {
     background: var(--page-db-row-accent);
     border-color: color-mix(in srgb, var(--page-db-row-accent) 72%, #111111);
@@ -7874,6 +7884,122 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     font-size: 11px;
     line-height: 1.4;
     padding: 2px 0;
+}
+
+
+.page-database-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    align-items: stretch;
+    box-sizing: border-box;
+}
+
+.page-database-gallery-card {
+    border: 1px solid #2d2d2d;
+    background: #1a1a1a;
+    color: var(--text-main);
+    border-radius: 2px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    width: 100%;
+    text-align: left;
+    padding: 0;
+    cursor: pointer;
+    overflow: hidden;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.page-database-gallery-card:hover {
+    background: #202020;
+    border-color: #383838;
+}
+
+.page-database-gallery-card-preview {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #111;
+}
+
+.page-database-gallery-card-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.page-database-gallery-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    min-width: 0;
+}
+
+.page-database-gallery-card-title {
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 500;
+    word-break: break-word;
+}
+
+.page-database-gallery-card-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.page-database-gallery-card-field {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+}
+
+.page-database-gallery-card-field-label {
+    color: var(--muted3);
+    font-size: 10px;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.page-database-gallery-card-field-value {
+    color: var(--muted2);
+    font-size: 11px;
+    line-height: 1.35;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.page-database-gallery-card-field.is-tag .page-database-gallery-card-field-value .page-db-cell-tag-list {
+    gap: 4px;
+}
+
+.page-database-gallery-card.has-row-color {
+    background: var(--page-db-row-accent);
+    border-color: color-mix(in srgb, var(--page-db-row-accent) 72%, #111111);
+}
+
+.page-database-gallery-card.has-row-color:hover {
+    background: color-mix(in srgb, var(--page-db-row-accent) 88%, #111111);
+    border-color: color-mix(in srgb, var(--page-db-row-accent) 74%, #090909);
+}
+
+.page-database-gallery-card.is-row-selected {
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22), 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+.page-database-gallery-card.is-row-selected.has-row-color {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page-db-row-accent) 62%, white), 0 0 0 1px color-mix(in srgb, var(--page-db-row-accent) 16%, transparent);
+}
+
+.block[data-type="calendar"] .page-database-gallery {
+    padding: 0 8px 8px;
 }
 
 .block[data-type="calendar"] .page-database-board {
