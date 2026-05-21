@@ -1,5 +1,8 @@
 .page-board-surface {
-  display: block;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .infinite-canvas-toolbar[hidden] {
@@ -11,12 +14,17 @@
 }
 
 .page-board-surface:not(.is-infinite-canvas) .infinite-canvas-viewport {
+  display: flex;
+  flex: 1 1 auto;
   overflow: visible;
   max-height: none;
   min-height: 0;
 }
 
 .page-board-surface:not(.is-infinite-canvas) .infinite-canvas-stage {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }

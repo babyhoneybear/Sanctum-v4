@@ -172,6 +172,21 @@
     return DATE_FORMAT_OPTIONS.some((entry) => entry.value === safe) ? safe : "full";
   }
 
+  function normalizeDateRepeat(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return safe === "daily" ? "daily" : "none";
+  }
+
+  function shiftDayKey(dayKey = "", delta = 0) {
+    const normalized = normalizeDayKey(dayKey, "");
+    if (!normalized || !Number.isFinite(Number(delta))) return "";
+    const [yearText, monthText, dayText] = normalized.split("-");
+    const parsed = new Date(Number(yearText), Number(monthText) - 1, Number(dayText));
+    if (Number.isNaN(parsed.getTime())) return normalized;
+    parsed.setDate(parsed.getDate() + Number(delta));
+    return toDayKey(parsed);
+  }
+
   function normalizeTimeValue(value = "") {
     const match = String(value || "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
     if (!match) return "";
@@ -194,7 +209,8 @@
       endTime: "",
       dateFormat: "full",
       includeTime: false,
-      remind: "none"
+      remind: "none",
+      repeat: "none"
     };
 
     if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -205,7 +221,8 @@
         endTime: normalizeTimeValue(value.endTime || ""),
         dateFormat: normalizeDateFormat(value.dateFormat || value.format || "full"),
         includeTime: !!value.includeTime,
-        remind: String(value.remind || "none").trim() || "none"
+        remind: String(value.remind || "none").trim() || "none",
+        repeat: normalizeDateRepeat(value.repeat || value.repeatMode || "none")
       };
     }
 
@@ -235,10 +252,31 @@
     };
   }
 
+  function resolveDateCellValue(value = "", referenceDate = new Date()) {
+    const parsed = parseDateCellValue(value);
+    if (parsed.repeat !== "daily" || !parsed.start) return parsed;
+
+    const todayKey = toDayKey(referenceDate instanceof Date ? referenceDate : new Date(referenceDate));
+    if (!todayKey || parsed.start === todayKey) return parsed;
+
+    const [startYear, startMonth, startDay] = parsed.start.split("-").map(Number);
+    const [todayYear, todayMonth, todayDay] = todayKey.split("-").map(Number);
+    const anchor = new Date(startYear, startMonth - 1, startDay);
+    const today = new Date(todayYear, todayMonth - 1, todayDay);
+    if (Number.isNaN(anchor.getTime()) || Number.isNaN(today.getTime())) return parsed;
+
+    const deltaDays = Math.round((today.getTime() - anchor.getTime()) / 86400000);
+    return {
+      ...parsed,
+      start: todayKey,
+      end: parsed.end ? shiftDayKey(parsed.end, deltaDays) : ""
+    };
+  }
+
   function serializeDateCellValue(value = "") {
     const parsed = parseDateCellValue(value);
     if (!parsed.start) return "";
-    if (!parsed.end && parsed.dateFormat === "full" && !parsed.includeTime && parsed.remind === "none") {
+    if (!parsed.end && parsed.dateFormat === "full" && !parsed.includeTime && parsed.remind === "none" && parsed.repeat === "none") {
       return parsed.start;
     }
     const payload = { start: parsed.start };
@@ -248,15 +286,16 @@
     if (parsed.dateFormat !== "full") payload.dateFormat = parsed.dateFormat;
     if (parsed.includeTime) payload.includeTime = true;
     if (parsed.remind !== "none") payload.remind = parsed.remind;
+    if (parsed.repeat !== "none") payload.repeat = parsed.repeat;
     return JSON.stringify(payload);
   }
 
   function getDateStartValue(value = "") {
-    return parseDateCellValue(value).start;
+    return resolveDateCellValue(value).start;
   }
 
   function getDateSortValue(value = "") {
-    const parsed = parseDateCellValue(value);
+    const parsed = resolveDateCellValue(value);
     return `${parsed.start || ""}|${parsed.startTime || ""}|${parsed.end || ""}|${parsed.endTime || ""}`;
   }
 
@@ -274,7 +313,7 @@
   }
 
   function formatDateValueLabel(value = "") {
-    const parsed = parseDateCellValue(value);
+    const parsed = resolveDateCellValue(value);
     if (!parsed.start) return "";
     const startLabel = formatDayKey(parsed.start, parsed.dateFormat);
     const startTimeLabel = parsed.includeTime ? formatTimeValue(parsed.startTime) : "";
@@ -1183,6 +1222,32 @@
     };
   }
 
+  function getChecklistAutomationProperties(properties = []) {
+    const supported = new Set(["text", "number", "select", "checkbox", "status", "tag", "date", "notes"]);
+    return safeParseArray(properties || []).filter((property) => supported.has(normalizePropertyType(property?.type || "", "")));
+  }
+
+  function normalizeChecklistAutomationRule(raw = {}, properties = []) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const property = getChecklistAutomationProperties(properties).find((entry) => entry.id === source.propertyId) || null;
+    if (!property) {
+      return { propertyId: "", value: "" };
+    }
+    const rawValue = String(source.value ?? "").trim();
+    return {
+      propertyId: property.id,
+      value: property.type === "date" && rawValue.toLowerCase() === "today" ? "__today__" : rawValue
+    };
+  }
+
+  function normalizeChecklistAutomation(raw = {}, properties = []) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      onCheck: normalizeChecklistAutomationRule(source.onCheck || source.checked || {}, properties),
+      onUncheck: normalizeChecklistAutomationRule(source.onUncheck || source.unchecked || {}, properties)
+    };
+  }
+
   function parseRelationValues(value = "") {
     if (Array.isArray(value)) {
       const seen = new Set();
@@ -1791,6 +1856,7 @@
       checklistCheckboxColor: normalizeChecklistToneColor(raw.checklistCheckboxColor || ""),
       checklistTextColor: normalizeChecklistToneColor(raw.checklistTextColor || ""),
       checklistProgressColor: normalizeChecklistToneColor(raw.checklistProgressColor || ""),
+      checklistAutomation: normalizeChecklistAutomation(raw.checklistAutomation || {}, properties),
       showPageIcon: !!raw.showPageIcon,
       boardCardPreview: normalizeBoardCardPreview(raw.boardCardPreview || "none"),
       boardCardSize: normalizeBoardCardSize(raw.boardCardSize || "large"),
@@ -2791,6 +2857,32 @@
     return getDatabaseSourceByTarget(property.relationTarget || {});
   }
 
+  function getRelationSetupStatus(property) {
+    const source = getRelationSource(property);
+    if (!source) {
+      return "Choose the table this relation should link to. After that, each row can pick one or more rows from that table.";
+    }
+    return `Linked to ${source.label || source.title || "selected table"}. Rows in this field can reference rows from that table.`;
+  }
+
+  function getSummarySetupStatus(database, property) {
+    const relationProperty = getSummaryRelationProperty(database, property);
+    const mode = normalizeSummaryMode(property?.summaryConfig?.mode || "count");
+    const needsTarget = mode === "sum" || mode === "latest-date";
+    if (!relationProperty) {
+      return "Add or choose a Link property first. Summary fields work by reading rows through a link.";
+    }
+    if (!getRelationSource(relationProperty)) {
+      return `The "${relationProperty.name}" link field needs a target table before this summary can calculate.`;
+    }
+    if (needsTarget && !getSummaryTargetProperty(database, property)) {
+      return mode === "sum"
+        ? "Choose the number field from the linked table that should be added together."
+        : "Choose the date field from the linked table that should provide the latest date.";
+    }
+    return "This summary reads linked rows and updates automatically when the link field changes.";
+  }
+
   function getRelationRowEntries(property, value = "") {
     const rowIds = parseRelationValues(value);
     const source = getRelationSource(property);
@@ -2956,7 +3048,7 @@
 
   function getFormulaDateOperand(database, row, reference, visited = new Set()) {
     const resolved = resolveFormulaValueReference(database, row, reference, visited);
-    return parseDateCellValue(resolved).start || normalizeDayKey(resolved, "");
+    return resolveDateCellValue(resolved).start || normalizeDayKey(resolved, "");
   }
 
   function getFormulaRelationEntries(database, row, relationReference = "") {
@@ -3030,10 +3122,77 @@
     return "";
   }
 
+  function getFormulaSetupStatus(database, property) {
+    const config = normalizeFormulaConfig(property?.formulaConfig || {});
+    const simpleType = normalizeFormulaSimpleType(config.simpleType || "sum");
+
+    if (config.mode === "advanced") {
+      return "Advanced formulas support field refs like [Budget], math, comparisons, and the listed helper functions. They do not allow browser or JavaScript API access.";
+    }
+
+    if (["sum", "average"].includes(simpleType)) {
+      if (!getPropertyById(database, config.relationPropertyId || "")) return "Choose a Link field first, then choose the number field to read from linked rows.";
+      if (!getFormulaRelatedFieldCandidates(database, property, "number").find((entry) => entry.id === config.targetPropertyId)) return "Choose the number field from the linked table.";
+    }
+
+    if (simpleType === "count") {
+      if (!getPropertyById(database, config.relationPropertyId || "")) return "Choose a Link field to count linked rows.";
+      return "Leave the checkbox field empty to count every linked row, or choose one to count only checked linked rows.";
+    }
+
+    if (simpleType === "auto-complete" && !getPropertyById(database, config.checkboxPropertyId || "")) {
+      return "Choose a checkbox field on this row. Checked becomes Complete; unchecked becomes In progress.";
+    }
+
+    if (["subtract", "percentage", "compare"].includes(simpleType)) {
+      if (!getPropertyById(database, config.leftPropertyId || "") || !getPropertyById(database, config.rightPropertyId || "")) return "Choose both number fields for this formula.";
+    }
+
+    if (simpleType === "days-until-date" && !getPropertyById(database, config.datePropertyId || "")) {
+      return "Choose the date field this formula should count down to.";
+    }
+
+    return getFormulaSimpleDescription(property);
+  }
+
+  function validateAdvancedFormulaExpression(expression = "") {
+    const source = String(expression || "").trim();
+    if (!source) return { ok: true };
+    if (source.length > 500) return { ok: false, reason: "Formula is too long." };
+
+    const withoutStrings = source
+      .replace(/"([^"\\]|\\.)*"/g, '""')
+      .replace(/'([^'\\]|\\.)*'/g, "''")
+      .replace(/\[[^\]]+\]/g, "__field_ref__");
+
+    if (/[;`{}]/.test(withoutStrings)) {
+      return { ok: false, reason: "Formula contains unsupported JavaScript syntax." };
+    }
+
+    if (/\.[A-Za-z_$]/.test(withoutStrings)) {
+      return { ok: false, reason: "Formula property access is not allowed." };
+    }
+
+    const blockedWords = /\b(?:window|document|globalThis|self|Function|eval|constructor|prototype|__proto__|this|new|class|import|fetch|XMLHttpRequest|localStorage|sessionStorage|indexedDB|setTimeout|setInterval|while|for|do|try|catch|throw|await|async)\b/i;
+    if (blockedWords.test(withoutStrings)) {
+      return { ok: false, reason: "Formula uses a blocked JavaScript word." };
+    }
+
+    const allowedPattern = /^[0-9A-Za-z_$\s+\-*/%(),<>=!&|?:.'"\[\]]+$/;
+    if (!allowedPattern.test(source)) {
+      return { ok: false, reason: "Formula contains unsupported characters." };
+    }
+
+    return { ok: true };
+  }
+
   function computeFormulaAdvancedRawValue(database, row, property, visited = new Set()) {
     const config = normalizeFormulaConfig(property?.formulaConfig || {});
     const expression = String(config.expression || "").trim();
     if (!expression) return "";
+
+    const validation = validateAdvancedFormulaExpression(expression);
+    if (!validation.ok) return "";
 
     const prepared = expression
       .replace(/\[([^\]]+)\]/g, (_match, label) => `__field(${JSON.stringify(String(label || "").trim())})`)
@@ -3747,6 +3906,84 @@
     return match?.label || "Custom";
   }
 
+  function getChecklistAutomationRule(database, trigger = "onCheck") {
+    const automation = normalizeChecklistAutomation(database?.checklistAutomation || {}, database?.properties || []);
+    return trigger === "onUncheck" ? automation.onUncheck : automation.onCheck;
+  }
+
+  function getChecklistAutomationLabel(database, trigger = "onCheck") {
+    const rule = getChecklistAutomationRule(database, trigger);
+    const property = getPropertyById(database, rule.propertyId || "");
+    if (!property) return "Do nothing";
+    let valueLabel = rule.value
+      ? formatCellDisplay(property, rule.value) || rule.value
+      : (property.type === "checkbox" ? "Unchecked" : "Empty");
+    if (property.type === "date" && rule.value === "__today__") valueLabel = "Today";
+    return `Set ${property.name} to ${valueLabel}`;
+  }
+
+  function getChecklistAutomationValueOptions(property) {
+    if (!property) return [];
+
+    if (property.type === "checkbox") {
+      return [
+        { value: "true", label: "Checked" },
+        { value: "false", label: "Unchecked" }
+      ];
+    }
+
+    if (property.type === "date") {
+      return [
+        { value: "__today__", label: "Today" },
+        { value: "", label: "Clear date" }
+      ];
+    }
+
+    if (property.type === "status") {
+      return getStatusOptions(property).map((option) => ({ value: option.name, label: option.name }));
+    }
+
+    if (property.type === "select") {
+      return getPropertySelectOptions(property).map((option) => ({ value: option.name, label: option.name }));
+    }
+
+    if (property.type === "tag") {
+      return getPropertyTagOptions(property).map((option) => ({ value: option.name, label: option.name }));
+    }
+
+    return [];
+  }
+
+  function setChecklistAutomationRule(database, trigger = "onCheck", rule = {}) {
+    const key = trigger === "onUncheck" ? "onUncheck" : "onCheck";
+    const property = getPropertyById(database, rule?.propertyId || "");
+    const nextRule = property?.type === "date" && String(rule?.value || "").trim().toLowerCase() === "today"
+      ? { ...rule, value: "__today__" }
+      : rule;
+    database.checklistAutomation = normalizeChecklistAutomation({
+      ...(database.checklistAutomation || {}),
+      [key]: nextRule
+    }, database.properties || []);
+  }
+
+  function resolveChecklistAutomationValue(property, value = "") {
+    if (property?.type === "date" && String(value || "").trim() === "__today__") {
+      return serializeDateCellValue({ start: toDayKey(new Date()) });
+    }
+    return value || "";
+  }
+
+  function promptChecklistAutomationValue(property, currentValue = "") {
+    if (!property) return null;
+    if (property.type === "date") {
+      return prompt(`Set ${property.name} to date (YYYY-MM-DD, "today", or blank to clear):`, currentValue === "__today__" ? "today" : currentValue || "");
+    }
+    if (property.type === "number") {
+      return prompt(`Set ${property.name} to number (or blank to clear):`, currentValue || "");
+    }
+    return prompt(`Set ${property.name} to text (blank clears it):`, currentValue || "");
+  }
+
   function saveAndRerenderDatabaseSettings(context, database) {
     saveDatabaseForContext(context, database);
     rerenderCalendarContext(context);
@@ -3855,6 +4092,60 @@
       appendMenuSubmenuButton(submenuEl, `Progress color: ${getChecklistColorLabel(database.checklistProgressColor || "")}`, (buttonEl) => {
         openChecklistColorMenu(buttonEl, "Progress color", "checklistProgressColor");
       }, { active: !!normalizeChecklistToneColor(database.checklistProgressColor || "") });
+
+      const openChecklistAutomationValueMenu = (buttonEl, trigger, property) => {
+        const currentRule = getChecklistAutomationRule(database, trigger);
+        const valueOptions = getChecklistAutomationValueOptions(property);
+
+        openPropertySubmenu(buttonEl, property.name, (valueMenuEl) => {
+          if (valueOptions.length) {
+            valueOptions.forEach((option) => {
+              appendMenuButton(valueMenuEl, option.label, () => {
+                setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: option.value });
+                saveAndRerenderDatabaseSettings(context, database);
+              }, { active: currentRule.propertyId === property.id && currentRule.value === option.value });
+            });
+          } else {
+            appendMenuButton(valueMenuEl, currentRule.propertyId === property.id && currentRule.value ? "Edit value..." : "Set value...", () => {
+              const nextValue = promptChecklistAutomationValue(property, currentRule.propertyId === property.id ? currentRule.value : "");
+              if (nextValue === null) return;
+              setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: nextValue });
+              saveAndRerenderDatabaseSettings(context, database);
+            });
+          }
+
+          appendMenuDivider(valueMenuEl);
+          appendMenuButton(valueMenuEl, "Clear value", () => {
+            setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: "" });
+            saveAndRerenderDatabaseSettings(context, database);
+          }, { active: currentRule.propertyId === property.id && !currentRule.value });
+        });
+      };
+
+      const openChecklistAutomationMenu = (buttonEl, trigger, title) => {
+        openPropertySubmenu(buttonEl, title, (automationMenuEl) => {
+          appendMenuButton(automationMenuEl, "Do nothing", () => {
+            setChecklistAutomationRule(database, trigger, {});
+            saveAndRerenderDatabaseSettings(context, database);
+          }, { active: !getChecklistAutomationRule(database, trigger).propertyId });
+
+          const properties = getChecklistAutomationProperties(database.properties || []);
+          if (properties.length) appendMenuDivider(automationMenuEl);
+          properties.forEach((property) => {
+            appendMenuSubmenuButton(automationMenuEl, `Set ${property.name}`, (valueButtonEl) => {
+              openChecklistAutomationValueMenu(valueButtonEl, trigger, property);
+            }, { active: getChecklistAutomationRule(database, trigger).propertyId === property.id });
+          });
+        });
+      };
+
+      appendMenuDivider(submenuEl);
+      appendMenuSubmenuButton(submenuEl, `On check: ${getChecklistAutomationLabel(database, "onCheck")}`, (buttonEl) => {
+        openChecklistAutomationMenu(buttonEl, "onCheck", "On check");
+      }, { active: !!getChecklistAutomationRule(database, "onCheck").propertyId });
+      appendMenuSubmenuButton(submenuEl, `On uncheck: ${getChecklistAutomationLabel(database, "onUncheck")}`, (buttonEl) => {
+        openChecklistAutomationMenu(buttonEl, "onUncheck", "On uncheck");
+      }, { active: !!getChecklistAutomationRule(database, "onUncheck").propertyId });
     });
   }
 
@@ -4245,7 +4536,7 @@
     if (property.type === "summary") {
       const mode = normalizeSummaryMode(property.summaryConfig?.mode || "count");
       if (mode === "latest-date") {
-        const parsed = parseDateCellValue(rawValue);
+        const parsed = resolveDateCellValue(rawValue);
         const dateText = [parsed.start, parsed.end, formatCellDisplay(property, rawValue)].join(" ").toLowerCase();
         if (filter.mode === "empty") return !parsed.start;
         if (filter.mode === "contains") return dateText.includes(filterValue.toLowerCase());
@@ -4272,7 +4563,7 @@
     }
 
     if (property.type === "date") {
-      const parsed = parseDateCellValue(rawValue);
+      const parsed = resolveDateCellValue(rawValue);
       const dateText = [parsed.start, parsed.end, formatDateValueLabel(rawValue)].join(" ").toLowerCase();
       if (filter.mode === "empty") return !parsed.start;
       if (filter.mode === "contains") return dateText.includes(filterValue.toLowerCase());
@@ -4772,7 +5063,7 @@
 
   function openDateValueMenu(anchorEl, context, database, row, property) {
     const menuEl = mountDatabaseFloatingEl(DATABASE_MENU_ID, "topbar-dropdown page-database-value-menu page-database-date-menu", anchorEl, { align: "left" });
-    const initialValue = parseDateCellValue(getRowValue(row, property.id));
+    const initialValue = resolveDateCellValue(getRowValue(row, property.id));
     const state = {
       start: initialValue.start,
       end: initialValue.end,
@@ -4781,6 +5072,7 @@
       dateFormat: initialValue.dateFormat,
       includeTime: initialValue.includeTime,
       remind: initialValue.remind,
+      repeat: initialValue.repeat,
       month: normalizeMonthKey(initialValue.start || toDayKey(new Date())),
       activeTarget: initialValue.end ? "end" : "start"
     };
@@ -4793,7 +5085,8 @@
         endTime: state.endTime,
         dateFormat: state.dateFormat,
         includeTime: state.includeTime,
-        remind: state.remind
+        remind: state.remind,
+        repeat: state.repeat
       }, { closeMenus: false });
     };
 
@@ -4835,6 +5128,7 @@
         : state.remind === "day-before"
           ? "1 day before"
           : "At time of event";
+      const repeatLabel = state.repeat === "daily" ? "Daily" : "None";
       const startTimeValue = state.startTime || "09:00";
       const endTimeValue = state.endTime || state.startTime || "09:00";
 
@@ -4878,9 +5172,10 @@
               </label>
             ` : ""}
           ` : ""}
+          <button type="button" class="page-database-date-setting" data-date-action="cycle-repeat"><span class="page-database-date-setting-label">Repeat</span><span class="page-database-date-setting-value">${escapeHTML(repeatLabel)} <span class="page-database-date-chevron">›</span></span></button>
           <button type="button" class="page-database-date-setting" data-date-action="cycle-remind"><span class="page-database-date-setting-label">Remind</span><span class="page-database-date-setting-value">${escapeHTML(remindLabel)} <span class="page-database-date-chevron">›</span></span></button>
           <button type="button" class="page-database-date-setting clear-row" data-date-action="clear"><span class="page-database-date-setting-label">Clear</span><span></span></button>
-          <div class="page-database-date-footnote">Learn about reminders</div>
+          <div class="page-database-date-footnote">Daily repeat always rolls the date forward to today.</div>
         </div>
       `;
 
@@ -4953,6 +5248,16 @@
             renderDateMenu();
             return;
           }
+          if (action === "cycle-repeat") {
+            state.repeat = state.repeat === "daily" ? "none" : "daily";
+            if (state.repeat === "daily" && !state.start) {
+              state.start = toDayKey(new Date());
+              state.month = normalizeMonthKey(state.start, new Date());
+            }
+            saveState();
+            renderDateMenu();
+            return;
+          }
           if (action === "cycle-remind") {
             const reminders = ["none", "at-time", "day-before"];
             const currentIndex = reminders.indexOf(state.remind);
@@ -4968,6 +5273,7 @@
             state.endTime = "";
             state.includeTime = false;
             state.remind = "none";
+            state.repeat = "none";
             state.activeTarget = "start";
             commitCellValue(context, database, row.id, property.id, "", { closeMenus: false });
             renderDateMenu();
@@ -5443,10 +5749,21 @@
     const row = getRowById(database, rowId);
     if (!row) return;
     row.checklistChecked = !!checked;
+    applyChecklistAutomation(database, row, row.checklistChecked ? "onCheck" : "onUncheck");
+
     if (isFolderDatabase(database)) {
       const metadata = getFolderMetadataEntry(database, row);
       if (metadata) metadata.checklistChecked = row.checklistChecked;
     }
+  }
+
+  function applyChecklistAutomation(database, row, trigger = "onCheck") {
+    if (!database || !row) return false;
+    const rule = getChecklistAutomationRule(database, trigger);
+    const property = getPropertyById(database, rule.propertyId || "");
+    if (!property) return false;
+    updateRowValue(database, row.id, property.id, resolveChecklistAutomationValue(property, rule.value));
+    return true;
   }
 
   function buildChecklistProgressRingSVG(percent = 0) {
@@ -7140,6 +7457,17 @@
             closeDatabaseMenus();
           }, { active: getPropertyFilter(database, property.id)?.mode === "empty" });
 
+          appendMenuButton(submenuEl, "Contains text...", () => {
+            const current = getPropertyFilter(database, property.id);
+            const nextValue = prompt("Show rows where this field contains:", current?.mode === "contains" ? current.value || "" : "");
+            if (nextValue === null) return;
+            const clean = String(nextValue || "").trim();
+            setPropertyFilter(database, property.id, clean ? "contains" : "", clean);
+            saveDatabaseForContext(context, database);
+            rerenderCalendarContext(context);
+            closeDatabaseMenus();
+          }, { active: getPropertyFilter(database, property.id)?.mode === "contains" });
+
           appendMenuButton(submenuEl, "Clear filter", () => {
             setPropertyFilter(database, property.id, "", "");
             saveDatabaseForContext(context, database);
@@ -7434,6 +7762,7 @@
 
   function buildRelationPropertyPanelHTML(property, database) {
     const source = getRelationSource(property);
+    const setupStatus = getRelationSetupStatus(property);
     return `
       <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
       <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
@@ -7459,7 +7788,7 @@
             <span>Link</span>
             <span class="page-database-property-panel-item-meta">${escapeHTML(source?.label || "Choose table")}</span>
           </button>
-          <div class="page-database-property-panel-note">Select another table, then each row can link one or more rows from it.</div>
+          <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
           <div class="page-database-property-panel-divider"></div>
           <button type="button" class="page-database-property-panel-toggle${isPropertyUnwrapped(database, property.id) ? " active" : ""}" data-db-action="toggle-property-wrap" data-prop-id="${escapeHTML(property.id)}">
             <span>Wrap content</span>
@@ -7477,6 +7806,7 @@
     const targetProperty = getSummaryTargetProperty(database, property);
     const mode = normalizeSummaryMode(property.summaryConfig?.mode || "count");
     const needsTarget = mode === "sum" || mode === "latest-date";
+    const setupStatus = getSummarySetupStatus(database, property);
     return `
       <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
       <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
@@ -7510,7 +7840,7 @@
             <span>Field</span>
             <span class="page-database-property-panel-item-meta">${escapeHTML(needsTarget ? (targetProperty?.name || "Choose field") : "Not needed")}</span>
           </button>
-          <div class="page-database-property-panel-note">Summary values are computed from the linked rows and update automatically.</div>
+          <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
           <div class="page-database-property-panel-divider"></div>
           <button type="button" class="page-database-property-panel-item" data-db-action="duplicate-property-panel" data-prop-id="${escapeHTML(property.id)}">Duplicate property</button>
           <button type="button" class="page-database-property-panel-item danger" data-db-action="delete-property-panel" data-prop-id="${escapeHTML(property.id)}">Delete property</button>
@@ -7548,6 +7878,7 @@
     const needsCheckbox = ["count", "auto-complete"].includes(simpleType);
     const needsPair = ["subtract", "percentage", "compare"].includes(simpleType);
     const needsDate = simpleType === "days-until-date";
+    const setupStatus = getFormulaSetupStatus(database, property);
     return `
       <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
       <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
@@ -7612,13 +7943,13 @@
                 <span class="page-database-property-panel-item-meta">${escapeHTML(dateProperty?.name || "Choose date field")}</span>
               </button>
             ` : ""}
-            <div class="page-database-property-panel-note">${escapeHTML(getFormulaSimpleDescription(property))}</div>
+            <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
           ` : `
             <label class="page-database-formula-advanced">
               <span class="page-database-formula-advanced-label">Formula</span>
               <textarea class="page-database-formula-advanced-input" data-db-action="formula-expression" placeholder="Example: percent([Spent], [Budget])">${escapeHTML(config.expression || "")}</textarea>
             </label>
-            <div class="page-database-property-panel-note">Use field names in square brackets, like [Budget] - [Actual]. You can also use helpers like sum("Tasks", "Hours"), count("Tasks"), average("Tasks", "Hours"), percent([Done], [Total]), daysUntil([Due]), compare([Budget], [Actual]), and if(allChecked("Tasks", "Done"), "Complete", "In progress").</div>
+            <div class="page-database-property-panel-note">${escapeHTML(setupStatus)} Use helpers like sum("Tasks", "Hours"), count("Tasks"), average("Tasks", "Hours"), percent([Done], [Total]), daysUntil([Due]), compare([Budget], [Actual]), and if(allChecked("Tasks", "Done"), "Complete", "In progress").</div>
           `}
           <button type="button" class="page-database-property-panel-link page-database-property-panel-link-quiet" data-db-action="toggle-formula-mode" data-prop-id="${escapeHTML(property.id)}">${config.mode === "advanced" ? "Back to simple" : "Advanced"}</button>
           <div class="page-database-property-panel-divider"></div>
