@@ -3173,7 +3173,15 @@ function normalizeDataCalloutSystemFormat(value = "", systemKey = "current-date"
   }
 
   if (systemKey === "page-activity") {
-    return ["compact", "clock"].includes(safe) ? safe : "compact";
+    return [
+      "compact",
+      "clock",
+      "week-compact",
+      "week-clock",
+      "last-opened",
+      "sessions-today",
+      "sessions-total"
+    ].includes(safe) ? safe : "compact";
   }
 
   return ["short", "long"].includes(safe) ? safe : "short";
@@ -3204,15 +3212,25 @@ function writePageActivityData(value) {
 }
 
 function normalizePageActivityEntry(raw = {}) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { days: {}, lastOpenedAt: "", lastSessionStartedAt: "" };
+  }
 
-  const normalized = {};
-  Object.entries(raw).forEach(([dayKey, value]) => {
-    const ms = Math.max(0, Math.round(Number(value) || 0));
-    if (!ms) return;
-    normalized[String(dayKey)] = ms;
+  const sourceDays = raw.days && typeof raw.days === "object" && !Array.isArray(raw.days) ? raw.days : raw;
+  const days = {};
+  Object.entries(sourceDays).forEach(([dayKey, value]) => {
+    const daySource = value && typeof value === "object" && !Array.isArray(value) ? value : { ms: value };
+    const ms = Math.max(0, Math.round(Number(daySource.ms) || 0));
+    const sessions = Math.max(0, Math.round(Number(daySource.sessions) || 0));
+    if (!ms && !sessions) return;
+    days[String(dayKey)] = { ms, sessions };
   });
-  return normalized;
+
+  return {
+    days,
+    lastOpenedAt: typeof raw.lastOpenedAt === "string" ? raw.lastOpenedAt : "",
+    lastSessionStartedAt: typeof raw.lastSessionStartedAt === "string" ? raw.lastSessionStartedAt : ""
+  };
 }
 
 function getPageActivityDayKey(date = new Date()) {
@@ -3247,10 +3265,34 @@ function writePageActivityDuration(pageId = "", startAt = 0, endAt = Date.now())
       0
     ).getTime();
     const nextCursor = Math.min(endTime, nextBoundary);
-    entry[dayKey] = Math.max(0, Math.round(Number(entry[dayKey]) || 0) + (nextCursor - cursor));
+    const dayEntry = entry.days[dayKey] || { ms: 0, sessions: 0 };
+    entry.days[dayKey] = {
+      ...dayEntry,
+      ms: Math.max(0, Math.round(Number(dayEntry.ms) || 0) + (nextCursor - cursor))
+    };
     cursor = nextCursor;
   }
 
+  all[safePageId] = entry;
+  return writePageActivityData(all);
+}
+
+function markPageActivityOpened(pageId = "", openedAt = Date.now()) {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return false;
+
+  const openTime = Math.max(0, Math.floor(Number(openedAt) || Date.now()));
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+  const dayKey = getPageActivityDayKey(new Date(openTime));
+  const dayEntry = entry.days[dayKey] || { ms: 0, sessions: 0 };
+  entry.days[dayKey] = {
+    ...dayEntry,
+    sessions: Math.max(0, Math.round(Number(dayEntry.sessions) || 0) + 1)
+  };
+  const isoTime = new Date(openTime).toISOString();
+  entry.lastOpenedAt = isoTime;
+  entry.lastSessionStartedAt = isoTime;
   all[safePageId] = entry;
   return writePageActivityData(all);
 }
@@ -3261,7 +3303,44 @@ function getStoredPageActivityMs(pageId = "", dayKey = getPageActivityDayKey()) 
 
   const all = readPageActivityData();
   const entry = normalizePageActivityEntry(all[safePageId]);
-  return Math.max(0, Math.round(Number(entry[dayKey]) || 0));
+  return Math.max(0, Math.round(Number(entry.days?.[dayKey]?.ms) || 0));
+}
+
+function getPageActivityWeekDayKeys(referenceDate = new Date()) {
+  const date = referenceDate instanceof Date ? new Date(referenceDate.getTime()) : new Date(referenceDate);
+  if (Number.isNaN(date.getTime())) return [];
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
+    return getPageActivityDayKey(day);
+  });
+}
+
+function getStoredPageActivityWeekMs(pageId = "", referenceDate = new Date()) {
+  return getPageActivityWeekDayKeys(referenceDate)
+    .reduce((total, dayKey) => total + getStoredPageActivityMs(pageId, dayKey), 0);
+}
+
+function getStoredPageActivitySessions(pageId = "", dayKey = "") {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return 0;
+
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+  if (dayKey) return Math.max(0, Math.round(Number(entry.days?.[dayKey]?.sessions) || 0));
+  return Object.values(entry.days || {}).reduce((total, dayEntry) => total + Math.max(0, Math.round(Number(dayEntry?.sessions) || 0)), 0);
+}
+
+function getPageActivityLastOpenedLabel(pageId = "") {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return "Never";
+
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+  const date = new Date(entry.lastOpenedAt || "");
+  if (Number.isNaN(date.getTime())) return "Never";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function flushTrackedPageActivity(options = {}) {
@@ -3282,12 +3361,15 @@ function flushTrackedPageActivity(options = {}) {
 function setTrackedPageActivityPage(pageId = "") {
   flushTrackedPageActivity({ now: Date.now() });
   trackedPageActivityId = String(pageId || "").trim();
-  trackedPageActivityStartedAt = trackedPageActivityId && !document.hidden ? Date.now() : 0;
+  const now = Date.now();
+  trackedPageActivityStartedAt = trackedPageActivityId && !document.hidden ? now : 0;
+  if (trackedPageActivityStartedAt) markPageActivityOpened(trackedPageActivityId, now);
 }
 
 function resumeTrackedPageActivity() {
   if (!trackedPageActivityId || trackedPageActivityStartedAt || document.hidden) return;
   trackedPageActivityStartedAt = Date.now();
+  markPageActivityOpened(trackedPageActivityId, trackedPageActivityStartedAt);
 }
 
 function getLivePageActivityMs(pageId = "", dayKey = getPageActivityDayKey()) {
@@ -3299,6 +3381,15 @@ function getLivePageActivityMs(pageId = "", dayKey = getPageActivityDayKey()) {
     total += Math.max(0, Date.now() - trackedPageActivityStartedAt);
   }
 
+  return Math.max(0, total);
+}
+
+function getLivePageActivityWeekMs(pageId = "", referenceDate = new Date()) {
+  let total = getStoredPageActivityWeekMs(pageId, referenceDate);
+  const todayKey = getPageActivityDayKey(referenceDate);
+  if (getPageActivityWeekDayKeys(referenceDate).includes(todayKey)) {
+    total += Math.max(0, getLivePageActivityMs(pageId, todayKey) - getStoredPageActivityMs(pageId, todayKey));
+  }
   return Math.max(0, total);
 }
 
@@ -4164,8 +4255,13 @@ function getDataCalloutSystemFormatOptions(systemKey = "current-date") {
 
   if (systemKey === "page-activity") {
     return [
-      { value: "compact", label: "Compact" },
-      { value: "clock", label: "Clock" }
+      { value: "compact", label: "Today compact" },
+      { value: "clock", label: "Today clock" },
+      { value: "week-compact", label: "This week compact" },
+      { value: "week-clock", label: "This week clock" },
+      { value: "last-opened", label: "Last opened" },
+      { value: "sessions-today", label: "Sessions today" },
+      { value: "sessions-total", label: "Sessions total" }
     ];
   }
 
@@ -4230,6 +4326,35 @@ function computeSystemDataCalloutValue(config) {
       return {
         valueText: "—",
         configured: false
+      };
+    }
+
+    if (config.systemFormat === "week-compact" || config.systemFormat === "week-clock") {
+      return {
+        valueText: formatDataCalloutDuration(getLivePageActivityWeekMs(targetPageId), config.systemFormat === "week-clock" ? "clock" : "compact"),
+        configured: true
+      };
+    }
+
+    if (config.systemFormat === "last-opened") {
+      return {
+        valueText: getPageActivityLastOpenedLabel(targetPageId),
+        configured: true
+      };
+    }
+
+    if (config.systemFormat === "sessions-today") {
+      const sessions = getStoredPageActivitySessions(targetPageId, getPageActivityDayKey());
+      return {
+        valueText: `${sessions}`,
+        configured: true
+      };
+    }
+
+    if (config.systemFormat === "sessions-total") {
+      return {
+        valueText: `${getStoredPageActivitySessions(targetPageId)}`,
+        configured: true
       };
     }
 

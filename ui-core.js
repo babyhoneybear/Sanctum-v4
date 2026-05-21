@@ -322,6 +322,17 @@ function normalizeCanvasOffset(value = 0) {
   return Math.max(0, numeric);
 }
 
+function normalizeThemeMode(value = "", fallback = "dark") {
+  const safe = String(value || "").trim().toLowerCase();
+  if (safe === "light" || safe === "dark") return safe;
+  return fallback === "light" ? "light" : "dark";
+}
+
+function normalizePageThemeOverride(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return safe === "light" || safe === "dark" ? safe : "";
+}
+
 function normalizePageSettings(settings = {}) {
   return {
     showHeader: !!settings.showHeader,
@@ -331,6 +342,7 @@ function normalizePageSettings(settings = {}) {
     headerSize: ["sm", "md", "lg"].includes(settings.headerSize) ? settings.headerSize : "md",
     headerPos: normalizeHeaderPos(settings.headerPos),
     fontPreset: normalizePageFontPreset(settings.fontPreset),
+    theme: normalizePageThemeOverride(settings.theme || settings.themeOverride || ""),
     canvasZoom: normalizeCanvasZoom(settings.canvasZoom),
     canvasScrollLeft: normalizeCanvasOffset(settings.canvasScrollLeft),
     canvasScrollTop: normalizeCanvasOffset(settings.canvasScrollTop),
@@ -452,6 +464,8 @@ function normalizePin(pin = {}) {
 }
 
 window.normalizePageSettings = normalizePageSettings;
+window.normalizeThemeMode = normalizeThemeMode;
+window.normalizePageThemeOverride = normalizePageThemeOverride;
 window.normalizePin = normalizePin;
 
 function readAllPageBlocks() {
@@ -1185,5 +1199,4 @@ function deleteSinglePageTree(pageId) {
   const childPageIds = collectDescendantPageIds(pageId);
   deletePagesAndStoredData([pageId, ...childPageIds]);
 }
-
 

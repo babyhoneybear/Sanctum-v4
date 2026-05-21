@@ -1815,6 +1815,14 @@
       .filter((entry) => propertyIds.has(entry) && entry !== "name");
   }
 
+  function normalizeChecklistSidePropertyIds(value = [], properties = []) {
+    const propertyIds = new Set(safeParseArray(properties).map((property) => property?.id).filter(Boolean));
+    return safeParseArray(value)
+      .map((entry) => String(entry || "").trim())
+      .filter((entry, index, array) => entry && array.indexOf(entry) === index)
+      .filter((entry) => propertyIds.has(entry) && entry !== "name");
+  }
+
   function normalizeResetConfig(rawValue = {}, properties = []) {
     const raw = safeParseObject(rawValue);
     const frequency = normalizeResetFrequency(raw.frequency || "none");
@@ -1876,6 +1884,7 @@
       checklistTextColor: normalizeChecklistToneColor(raw.checklistTextColor || ""),
       checklistProgressColor: normalizeChecklistToneColor(raw.checklistProgressColor || ""),
       checklistAutomation: normalizeChecklistAutomation(raw.checklistAutomation || {}, properties),
+      checklistSidePropertyIds: normalizeChecklistSidePropertyIds(raw.checklistSidePropertyIds || raw.checklistFields || [], properties),
       showPageIcon: !!raw.showPageIcon,
       boardCardPreview: normalizeBoardCardPreview(raw.boardCardPreview || "none"),
       boardCardSize: normalizeBoardCardSize(raw.boardCardSize || "large"),
@@ -3925,6 +3934,32 @@
     return match?.label || "Custom";
   }
 
+  function getChecklistSidePropertyIds(database) {
+    return normalizeChecklistSidePropertyIds(database?.checklistSidePropertyIds || [], database?.properties || []);
+  }
+
+  function getChecklistSideProperties(database) {
+    const ids = getChecklistSidePropertyIds(database);
+    return ids.map((propertyId) => getPropertyById(database, propertyId)).filter(Boolean);
+  }
+
+  function getChecklistSidePropertiesLabel(database) {
+    const properties = getChecklistSideProperties(database);
+    if (!properties.length) return "None";
+    if (properties.length === 1) return properties[0].name;
+    return `${properties[0].name} +${properties.length - 1} more`;
+  }
+
+  function toggleChecklistSideProperty(database, propertyId = "") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.id === "name") return;
+    const current = getChecklistSidePropertyIds(database);
+    database.checklistSidePropertyIds = current.includes(property.id)
+      ? current.filter((entry) => entry !== property.id)
+      : [...current, property.id];
+    database.checklistSidePropertyIds = normalizeChecklistSidePropertyIds(database.checklistSidePropertyIds, database.properties || []);
+  }
+
   function getChecklistAutomationActions(database, trigger = "onCheck") {
     const automation = normalizeChecklistAutomation(database?.checklistAutomation || {}, database?.properties || []);
     return trigger === "onUncheck" ? automation.onUncheck : automation.onCheck;
@@ -4142,6 +4177,29 @@
       appendMenuSubmenuButton(submenuEl, `Progress color: ${getChecklistColorLabel(database.checklistProgressColor || "")}`, (buttonEl) => {
         openChecklistColorMenu(buttonEl, "Progress color", "checklistProgressColor");
       }, { active: !!normalizeChecklistToneColor(database.checklistProgressColor || "") });
+
+      const openChecklistSidePropertiesMenu = (buttonEl) => {
+        openPropertySubmenu(buttonEl, "Right side properties", (propertiesMenuEl) => {
+          appendMenuButton(propertiesMenuEl, "None", () => {
+            database.checklistSidePropertyIds = [];
+            saveAndRerenderDatabaseSettings(context, database);
+          }, { active: !getChecklistSidePropertyIds(database).length });
+
+          const properties = safeParseArray(database.properties || []).filter((property) => property?.id && property.id !== "name");
+          if (properties.length) appendMenuDivider(propertiesMenuEl);
+          properties.forEach((property) => {
+            appendMenuButton(propertiesMenuEl, property.name, () => {
+              toggleChecklistSideProperty(database, property.id);
+              saveAndRerenderDatabaseSettings(context, database);
+            }, { active: getChecklistSidePropertyIds(database).includes(property.id) });
+          });
+        });
+      };
+
+      appendMenuDivider(submenuEl);
+      appendMenuSubmenuButton(submenuEl, `Right side: ${getChecklistSidePropertiesLabel(database)}`, (buttonEl) => {
+        openChecklistSidePropertiesMenu(buttonEl);
+      }, { active: !!getChecklistSidePropertyIds(database).length });
 
       const openChecklistAutomationValueMenu = (buttonEl, trigger, property) => {
         const currentAction = getChecklistAutomationAction(database, trigger, property.id);
@@ -5859,6 +5917,7 @@
     const percent = totalCount ? Math.round((checkedCount / totalCount) * 100) : 0;
     const progressStyle = getChecklistProgressStyle(database);
     const density = getChecklistDensity(database);
+    const sideProperties = getChecklistSideProperties(database);
     const checklistStyleVars = [
       ["--page-db-checklist-row-bg", getChecklistToneColor(database, "checklistRowBgColor")],
       ["--page-db-checklist-checkbox", getChecklistToneColor(database, "checklistCheckboxColor")],
@@ -5870,14 +5929,24 @@
       .join("");
 
     const listHTML = totalCount
-      ? visibleRows.map((row) => `
+      ? visibleRows.map((row) => {
+        const sideHTML = sideProperties
+          .map((property) => {
+            const valueLabel = formatCellDisplay(property, getRowValue(row, property.id));
+            return `<span class="page-database-checklist-side-value" title="${escapeHTML(property.name)}">${escapeHTML(valueLabel)}</span>`;
+          })
+          .join("");
+
+        return `
           <div class="page-database-checklist-item${row.archived ? " is-archived" : ""}${row.checklistChecked ? " is-checked" : ""}" data-item-id="${escapeHTML(row.id)}" data-db-row-page-id="${escapeHTML(row.pageId || "")}">
             <button type="button" class="page-database-checklist-checkbox${row.checklistChecked ? " checked" : ""}" data-db-action="toggle-checklist-row" data-row-id="${escapeHTML(row.id)}" aria-label="${row.checklistChecked ? "Uncheck" : "Check"} ${escapeHTML(getRowTitle(database, row))}"${readOnly ? " disabled" : ""}>
               <span>${row.checklistChecked ? "✓" : ""}</span>
             </button>
             <button type="button" class="page-database-checklist-title" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}">${escapeHTML(getRowTitle(database, row))}</button>
+            ${sideHTML ? `<div class="page-database-checklist-side-values">${sideHTML}</div>` : ""}
           </div>
-        `).join("")
+        `;
+      }).join("")
       : `
           <div class="page-calendar-empty page-database-checklist-empty">
             <div class="page-calendar-empty-title">No checklist items yet.</div>

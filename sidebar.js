@@ -642,6 +642,9 @@ function openPage(pageId, options = {}) {
   }
 
   currentPageId = pageId;
+  if (typeof applyResolvedTheme === "function") {
+    applyResolvedTheme(pageId);
+  }
   sidebarAutoRevealPath = revealSidebarPath;
   renderSidebarDomains();
   renderSidebarPins();
