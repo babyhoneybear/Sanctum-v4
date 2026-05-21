@@ -1227,24 +1227,43 @@
     return safeParseArray(properties || []).filter((property) => supported.has(normalizePropertyType(property?.type || "", "")));
   }
 
-  function normalizeChecklistAutomationRule(raw = {}, properties = []) {
+  function normalizeChecklistAutomationAction(raw = {}, properties = []) {
     const source = raw && typeof raw === "object" ? raw : {};
     const property = getChecklistAutomationProperties(properties).find((entry) => entry.id === source.propertyId) || null;
     if (!property) {
-      return { propertyId: "", value: "" };
+      return null;
     }
     const rawValue = String(source.value ?? "").trim();
     return {
+      id: typeof source.id === "string" && source.id ? source.id : createId("check-action"),
       propertyId: property.id,
       value: property.type === "date" && rawValue.toLowerCase() === "today" ? "__today__" : rawValue
     };
   }
 
+  function normalizeChecklistAutomationActions(raw = [], properties = []) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const items = Array.isArray(raw)
+      ? raw
+      : (Array.isArray(source.actions) ? source.actions : (source.propertyId ? [source] : []));
+    const actions = [];
+    const seenProperties = new Set();
+
+    items.forEach((item) => {
+      const action = normalizeChecklistAutomationAction(item, properties);
+      if (!action || seenProperties.has(action.propertyId)) return;
+      seenProperties.add(action.propertyId);
+      actions.push(action);
+    });
+
+    return actions;
+  }
+
   function normalizeChecklistAutomation(raw = {}, properties = []) {
     const source = raw && typeof raw === "object" ? raw : {};
     return {
-      onCheck: normalizeChecklistAutomationRule(source.onCheck || source.checked || {}, properties),
-      onUncheck: normalizeChecklistAutomationRule(source.onUncheck || source.unchecked || {}, properties)
+      onCheck: normalizeChecklistAutomationActions(source.onCheck || source.checked || [], properties),
+      onUncheck: normalizeChecklistAutomationActions(source.onUncheck || source.unchecked || [], properties)
     };
   }
 
@@ -3906,20 +3925,30 @@
     return match?.label || "Custom";
   }
 
-  function getChecklistAutomationRule(database, trigger = "onCheck") {
+  function getChecklistAutomationActions(database, trigger = "onCheck") {
     const automation = normalizeChecklistAutomation(database?.checklistAutomation || {}, database?.properties || []);
     return trigger === "onUncheck" ? automation.onUncheck : automation.onCheck;
   }
 
-  function getChecklistAutomationLabel(database, trigger = "onCheck") {
-    const rule = getChecklistAutomationRule(database, trigger);
-    const property = getPropertyById(database, rule.propertyId || "");
-    if (!property) return "Do nothing";
-    let valueLabel = rule.value
-      ? formatCellDisplay(property, rule.value) || rule.value
+  function getChecklistAutomationActionLabel(database, action = {}) {
+    const property = getPropertyById(database, action.propertyId || "");
+    if (!property) return "";
+    let valueLabel = action.value
+      ? formatCellDisplay(property, action.value) || action.value
       : (property.type === "checkbox" ? "Unchecked" : "Empty");
-    if (property.type === "date" && rule.value === "__today__") valueLabel = "Today";
+    if (property.type === "date" && action.value === "__today__") valueLabel = "Today";
     return `Set ${property.name} to ${valueLabel}`;
+  }
+
+  function getChecklistAutomationLabel(database, trigger = "onCheck") {
+    const actions = getChecklistAutomationActions(database, trigger);
+    if (!actions.length) return "Do nothing";
+    const firstLabel = getChecklistAutomationActionLabel(database, actions[0]) || "1 action";
+    return actions.length === 1 ? firstLabel : `${firstLabel} +${actions.length - 1} more`;
+  }
+
+  function getChecklistAutomationAction(database, trigger = "onCheck", propertyId = "") {
+    return getChecklistAutomationActions(database, trigger).find((action) => action.propertyId === propertyId) || null;
   }
 
   function getChecklistAutomationValueOptions(property) {
@@ -3954,15 +3983,36 @@
     return [];
   }
 
-  function setChecklistAutomationRule(database, trigger = "onCheck", rule = {}) {
+  function setChecklistAutomationAction(database, trigger = "onCheck", action = {}) {
     const key = trigger === "onUncheck" ? "onUncheck" : "onCheck";
-    const property = getPropertyById(database, rule?.propertyId || "");
-    const nextRule = property?.type === "date" && String(rule?.value || "").trim().toLowerCase() === "today"
-      ? { ...rule, value: "__today__" }
-      : rule;
+    const property = getPropertyById(database, action?.propertyId || "");
+    if (!property) return;
+    const nextAction = property.type === "date" && String(action?.value || "").trim().toLowerCase() === "today"
+      ? { ...action, propertyId: property.id, value: "__today__" }
+      : { ...action, propertyId: property.id };
+    const currentActions = getChecklistAutomationActions(database, key);
+    const nextActions = currentActions.filter((entry) => entry.propertyId !== property.id);
+    nextActions.push(nextAction);
     database.checklistAutomation = normalizeChecklistAutomation({
       ...(database.checklistAutomation || {}),
-      [key]: nextRule
+      [key]: nextActions
+    }, database.properties || []);
+  }
+
+  function removeChecklistAutomationAction(database, trigger = "onCheck", propertyId = "") {
+    const key = trigger === "onUncheck" ? "onUncheck" : "onCheck";
+    const nextActions = getChecklistAutomationActions(database, key).filter((action) => action.propertyId !== propertyId);
+    database.checklistAutomation = normalizeChecklistAutomation({
+      ...(database.checklistAutomation || {}),
+      [key]: nextActions
+    }, database.properties || []);
+  }
+
+  function clearChecklistAutomationActions(database, trigger = "onCheck") {
+    const key = trigger === "onUncheck" ? "onUncheck" : "onCheck";
+    database.checklistAutomation = normalizeChecklistAutomation({
+      ...(database.checklistAutomation || {}),
+      [key]: []
     }, database.properties || []);
   }
 
@@ -3976,7 +4026,7 @@
   function promptChecklistAutomationValue(property, currentValue = "") {
     if (!property) return null;
     if (property.type === "date") {
-      return prompt(`Set ${property.name} to date (YYYY-MM-DD, "today", or blank to clear):`, currentValue === "__today__" ? "today" : currentValue || "");
+      return prompt(`Set ${property.name} to date (YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, "today", or blank to clear):`, currentValue === "__today__" ? "today" : currentValue || "");
     }
     if (property.type === "number") {
       return prompt(`Set ${property.name} to number (or blank to clear):`, currentValue || "");
@@ -4094,47 +4144,66 @@
       }, { active: !!normalizeChecklistToneColor(database.checklistProgressColor || "") });
 
       const openChecklistAutomationValueMenu = (buttonEl, trigger, property) => {
-        const currentRule = getChecklistAutomationRule(database, trigger);
+        const currentAction = getChecklistAutomationAction(database, trigger, property.id);
         const valueOptions = getChecklistAutomationValueOptions(property);
 
         openPropertySubmenu(buttonEl, property.name, (valueMenuEl) => {
           if (valueOptions.length) {
             valueOptions.forEach((option) => {
               appendMenuButton(valueMenuEl, option.label, () => {
-                setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: option.value });
+                setChecklistAutomationAction(database, trigger, { propertyId: property.id, value: option.value });
                 saveAndRerenderDatabaseSettings(context, database);
-              }, { active: currentRule.propertyId === property.id && currentRule.value === option.value });
+              }, { active: currentAction?.value === option.value });
             });
           } else {
-            appendMenuButton(valueMenuEl, currentRule.propertyId === property.id && currentRule.value ? "Edit value..." : "Set value...", () => {
-              const nextValue = promptChecklistAutomationValue(property, currentRule.propertyId === property.id ? currentRule.value : "");
+            appendMenuButton(valueMenuEl, currentAction?.value ? "Edit value..." : "Set value...", () => {
+              const nextValue = promptChecklistAutomationValue(property, currentAction?.value || "");
               if (nextValue === null) return;
-              setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: nextValue });
+              setChecklistAutomationAction(database, trigger, { propertyId: property.id, value: nextValue });
               saveAndRerenderDatabaseSettings(context, database);
             });
           }
 
           appendMenuDivider(valueMenuEl);
           appendMenuButton(valueMenuEl, "Clear value", () => {
-            setChecklistAutomationRule(database, trigger, { propertyId: property.id, value: "" });
+            setChecklistAutomationAction(database, trigger, { propertyId: property.id, value: "" });
             saveAndRerenderDatabaseSettings(context, database);
-          }, { active: currentRule.propertyId === property.id && !currentRule.value });
+          }, { active: !!currentAction && !currentAction.value });
+          if (currentAction) {
+            appendMenuButton(valueMenuEl, "Remove action", () => {
+              removeChecklistAutomationAction(database, trigger, property.id);
+              saveAndRerenderDatabaseSettings(context, database);
+            });
+          }
         });
       };
 
       const openChecklistAutomationMenu = (buttonEl, trigger, title) => {
         openPropertySubmenu(buttonEl, title, (automationMenuEl) => {
-          appendMenuButton(automationMenuEl, "Do nothing", () => {
-            setChecklistAutomationRule(database, trigger, {});
+          const actions = getChecklistAutomationActions(database, trigger);
+          appendMenuButton(automationMenuEl, "Clear all actions", () => {
+            clearChecklistAutomationActions(database, trigger);
             saveAndRerenderDatabaseSettings(context, database);
-          }, { active: !getChecklistAutomationRule(database, trigger).propertyId });
+          }, { active: !actions.length });
 
           const properties = getChecklistAutomationProperties(database.properties || []);
+          if (actions.length) {
+            appendMenuDivider(automationMenuEl);
+            appendMenuLabel(automationMenuEl, "Current actions");
+            actions.forEach((action) => {
+              const property = getPropertyById(database, action.propertyId || "");
+              if (!property) return;
+              appendMenuSubmenuButton(automationMenuEl, getChecklistAutomationActionLabel(database, action), (valueButtonEl) => {
+                openChecklistAutomationValueMenu(valueButtonEl, trigger, property);
+              }, { active: true });
+            });
+          }
           if (properties.length) appendMenuDivider(automationMenuEl);
+          appendMenuLabel(automationMenuEl, actions.length ? "Add or change action" : "Add action");
           properties.forEach((property) => {
             appendMenuSubmenuButton(automationMenuEl, `Set ${property.name}`, (valueButtonEl) => {
               openChecklistAutomationValueMenu(valueButtonEl, trigger, property);
-            }, { active: getChecklistAutomationRule(database, trigger).propertyId === property.id });
+            }, { active: !!getChecklistAutomationAction(database, trigger, property.id) });
           });
         });
       };
@@ -4142,10 +4211,10 @@
       appendMenuDivider(submenuEl);
       appendMenuSubmenuButton(submenuEl, `On check: ${getChecklistAutomationLabel(database, "onCheck")}`, (buttonEl) => {
         openChecklistAutomationMenu(buttonEl, "onCheck", "On check");
-      }, { active: !!getChecklistAutomationRule(database, "onCheck").propertyId });
+      }, { active: !!getChecklistAutomationActions(database, "onCheck").length });
       appendMenuSubmenuButton(submenuEl, `On uncheck: ${getChecklistAutomationLabel(database, "onUncheck")}`, (buttonEl) => {
         openChecklistAutomationMenu(buttonEl, "onUncheck", "On uncheck");
-      }, { active: !!getChecklistAutomationRule(database, "onUncheck").propertyId });
+      }, { active: !!getChecklistAutomationActions(database, "onUncheck").length });
     });
   }
 
@@ -5759,11 +5828,14 @@
 
   function applyChecklistAutomation(database, row, trigger = "onCheck") {
     if (!database || !row) return false;
-    const rule = getChecklistAutomationRule(database, trigger);
-    const property = getPropertyById(database, rule.propertyId || "");
-    if (!property) return false;
-    updateRowValue(database, row.id, property.id, resolveChecklistAutomationValue(property, rule.value));
-    return true;
+    let applied = false;
+    getChecklistAutomationActions(database, trigger).forEach((action) => {
+      const property = getPropertyById(database, action.propertyId || "");
+      if (!property) return;
+      updateRowValue(database, row.id, property.id, resolveChecklistAutomationValue(property, action.value));
+      applied = true;
+    });
+    return applied;
   }
 
   function buildChecklistProgressRingSVG(percent = 0) {
