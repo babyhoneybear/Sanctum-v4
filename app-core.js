@@ -230,6 +230,8 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
   // update peek drawer if open
   if (activePeekId === editingPageId) openPeek(editingPageId);
 
+  const shouldReopenCurrentPage = currentPageId === editingPageId;
+
     // update current page UI if we're currently on this page
   if (currentPageId === editingPageId) {
     const titleEl = document.getElementById("pageTitle");
@@ -244,6 +246,10 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
 
   saveCurrentPageBlocks();
   closePageDetails();
+
+  if (shouldReopenCurrentPage && typeof openPage === "function") {
+    openPage(currentPageId, { revealSidebarPath: false });
+  }
 });
 
 document.getElementById("pageDetailsCancel").addEventListener("click", closePageDetails);
@@ -593,11 +599,23 @@ function getPageSettings(pageId) {
 
 function savePageSettings(pageId, settings) {
   const all = readStorageJSON(PAGE_SETTINGS_KEY, {});
-  all[pageId] = normalizePageSettings(settings);
+  const previous = normalizePageSettings(all[pageId] || {});
+  const next = normalizePageSettings(settings);
+  all[pageId] = next;
   const saved = writeStorageJSON(PAGE_SETTINGS_KEY, all);
 
   if (saved && pageId) {
+    const shouldSyncLinkedCards = previous.showHeader !== next.showHeader
+      || previous.showTitle !== next.showTitle
+      || previous.showIcon !== next.showIcon
+      || previous.headerSrc !== next.headerSrc
+      || previous.headerSize !== next.headerSize
+      || previous.headerPos !== next.headerPos
+      || previous.fontPreset !== next.fontPreset;
+
+    if (shouldSyncLinkedCards) {
     updateLinkedCardImagesEverywhere(pageId);
+    }
   }
 
   return saved;
@@ -1685,6 +1703,61 @@ function findReferencesTo(pageId) {
     .sort((a, b) => b.count - a.count);
 }
 
+function htmlToPeekNotesText(html = "") {
+  const sourceHTML = String(html || "").trim();
+  if (!sourceHTML) return "";
+  const temp = document.createElement("div");
+  temp.innerHTML = sourceHTML
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "</$1>\n");
+  return String(temp.textContent || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function serializePeekNotesHTML(text = "") {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return "";
+  return `<p>${escapeHTML(normalized).replace(/\n/g, "<br>")}</p>`;
+}
+
+function readPeekPageNotes(pageId) {
+  if (typeof window.readAllDocuments !== "function") return "";
+  const documents = window.readAllDocuments() || {};
+  const doc = documents?.[pageId] || {};
+  const sections = Array.isArray(doc.sections) ? doc.sections : [];
+  return htmlToPeekNotesText(sections[0]?.content || "");
+}
+
+function savePeekPageNotes(pageId, text = "") {
+  if (typeof window.readAllDocuments !== "function" || typeof window.writeAllDocuments !== "function") return;
+  const documents = window.readAllDocuments() || {};
+  const existing = documents?.[pageId] && typeof documents[pageId] === "object" ? documents[pageId] : {};
+  const firstSection = existing.sections?.[0] && typeof existing.sections[0] === "object" ? existing.sections[0] : {};
+
+  const sections = [{
+    ...firstSection,
+    title: String(firstSection.title || "Notes").trim() || "Notes",
+    content: serializePeekNotesHTML(text)
+  }];
+
+  documents[pageId] = {
+    ...existing,
+    sections
+  };
+
+  window.writeAllDocuments(documents);
+}
+
+function syncPeekDrawerLayout(drawer) {
+  if (!drawer) return;
+  const topbarBottom = Math.max(0, Math.round(document.querySelector(".topbar")?.getBoundingClientRect?.().bottom || 0));
+  drawer.style.top = `${topbarBottom}px`;
+  drawer.style.height = `calc(100vh - ${topbarBottom}px)`;
+}
+
 function openPeek(pageId) {
   const allPages = {};
   userPages.forEach(p => allPages[p.id] = p);
@@ -1700,9 +1773,17 @@ function openPeek(pageId) {
     drawer.id = "peekDrawer";
     document.getElementById("main").appendChild(drawer);
   }
+  syncPeekDrawerLayout(drawer);
 
   const icon = page.icon || (page.type === "domain" ? "⌂" : "📄");
-  const summary = page.summary || "";
+  const rowPeekData = typeof window.getDatabaseRowPeekData === "function"
+    ? window.getDatabaseRowPeekData(pageId)
+    : null;
+  const displayTitle = rowPeekData?.title || page.title || "Untitled";
+  const displayType = rowPeekData?.typeLabel || page.category || page.layout || "page";
+  const displayIcon = rowPeekData ? (rowPeekData.icon || "📄") : icon;
+  const rowCoverSource = rowPeekData?.coverSource || "";
+  const summary = rowPeekData ? readPeekPageNotes(pageId) : (page.summary || "");
 
   const refs = findReferencesTo(pageId);
   const refsHTML = refs.length ? `
@@ -1718,27 +1799,81 @@ function openPeek(pageId) {
     </div>
   ` : "";
 
-  drawer.innerHTML = `
-    <div class="peek-header">
-      ${getIconMarkup(icon, page.type === "domain" ? "⌂" : "📄", "peek-icon")}
-      <div>
-        <div class="peek-title">${page.title}</div>
-        <div class="peek-type">${page.category || page.layout || "page"}</div>
+  const rowBodyHTML = rowPeekData
+    ? rowPeekData.missing
+      ? `<div class="peek-summary-placeholder">This row is no longer available.</div>`
+      : `
+        <div class="peek-row-properties">
+          <div class="peek-row-property-list">
+            ${rowPeekData.properties.length
+              ? rowPeekData.properties.map((property) => `
+                  <div class="peek-row-property">
+                    <div class="peek-row-property-meta">
+                      <span class="peek-row-property-icon" aria-hidden="true">${escapeHTML(property.icon || "")}</span>
+                      <span class="peek-row-property-label">${escapeHTML(property.label || "Property")}</span>
+                    </div>
+                    <div class="peek-row-property-value">${property.editorHTML || property.valueHTML}</div>
+                  </div>
+                `).join("")
+              : `<div class="peek-summary-placeholder">No properties yet.</div>`
+            }
+            <button type="button" id="peekAddPropertyBtn" class="peek-row-add-property"><span class="peek-row-add-property-icon" aria-hidden="true">+</span><span>Add property</span></button>
+          </div>
+        </div>
+        <div class="peek-row-section peek-row-notes">
+          <div class="peek-row-section-label">Notes</div>
+          <textarea id="peekRowNotesInput" class="peek-row-notes-input" placeholder="Start typing notes...">${escapeHTML(summary)}</textarea>
+        </div>
+      `
+    : "";
+
+  const rowCoverHTML = rowPeekData && !rowPeekData.missing
+    ? `
+      <div class="peek-cover${rowCoverSource ? " has-image" : " is-empty"}">
+        ${rowCoverSource ? `<img src="${escapeHTML(rowCoverSource)}" alt="" class="peek-cover-image" />` : '<div class="peek-cover-placeholder"></div>'}
+        <button type="button" id="peekRowCoverBtn" class="peek-cover-btn">${rowCoverSource ? "Change cover" : "Add cover"}</button>
       </div>
+    `
+    : "";
+
+  drawer.innerHTML = `
+    <div class="peek-scroll">
+      ${rowCoverHTML}
+      <div class="peek-header">
+        ${getIconMarkup(displayIcon, page.type === "domain" ? "⌂" : "📄", "peek-icon")}
+        <div>
+          <div class="peek-title">${escapeHTML(displayTitle)}</div>
+          <div class="peek-type">${escapeHTML(displayType)}</div>
+        </div>
+      </div>
+      <div class="peek-summary">
+        ${rowPeekData
+          ? rowBodyHTML
+          : (summary
+              ? `<div class="peek-summary-text">${escapeHTML(summary)}</div>`
+              : `<div class="peek-summary-placeholder">No summary yet.</div>`
+            )
+        }
+      </div>
+      ${refsHTML}
     </div>
-    <div class="peek-summary">
-      ${summary
-        ? `<div class="peek-summary-text">${summary}</div>`
-        : `<div class="peek-summary-placeholder">No summary yet.</div>`
-      }
-    </div>
-    ${refsHTML}
     <div class="peek-actions">
       <button class="peek-btn" id="peekOpenBtn">Open Page</button>
-      <button class="peek-btn" id="peekPinBtn">Pin</button>
+      ${rowPeekData ? "" : '<button class="peek-btn" id="peekPinBtn">Pin</button>'}
       <button class="peek-btn peek-btn-close" id="peekCloseBtn">Close</button>
     </div>
   `;
+
+  drawer.dataset.peekPageId = pageId;
+  if (rowPeekData?.sourceKind) {
+    drawer.dataset.peekDbKind = rowPeekData.sourceKind;
+    drawer.dataset.peekDbPageId = rowPeekData.sourcePageId || "";
+    drawer.dataset.peekDbBlockId = rowPeekData.sourceBlockId || "";
+  } else {
+    delete drawer.dataset.peekDbKind;
+    delete drawer.dataset.peekDbPageId;
+    delete drawer.dataset.peekDbBlockId;
+  }
 
   if (typeof openOverlay === "function") {
     openOverlay("peekDrawer", drawer);
@@ -1752,11 +1887,39 @@ function openPeek(pageId) {
     openPage(pageId);
   });
 
-  document.getElementById("peekPinBtn").addEventListener("click", () => {
+  document.getElementById("peekPinBtn")?.addEventListener("click", () => {
     pinReference(pageId);
   });
 
   document.getElementById("peekCloseBtn").addEventListener("click", closePeek);
+
+  const rowNotesInput = document.getElementById("peekRowNotesInput");
+  if (rowPeekData && rowNotesInput) {
+    rowNotesInput.addEventListener("input", () => {
+      window.clearTimeout(drawer._peekNotesSaveTimer);
+      drawer._peekNotesSaveTimer = window.setTimeout(() => {
+        savePeekPageNotes(pageId, rowNotesInput.value || "");
+      }, 120);
+    });
+  }
+
+  document.getElementById("peekAddPropertyBtn")?.addEventListener("click", (event) => {
+    if (rowNotesInput) {
+      savePeekPageNotes(pageId, rowNotesInput.value || "");
+    }
+    if (typeof window.openDatabaseRowPropertyComposer === "function") {
+      window.openDatabaseRowPropertyComposer(pageId, event.currentTarget);
+    }
+  });
+
+  document.getElementById("peekRowCoverBtn")?.addEventListener("click", (event) => {
+    if (rowNotesInput) {
+      savePeekPageNotes(pageId, rowNotesInput.value || "");
+    }
+    if (typeof window.openDatabaseRowCoverMenu === "function") {
+      window.openDatabaseRowCoverMenu(pageId, event.currentTarget);
+    }
+  });
 
   drawer.querySelectorAll(".peek-ref-item").forEach(item => {
     item.addEventListener("click", () => {
@@ -1785,6 +1948,11 @@ function pinReference(pageId) {
   closePeek();
   openPinPanel();
 }
+
+window.addEventListener("resize", () => {
+  const drawer = document.getElementById("peekDrawer");
+  if (drawer) syncPeekDrawerLayout(drawer);
+});
 
 // == Simple page switching ==
 const pageTitle = document.getElementById("pageTitle");
@@ -2121,6 +2289,13 @@ let selectedLinkCandidateId = "";
 let pageCreateHideCardIcon = false;
 let pageCreateLinkTargetType = "all";
 
+function normalizePageCreateLayout(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["board-canvas", "infinite-canvas", "document", "sheet"].includes(safe)
+    ? safe
+    : "board-canvas";
+}
+
 function isAllowedPageCreateLinkTarget(item) {
   if (!item) return false;
   if (pageCreateLinkTargetType === "domain") return item.type === "domain";
@@ -2419,7 +2594,7 @@ document.getElementById("pageCreateLayouts").addEventListener("click", (e) => {
 function openPageCreateModal(block, options = {}) {
   pendingPageBlock = block;
   pendingPageRestoreData = options.restoreData ? { ...options.restoreData } : null;
-  selectedLayout = options.initialLayout === "sheet" ? "sheet" : "board-canvas";
+  selectedLayout = normalizePageCreateLayout(options.initialLayout || "board-canvas");
   selectedCategory = typeof options.initialCategory === "string" ? options.initialCategory : "none";
   selectedContainerType = typeof options.initialContainerType === "string" ? options.initialContainerType : "page";
   pageCreateMode = options.mode === "link" ? "link" : "create";
@@ -2974,6 +3149,7 @@ function renderData() {
       pages: userPages,
       blocks: readStorageJSON(STORAGE_KEYS.pageBlocks, {}),
       pageSettings: readStorageJSON(STORAGE_KEYS.pageSettings, {}),
+      pageActivity: readStorageJSON(STORAGE_KEYS.pageActivity, {}),
       documents: readStorageJSON(STORAGE_KEYS.documents, {}),
       docSettings: readStorageJSON(STORAGE_KEYS.docSettings, {}),
       chronicles: readStorageJSON(STORAGE_KEYS.chronicles, []),
@@ -2987,11 +3163,13 @@ function renderData() {
       threads: readStorageJSON("sanctum_threads", {}),
       anchors: readStorageJSON("sanctum_anchors", {}),
       annotations: readStorageJSON("sanctum_annotations", {}),
-      notesVault: readStorageJSON("sanctum_notes_vault_v1", []),
-      noteShelves: readStorageJSON("sanctum_note_shelves_v1", []),
-      helperInbox: readStorageJSON("sanctum_helper_inbox_v1", []),
-      helperActionLog: readStorageJSON("sanctum_helper_action_log_v1", []),
-      helperChatLog: readStorageJSON("sanctum_helper_chat_log_v1", []),
+      notesVault: readStorageJSON(STORAGE_KEYS.notesVault, []),
+      noteShelves: readStorageJSON(STORAGE_KEYS.noteShelves, []),
+      helperInbox: readStorageJSON(STORAGE_KEYS.helperInbox, []),
+      helperActionLog: readStorageJSON(STORAGE_KEYS.helperActionLog, []),
+      helperChatLog: readStorageJSON(STORAGE_KEYS.helperChatLog, []),
+      helperUserProfile: readStorageJSON(STORAGE_KEYS.helperUserProfile, {}),
+      helperMemoryProfile: readStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(readStorageJSON(STORAGE_KEYS.helperUserProfile, {}).id || 'primary-user')}`, {}),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -3016,6 +3194,7 @@ function renderData() {
           if (data.pages) { writeStorageJSON(STORAGE_KEYS.pagesRegistry, data.pages); }
           if (data.blocks) { writeStorageJSON(STORAGE_KEYS.pageBlocks, data.blocks); }
           if (data.pageSettings) { writeStorageJSON(STORAGE_KEYS.pageSettings, data.pageSettings); }
+          if (data.pageActivity) { writeStorageJSON(STORAGE_KEYS.pageActivity, data.pageActivity); }
           if (data.documents) { writeStorageJSON(STORAGE_KEYS.documents, data.documents); }
           if (data.docSettings) { writeStorageJSON(STORAGE_KEYS.docSettings, data.docSettings); }
           if (data.chronicles) { writeStorageJSON(STORAGE_KEYS.chronicles, data.chronicles); }
@@ -3029,13 +3208,17 @@ function renderData() {
           if (data.threads) { writeStorageJSON("sanctum_threads", data.threads); }
           if (data.anchors) { writeStorageJSON("sanctum_anchors", data.anchors); }
           if (data.annotations) { writeStorageJSON("sanctum_annotations", data.annotations); }
-          if (data.notesVault) { writeStorageJSON("sanctum_notes_vault_v1", data.notesVault); }
-          if (data.noteShelves) { writeStorageJSON("sanctum_note_shelves_v1", data.noteShelves); }
-          if (data.helperInbox) { writeStorageJSON("sanctum_helper_inbox_v1", data.helperInbox); }
-          if (data.helperActionLog) { writeStorageJSON("sanctum_helper_action_log_v1", data.helperActionLog); }
-          if (data.helperChatLog) { writeStorageJSON("sanctum_helper_chat_log_v1", data.helperChatLog); }
-          alert("Import successful. Reloading...");
-          location.reload();
+          if (data.notesVault) { writeStorageJSON(STORAGE_KEYS.notesVault, data.notesVault); }
+          if (data.noteShelves) { writeStorageJSON(STORAGE_KEYS.noteShelves, data.noteShelves); }
+          if (data.helperInbox) { writeStorageJSON(STORAGE_KEYS.helperInbox, data.helperInbox); }
+          if (data.helperActionLog) { writeStorageJSON(STORAGE_KEYS.helperActionLog, data.helperActionLog); }
+          if (data.helperChatLog) { writeStorageJSON(STORAGE_KEYS.helperChatLog, data.helperChatLog); }
+          if (data.helperUserProfile) { writeStorageJSON(STORAGE_KEYS.helperUserProfile, data.helperUserProfile); }
+          const importedProfile = data.helperUserProfile || readStorageJSON(STORAGE_KEYS.helperUserProfile, {});
+          if (data.helperMemoryProfile) { writeStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(importedProfile.id || 'primary-user')}`, data.helperMemoryProfile); }
+          const flush = window.SanctumStorage && window.SanctumStorage.flush;
+          const doReload = () => { alert("Import successful. Reloading..."); location.reload(); };
+          flush ? flush().then(doReload).catch(doReload) : doReload();
         } catch {
           alert("Invalid backup file.");
         }
@@ -3207,9 +3390,14 @@ function getAllBlocks() {
   }
 
   // search notes
-  const notes = readStorageJSON("sanctum_notes_vault_v1", []);
+  const notes = readStorageJSON(STORAGE_KEYS.notesVault, []);
   for (const note of notes) {
-    const noteText = [note.title || "", note.body || ""].join(" ").trim();
+    const noteText = [
+      note.title || "",
+      note.bodyText || "",
+      typeof note.bodyHTML === "string" ? note.bodyHTML.replace(/<[^>]*>/g, " ") : "",
+      note.preview || ""
+    ].join(" ").trim();
     if (!noteText) continue;
     results.push({ pageId: null, pageTitle: "Notes", block: { type: "note" }, text: noteText, noteId: note.id });
   }

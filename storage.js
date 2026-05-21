@@ -1,7 +1,8 @@
 (function () {
   const DB_NAME = 'sanctum_vault';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const STORE_NAME = 'kv';
+  const BLOB_STORE_NAME = 'blobs';
   const MANAGED_PREFIX = 'sanctum';
   const MANAGED_EXACT = new Set(['sanctum_profile_name']);
 
@@ -34,10 +35,11 @@
       try {
         if (clearPending) {
           await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const tx = db.transaction([STORE_NAME, BLOB_STORE_NAME], 'readwrite');
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error || new Error('IndexedDB clear failed'));
             tx.objectStore(STORE_NAME).clear();
+            tx.objectStore(BLOB_STORE_NAME).clear();
           });
           clearPending = false;
           pendingWrites.clear();
@@ -131,6 +133,9 @@
         if (!nextDb.objectStoreNames.contains(STORE_NAME)) {
           nextDb.createObjectStore(STORE_NAME);
         }
+        if (!nextDb.objectStoreNames.contains(BLOB_STORE_NAME)) {
+          nextDb.createObjectStore(BLOB_STORE_NAME);
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error || new Error('IndexedDB unavailable'));
@@ -152,6 +157,71 @@
       };
       tx.onerror = () => reject(tx.error || new Error('IndexedDB read failed'));
     });
+  }
+
+  async function waitForDb() {
+    if (db) return db;
+    if (window.SanctumStorageReady) {
+      try {
+        await window.SanctumStorageReady;
+      } catch (err) {
+        console.warn('Sanctum storage wait failed', err);
+      }
+    }
+    return db;
+  }
+
+  async function putBlob(key, value) {
+    const currentDb = await waitForDb();
+    if (!currentDb || typeof key !== 'string' || !key) return false;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = currentDb.transaction(BLOB_STORE_NAME, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB blob write failed'));
+        tx.objectStore(BLOB_STORE_NAME).put(value, key);
+      });
+      return true;
+    } catch (err) {
+      console.warn(`Failed to persist blob for key "${key}"`, err);
+      return false;
+    }
+  }
+
+  async function getBlob(key) {
+    const currentDb = await waitForDb();
+    if (!currentDb || typeof key !== 'string' || !key) return null;
+
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = currentDb.transaction(BLOB_STORE_NAME, 'readonly');
+        const req = tx.objectStore(BLOB_STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result ?? null);
+        req.onerror = () => reject(req.error || new Error('IndexedDB blob read failed'));
+      });
+    } catch (err) {
+      console.warn(`Failed to read blob for key "${key}"`, err);
+      return null;
+    }
+  }
+
+  async function removeBlob(key) {
+    const currentDb = await waitForDb();
+    if (!currentDb || typeof key !== 'string' || !key) return false;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = currentDb.transaction(BLOB_STORE_NAME, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB blob delete failed'));
+        tx.objectStore(BLOB_STORE_NAME).delete(key);
+      });
+      return true;
+    } catch (err) {
+      console.warn(`Failed to delete blob for key "${key}"`, err);
+      return false;
+    }
   }
 
   async function primeCache() {
@@ -226,11 +296,53 @@
     return total;
   }
 
+  async function forceFlush() {
+    if (!db) return;
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    try {
+      if (clearPending) {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction([STORE_NAME, BLOB_STORE_NAME], 'readwrite');
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('IndexedDB clear failed'));
+          tx.objectStore(STORE_NAME).clear();
+          tx.objectStore(BLOB_STORE_NAME).clear();
+        });
+        clearPending = false;
+        pendingWrites.clear();
+        pendingDeletes.clear();
+        return;
+      }
+      if (!pendingWrites.size && !pendingDeletes.size) return;
+      const writes = Array.from(pendingWrites.entries());
+      const deletes = Array.from(pendingDeletes.values());
+      pendingWrites.clear();
+      pendingDeletes.clear();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
+        const store = tx.objectStore(STORE_NAME);
+        writes.forEach(([key, value]) => store.put(value, key));
+        deletes.forEach((key) => store.delete(key));
+      });
+    } catch (err) {
+      console.warn('Sanctum storage force flush failed', err);
+    }
+  }
+
   window.SanctumStorage = {
     get ready() { return ready; },
     readJSON,
     writeJSON,
+    putBlob,
+    getBlob,
+    removeBlob,
     getUsageBytes,
+    flush: forceFlush,
     getManagedKeys() { return Array.from(cache.keys()).sort(); },
     exportManagedRaw() {
       const out = {};

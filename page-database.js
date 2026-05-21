@@ -88,11 +88,28 @@
   const PROPERTY_COMPOSER_ID = "sanctum-database-property-composer";
   const PROPERTY_PANEL_ID = "sanctum-database-property-panel";
   const DB_CONTROL_WIDTH = 36;
+  const DATABASE_ROW_PAGE_CONTAINER = "database-row";
+  const FOLDER_FIELD_DEFINITIONS = Object.freeze([
+    { field: "filename", id: "name", name: "Filename", type: "title", icon: "Aa" },
+    { field: "folderPath", id: "folder_path", name: "Folder Path", type: "text", icon: "📁" },
+    { field: "itemType", id: "item_type", name: "Type", type: "text", icon: "≣" },
+    { field: "extension", id: "extension", name: "Extension", type: "text", icon: "." },
+    { field: "sizeBytes", id: "size_bytes", name: "Size", type: "number", icon: "#" },
+    { field: "modifiedAt", id: "modified_at", name: "Modified Date", type: "text", icon: "📅" }
+  ]);
+  const FOLDER_AUTO_FILL_OPTIONS = Object.freeze([
+    { value: "", label: "None", types: ["text", "select", "date"] },
+    { value: "last-folder-segment", label: "Last folder segment", types: ["text", "select"] },
+    { value: "first-seen-date", label: "First seen date", types: ["date", "text"] }
+  ]);
+  const FOLDER_RECONNECT_ERROR_CODES = new Set(["missing-folder-access", "permission-denied", "scan-failed", "unsupported-browser"]);
 
   let draggingCalendarItem = null;
   let draggingDatabaseProperty = null;
   let pendingDatabaseFocus = null;
   let activeColumnResize = null;
+  const pendingScheduledResets = new Set();
+  const activeFolderScans = new Set();
 
   function escapeHTML(text = "") {
     return String(text)
@@ -288,10 +305,554 @@
     }
   }
 
+  function getFolderFieldDefinition(field = "") {
+    const safeField = String(field || "").trim();
+    return FOLDER_FIELD_DEFINITIONS.find((entry) => entry.field === safeField) || null;
+  }
+
+  function getFolderAutoFillDefinition(value = "") {
+    const safeValue = String(value || "").trim().toLowerCase();
+    return FOLDER_AUTO_FILL_OPTIONS.find((entry) => entry.value === safeValue) || FOLDER_AUTO_FILL_OPTIONS[0];
+  }
+
+  function normalizeFolderAutoFill(value = "", propertyType = "text") {
+    const definition = getFolderAutoFillDefinition(value);
+    return definition.types.includes(normalizePropertyType(propertyType || "text", "text")) ? definition.value : "";
+  }
+
+  function getFolderAutoFillLabel(value = "", propertyType = "text") {
+    return getFolderAutoFillDefinition(normalizeFolderAutoFill(value, propertyType)).label;
+  }
+
+  function getSupportedFolderAutoFillOptions(propertyType = "text") {
+    const safeType = normalizePropertyType(propertyType || "text", "text");
+    return FOLDER_AUTO_FILL_OPTIONS.filter((entry) => entry.types.includes(safeType));
+  }
+
+  function normalizeFolderField(value = "") {
+    return getFolderFieldDefinition(value)?.field || "";
+  }
+
+  function isFolderSystemProperty(property = {}) {
+    return !!normalizeFolderField(property?.folderField || "");
+  }
+
+  function isFolderDatabase(database = {}) {
+    const folderState = safeParseObject(database?.folderState || database?.dbFolderState || {});
+    return folderState.enabled === true || !!String(folderState.handleKey || "").trim() || safeParseArray(folderState.scanRecords || []).length > 0;
+  }
+
+  function getFolderSourceKey(source = {}) {
+    const safeSource = source?.kind === "block"
+      ? { kind: "block", pageId: source.pageId || "", blockId: source.blockId || "" }
+      : { kind: "page", pageId: source?.pageId || "", blockId: "" };
+    return safeSource.pageId ? getDatabaseSourceKey(safeSource) : "";
+  }
+
+  function getFolderHandleStorageKey(source = {}) {
+    const sourceKey = getFolderSourceKey(source);
+    return sourceKey ? `sanctum_folder_handle_${sourceKey}` : "";
+  }
+
+  function isFolderScanBusy(source = {}) {
+    const sourceKey = getFolderSourceKey(source);
+    return !!sourceKey && activeFolderScans.has(sourceKey);
+  }
+
+  function getFolderActionConfig(database = {}, source = null) {
+    const enabled = isFolderDatabase(database);
+    const busy = source ? isFolderScanBusy(source) : false;
+    const lastErrorCode = String(database?.folderState?.lastErrorCode || "").trim();
+    const needsReconnect = enabled && FOLDER_RECONNECT_ERROR_CODES.has(lastErrorCode);
+    return {
+      action: enabled && !needsReconnect ? "refresh-folder" : "connect-folder",
+      label: busy ? "Scanning..." : enabled ? (needsReconnect ? "Reconnect Folder" : "Refresh Folder") : "Connect Folder",
+      active: enabled,
+      disabled: busy
+    };
+  }
+
+  function getFolderPathFromRelativePath(relativePath = "") {
+    const safePath = String(relativePath || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+    if (!safePath || !safePath.includes("/")) return "/";
+    const parent = safePath.split("/").slice(0, -1).join("/");
+    return parent || "/";
+  }
+
+  function getLastFolderSegment(folderPath = "") {
+    const safePath = String(folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+    if (!safePath) return "";
+    const segments = safePath.split("/").filter(Boolean);
+    return segments.length ? segments[segments.length - 1] : "";
+  }
+
+  function getFileExtension(name = "") {
+    const safeName = String(name || "").trim();
+    const dotIndex = safeName.lastIndexOf(".");
+    if (dotIndex <= 0 || dotIndex === safeName.length - 1) return "";
+    return safeName.slice(dotIndex).toLowerCase();
+  }
+
+  function normalizeFolderModifiedTimestamp(value = 0) {
+    const numeric = Number(value || 0);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+  }
+
+  function normalizeFolderModifiedAt(value = "", fallbackTimestamp = 0) {
+    const timestamp = normalizeFolderModifiedTimestamp(value || fallbackTimestamp);
+    if (timestamp) {
+      const parsedFromTimestamp = new Date(timestamp);
+      if (!Number.isNaN(parsedFromTimestamp.getTime())) return parsedFromTimestamp.toISOString();
+    }
+
+    const safeValue = String(value || "").trim();
+    if (!safeValue) return "";
+    const parsed = new Date(safeValue);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  }
+
+  function buildFolderFingerprint(record = {}) {
+    if ((record?.kind || "file") !== "file") return "";
+    const size = Math.max(0, Number(record?.size) || 0);
+    const modifiedTimestamp = normalizeFolderModifiedTimestamp(record?.modifiedTimestamp || 0);
+    const extension = String(record?.extension || "").trim().toLowerCase();
+    return `file:${size}:${modifiedTimestamp}:${extension}`;
+  }
+
+  function normalizeFolderScanRecord(raw = {}) {
+    const safeRaw = raw && typeof raw === "object" ? raw : {};
+    const kind = safeRaw.kind === "directory" ? "directory" : "file";
+    const relativePath = String(safeRaw.relativePath || safeRaw.path || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+    const name = String(safeRaw.name || (relativePath ? relativePath.split("/").pop() : "")).trim();
+    const extension = kind === "file"
+      ? String(safeRaw.extension || getFileExtension(name)).trim().toLowerCase()
+      : "";
+    const modifiedTimestamp = kind === "file"
+      ? normalizeFolderModifiedTimestamp(safeRaw.modifiedTimestamp || safeRaw.lastModified || 0)
+      : 0;
+    const modifiedAt = kind === "file"
+      ? normalizeFolderModifiedAt(safeRaw.modifiedAt || safeRaw.modified || "", modifiedTimestamp)
+      : "";
+    const size = kind === "file"
+      ? Math.max(0, Number(safeRaw.size) || 0)
+      : "";
+    const folderPath = String(safeRaw.folderPath || getFolderPathFromRelativePath(relativePath) || "/").replace(/\\/g, "/") || "/";
+    const itemType = String(safeRaw.itemType || safeRaw.mimeType || (kind === "directory" ? "Folder" : "File")).trim() || (kind === "directory" ? "Folder" : "File");
+    const stableKey = String(safeRaw.stableKey || `${kind}:${relativePath || name}`).trim();
+    const fingerprint = String(safeRaw.fingerprint || buildFolderFingerprint({ kind, size, modifiedTimestamp, extension })).trim();
+    return {
+      stableKey,
+      kind,
+      name,
+      relativePath,
+      folderPath,
+      itemType,
+      extension,
+      size,
+      modifiedAt,
+      modifiedTimestamp,
+      fingerprint
+    };
+  }
+
+  function normalizeFolderMetadataRecord(raw = {}, properties = [createNameProperty()]) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const nextValues = {};
+    const nextAutoValues = {};
+    const nextManualOverrides = {};
+    const customProperties = safeParseArray(properties || []).filter((property) => !isFolderSystemProperty(property));
+    const sourceValues = source.values && typeof source.values === "object" ? source.values : {};
+    const sourceAutoValues = source.autoValues && typeof source.autoValues === "object" ? source.autoValues : {};
+    const sourceManualOverrides = source.manualOverrides && typeof source.manualOverrides === "object" ? source.manualOverrides : {};
+
+    customProperties.forEach((property) => {
+      if (!Object.prototype.hasOwnProperty.call(sourceValues, property.id)) return;
+      const normalizedValue = normalizeCellValue(property, sourceValues[property.id]);
+      if (!normalizedValue) return;
+      nextValues[property.id] = normalizedValue;
+
+      if (Object.prototype.hasOwnProperty.call(sourceAutoValues, property.id)) {
+        const normalizedAutoValue = normalizeCellValue(property, sourceAutoValues[property.id]);
+        if (normalizedAutoValue) nextAutoValues[property.id] = normalizedAutoValue;
+      }
+
+      if (sourceManualOverrides[property.id] === true) {
+        nextManualOverrides[property.id] = true;
+      }
+    });
+
+    return {
+      stableKey: String(source.stableKey || "").trim(),
+      fingerprint: String(source.fingerprint || "").trim(),
+      values: nextValues,
+      autoValues: nextAutoValues,
+      manualOverrides: nextManualOverrides,
+      firstSeenAt: normalizeISODateTime(source.firstSeenAt || ""),
+      icon: typeof source.icon === "string" ? source.icon : "",
+      color: normalizeRowColor(source.color || ""),
+      cellColors: normalizeRowCellColors(source.cellColors || {}, properties),
+      checklistChecked: source?.checklistChecked === true || source?.checklistChecked === "true"
+    };
+  }
+
+  function deriveFolderAutoFillValue(property, record, metadata = {}) {
+    if (!property) return "";
+    const mode = normalizeFolderAutoFill(property.folderAutoFill || "", property.type);
+    if (!mode) return "";
+
+    if (mode === "last-folder-segment") {
+      return normalizeCellValue(property, getLastFolderSegment(record?.folderPath || ""));
+    }
+
+    if (mode === "first-seen-date") {
+      const firstSeenAt = String(metadata?.firstSeenAt || "").trim();
+      if (!firstSeenAt) return "";
+      const parsed = new Date(firstSeenAt);
+      if (Number.isNaN(parsed.getTime())) return normalizeCellValue(property, firstSeenAt);
+      const dayKey = toDayKey(parsed);
+      return property.type === "date"
+        ? normalizeCellValue(property, serializeDateCellValue({ start: dayKey }))
+        : normalizeCellValue(property, dayKey);
+    }
+
+    return "";
+  }
+
+  function applyFolderAutoFillToMetadata(record, metadata, properties = [createNameProperty()]) {
+    const safeMetadata = metadata && typeof metadata === "object" ? metadata : normalizeFolderMetadataRecord({}, properties);
+    safeMetadata.values = safeMetadata.values && typeof safeMetadata.values === "object" ? safeMetadata.values : {};
+    safeMetadata.autoValues = safeMetadata.autoValues && typeof safeMetadata.autoValues === "object" ? safeMetadata.autoValues : {};
+    safeMetadata.manualOverrides = safeMetadata.manualOverrides && typeof safeMetadata.manualOverrides === "object" ? safeMetadata.manualOverrides : {};
+
+    safeParseArray(properties || []).forEach((property) => {
+      if (!property || isFolderSystemProperty(property)) return;
+
+      const derivedValue = deriveFolderAutoFillValue(property, record, safeMetadata);
+      const previousAutoValue = String(safeMetadata.autoValues?.[property.id] || "").trim();
+      const currentValue = String(safeMetadata.values?.[property.id] || "").trim();
+      const hasManualOverride = safeMetadata.manualOverrides?.[property.id] === true;
+
+      if (derivedValue) {
+        safeMetadata.autoValues[property.id] = derivedValue;
+      } else {
+        delete safeMetadata.autoValues[property.id];
+      }
+
+      if (!normalizeFolderAutoFill(property.folderAutoFill || "", property.type)) {
+        delete safeMetadata.manualOverrides[property.id];
+        return;
+      }
+
+      if (!hasManualOverride || !currentValue || currentValue === previousAutoValue) {
+        if (derivedValue) safeMetadata.values[property.id] = derivedValue;
+        else if (!hasManualOverride && currentValue === previousAutoValue) delete safeMetadata.values[property.id];
+        delete safeMetadata.manualOverrides[property.id];
+      }
+    });
+
+    return safeMetadata;
+  }
+
+  function reconcileFolderUserMetadata(scanRecords = [], userMetadata = {}, properties = [createNameProperty()]) {
+    const safeMetadata = userMetadata && typeof userMetadata === "object" ? userMetadata : {};
+    const normalizedMetadata = {};
+
+    Object.entries(safeMetadata).forEach(([key, value]) => {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) return;
+      normalizedMetadata[normalizedKey] = normalizeFolderMetadataRecord({
+        ...(value && typeof value === "object" ? value : {}),
+        stableKey: value?.stableKey || normalizedKey
+      }, properties);
+    });
+
+    const fingerprintBuckets = new Map();
+    Object.entries(normalizedMetadata).forEach(([key, value]) => {
+      if (!value.fingerprint) return;
+      if (!fingerprintBuckets.has(value.fingerprint)) fingerprintBuckets.set(value.fingerprint, []);
+      fingerprintBuckets.get(value.fingerprint).push({ key, value });
+    });
+
+    const nextMetadata = {};
+    const usedKeys = new Set();
+
+    scanRecords.forEach((record) => {
+      if (!record?.stableKey) return;
+
+      let matchedKey = normalizedMetadata[record.stableKey] ? record.stableKey : "";
+      if (!matchedKey && record.fingerprint) {
+        const candidates = (fingerprintBuckets.get(record.fingerprint) || []).filter((entry) => !usedKeys.has(entry.key));
+        if (candidates.length === 1) matchedKey = candidates[0].key;
+      }
+
+      if (!matchedKey) return;
+
+      usedKeys.add(matchedKey);
+      nextMetadata[record.stableKey] = normalizeFolderMetadataRecord({
+        ...normalizedMetadata[matchedKey],
+        stableKey: record.stableKey,
+        fingerprint: record.fingerprint || normalizedMetadata[matchedKey].fingerprint || ""
+      }, properties);
+    });
+
+    let unmatchedCount = 0;
+    Object.entries(normalizedMetadata).forEach(([key, value]) => {
+      if (usedKeys.has(key)) return;
+      unmatchedCount += 1;
+      nextMetadata[key] = value;
+    });
+
+    return {
+      userMetadata: nextMetadata,
+      unmatchedCount
+    };
+  }
+
+  function normalizeFolderState(raw = {}, properties = [createNameProperty()]) {
+    const source = safeParseObject(raw || {});
+    const scanRecords = safeParseArray(source.scanRecords || []).map((entry) => normalizeFolderScanRecord(entry)).filter((entry) => entry.stableKey);
+    const rawMetadata = safeParseObject(source.userMetadata || source.metadata || {});
+    const reconciled = reconcileFolderUserMetadata(scanRecords, rawMetadata, properties);
+    const enabled = source.enabled === true || !!String(source.handleKey || "").trim() || scanRecords.length > 0;
+    return {
+      enabled,
+      handleKey: String(source.handleKey || "").trim(),
+      rootName: String(source.rootName || "").trim(),
+      lastConnectedAt: normalizeISODateTime(source.lastConnectedAt || ""),
+      lastScanAt: normalizeISODateTime(source.lastScanAt || ""),
+      lastErrorCode: String(source.lastErrorCode || "").trim(),
+      lastErrorMessage: String(source.lastErrorMessage || "").trim(),
+      lastUnmatchedCount: Number.isFinite(Number(source.lastUnmatchedCount))
+        ? Math.max(0, Number(source.lastUnmatchedCount) || 0)
+        : reconciled.unmatchedCount,
+      scanRecords,
+      userMetadata: reconciled.userMetadata
+    };
+  }
+
+  function serializeFolderState(folderState = {}, properties = [createNameProperty()]) {
+    const normalized = normalizeFolderState(folderState, properties);
+    const hasPersistentData = normalized.enabled
+      || !!normalized.handleKey
+      || !!normalized.lastErrorCode
+      || normalized.scanRecords.length > 0
+      || Object.keys(normalized.userMetadata || {}).length > 0;
+
+    if (!hasPersistentData) return null;
+
+    return {
+      enabled: normalized.enabled,
+      handleKey: normalized.handleKey,
+      rootName: normalized.rootName,
+      lastConnectedAt: normalized.lastConnectedAt,
+      lastScanAt: normalized.lastScanAt,
+      lastErrorCode: normalized.lastErrorCode,
+      lastErrorMessage: normalized.lastErrorMessage,
+      lastUnmatchedCount: normalized.lastUnmatchedCount,
+      scanRecords: normalized.scanRecords.map((record) => ({
+        stableKey: record.stableKey,
+        kind: record.kind,
+        name: record.name,
+        relativePath: record.relativePath,
+        folderPath: record.folderPath,
+        itemType: record.itemType,
+        extension: record.extension,
+        size: record.size,
+        modifiedAt: record.modifiedAt,
+        modifiedTimestamp: record.modifiedTimestamp,
+        fingerprint: record.fingerprint
+      })),
+      userMetadata: normalized.userMetadata
+    };
+  }
+
+  function ensureFolderDatabaseProperties(properties = []) {
+    const normalized = ensureTitleProperty(Array.isArray(properties) ? properties : []);
+    const systemProperties = FOLDER_FIELD_DEFINITIONS.map((definition, index) => {
+      const existing = normalized.find((property) => {
+        const propertyField = normalizeFolderField(property?.folderField || "");
+        return propertyField === definition.field || property?.id === definition.id;
+      }) || null;
+
+      const nextProperty = normalizeProperty({
+        ...(existing || {}),
+        id: definition.id,
+        name: definition.name,
+        type: existing?.type || definition.type,
+        icon: existing?.icon || definition.icon,
+        folderField: definition.field,
+        readOnly: true,
+        hidden: existing?.hidden === true
+      }, index);
+
+      nextProperty.id = definition.id;
+      nextProperty.name = definition.name;
+      nextProperty.type = normalizePropertyType(existing?.type || definition.type, definition.type);
+      nextProperty.folderField = definition.field;
+      nextProperty.readOnly = true;
+      nextProperty.hidden = existing?.hidden === true;
+      if (definition.icon) nextProperty.icon = definition.icon;
+      return nextProperty;
+    });
+
+    const customProperties = normalized.filter((property) => {
+      const propertyField = normalizeFolderField(property?.folderField || "");
+      return !systemProperties.some((systemProperty) => systemProperty.id === property.id || propertyField === systemProperty.folderField);
+    });
+
+    return ensureTitleProperty([...systemProperties, ...customProperties]);
+  }
+
+  function createFolderRowId(stableKey = "") {
+    return `folder_${encodeURIComponent(String(stableKey || "").trim())}`;
+  }
+
+  function getFolderRowKey(row = {}) {
+    return String(row?.folderKey || "").trim();
+  }
+
+  function buildFolderRowValues(record = {}) {
+    return {
+      name: String(record?.name || "").trim(),
+      folder_path: String(record?.folderPath || "/").trim() || "/",
+      item_type: String(record?.itemType || (record?.kind === "directory" ? "Folder" : "File")).trim() || (record?.kind === "directory" ? "Folder" : "File"),
+      extension: String(record?.extension || "").trim().toLowerCase(),
+      size_bytes: record?.size === "" || record?.size == null ? "" : String(Math.max(0, Number(record.size) || 0)),
+      modified_at: String(record?.modifiedAt || "").trim()
+    };
+  }
+
+  function buildFolderDatabaseRows(folderState = {}, properties = [createNameProperty()]) {
+    const normalizedState = normalizeFolderState(folderState, properties);
+    return normalizedState.scanRecords.map((record) => {
+      const metadata = applyFolderAutoFillToMetadata(
+        record,
+        normalizedState.userMetadata?.[record.stableKey] || normalizeFolderMetadataRecord({
+          stableKey: record.stableKey,
+          fingerprint: record.fingerprint || "",
+          firstSeenAt: normalizedState.lastScanAt || normalizedState.lastConnectedAt || ""
+        }, properties),
+        properties
+      );
+      normalizedState.userMetadata[record.stableKey] = metadata;
+      const row = normalizeRow({
+        id: createFolderRowId(record.stableKey),
+        pageId: "",
+        icon: metadata?.icon || "",
+        color: metadata?.color || "",
+        checklistChecked: !!metadata?.checklistChecked,
+        cellColors: metadata?.cellColors || {},
+        values: {
+          ...buildFolderRowValues(record),
+          ...(metadata?.values || {})
+        }
+      }, properties);
+      row.pageId = "";
+      row.folderKey = record.stableKey;
+      row.folderFingerprint = record.fingerprint || "";
+      row.folderKind = record.kind;
+      row.folderRelativePath = record.relativePath;
+      return row;
+    });
+  }
+
+  function getFolderMetadataEntry(database, rowOrKey) {
+    if (!isFolderDatabase(database)) return null;
+    const row = rowOrKey && typeof rowOrKey === "object" ? rowOrKey : null;
+    const stableKey = row ? getFolderRowKey(row) : String(rowOrKey || "").trim();
+    if (!stableKey) return null;
+
+    database.folderState = normalizeFolderState(database.folderState || {}, database.properties);
+    if (!database.folderState.userMetadata[stableKey]) {
+      database.folderState.userMetadata[stableKey] = normalizeFolderMetadataRecord({
+        stableKey,
+        fingerprint: row?.folderFingerprint || ""
+      }, database.properties);
+    }
+
+    return database.folderState.userMetadata[stableKey];
+  }
+
+  function isFolderReadonlyProperty(database, property) {
+    return isFolderDatabase(database) && isFolderSystemProperty(property);
+  }
+
+  function formatFolderSizeValue(value = "") {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric) || numeric < 0) return "—";
+    if (numeric === 0) return "0 B";
+
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = numeric;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+
+    const digits = unitIndex === 0 ? 0 : size >= 100 ? 0 : size >= 10 ? 1 : 2;
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(size)} ${units[unitIndex]}`;
+  }
+
+  function formatFolderModifiedLabel(value = "") {
+    const safeValue = String(value || "").trim();
+    if (!safeValue) return "—";
+    const parsed = new Date(safeValue);
+    if (Number.isNaN(parsed.getTime())) return safeValue;
+    return parsed.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function formatFolderLastScanLabel(value = "") {
+    const safeValue = String(value || "").trim();
+    if (!safeValue) return "";
+    const parsed = new Date(safeValue);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function getFolderStatusText(database = {}) {
+    if (!isFolderDatabase(database)) return "";
+    const folderState = normalizeFolderState(database.folderState || {}, database.properties || []);
+    if (folderState.lastErrorMessage) return folderState.lastErrorMessage;
+    const itemCount = folderState.scanRecords.length;
+    const rootName = folderState.rootName ? `Connected folder: ${folderState.rootName}. ` : "Folder connected. ";
+    const lastScanLabel = formatFolderLastScanLabel(folderState.lastScanAt || "");
+    const lastScanText = lastScanLabel ? ` Last refreshed ${lastScanLabel}.` : "";
+    const unmatchedCount = Math.max(0, Number(folderState.lastUnmatchedCount) || 0);
+    const unmatchedText = unmatchedCount
+      ? ` ${unmatchedCount} saved metadata entr${unmatchedCount === 1 ? "y" : "ies"} could not be matched and may belong to renamed or deleted files.`
+      : "";
+    return `${rootName}${itemCount} item${itemCount === 1 ? "" : "s"} synced.${lastScanText}${unmatchedText}`.trim();
+  }
+
+  function serializeDatabaseForStorage(database = {}) {
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const nextValue = { ...normalized };
+    const folderState = serializeFolderState(normalized.folderState || {}, normalized.properties || []);
+    if (folderState) {
+      nextValue.folderState = folderState;
+      nextValue.rows = [];
+    } else {
+      delete nextValue.folderState;
+    }
+    return nextValue;
+  }
+
   function normalizeEmbedView(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
-    if (safe === "gallery" || safe === "board" || safe === "table") return safe;
-    if (fallback === "gallery" || fallback === "board") return fallback;
+      if (safe === "calendar" || safe === "gallery" || safe === "board" || safe === "checklist" || safe === "table") return safe;
+      if (fallback === "calendar" || fallback === "gallery" || fallback === "board" || fallback === "checklist") return fallback;
     return "table";
   }
 
@@ -344,8 +905,10 @@
   }
 
   function getInlineDatabaseViewData(database) {
+    if (database.view === "calendar") return buildCalendarViewHTML(database, { readOnly: true });
     if (database.view === "board") return buildBoardViewHTML(database, { readOnly: true });
     if (database.view === "gallery") return buildGalleryViewHTML(database, { readOnly: true });
+    if (database.view === "checklist") return buildChecklistViewHTML(database, { readOnly: true });
     return buildTableViewHTML(database, { readOnly: true });
   }
 
@@ -386,7 +949,9 @@
 
   function getInlineViewLabel(view = "table") {
     const normalized = normalizeEmbedView(view, "table");
+    if (normalized === "calendar") return "Calendar";
     if (normalized === "gallery") return "Gallery";
+    if (normalized === "checklist") return "Checklist";
     return normalized === "board" ? "Board" : "Table";
   }
 
@@ -396,8 +961,8 @@
 
   function normalizeViewMode(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
-    if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board") return safe;
-    if (fallback === "calendar" || fallback === "gallery" || fallback === "board") return fallback;
+    if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board" || safe === "checklist") return safe;
+    if (fallback === "calendar" || fallback === "gallery" || fallback === "board" || fallback === "checklist") return fallback;
     return "table";
   }
 
@@ -828,7 +1393,10 @@
       icon: typeof raw.icon === "string" ? raw.icon : "",
       showIcon: raw.showIcon !== false,
       hidden: raw.hidden === true,
-      headerColor: normalizePropertyHeaderColor(raw.headerColor || "")
+      headerColor: normalizePropertyHeaderColor(raw.headerColor || ""),
+      readOnly: raw.readOnly === true,
+      folderField: normalizeFolderField(raw.folderField || ""),
+      folderAutoFill: normalizeFolderAutoFill(raw.folderAutoFill || "", type)
     };
     if (type === "status") property.statusGroups = normalizeStatusGroups(raw.statusGroups || []);
     if (type === "tag") property.tagOptions = normalizeTagOptions(raw.tagOptions || []);
@@ -916,11 +1484,19 @@
   function normalizeRow(raw = {}, properties = [createNameProperty()]) {
     const row = {
       id: typeof raw.id === "string" && raw.id ? raw.id : createId("row"),
+      pageId: typeof raw.pageId === "string" ? raw.pageId : "",
+      archived: !!raw.archived,
+      archivedAt: normalizeISODateTime(raw.archivedAt || ""),
+      checklistChecked: raw?.checklistChecked === true || raw?.checklistChecked === "true" || raw?.checked === true || raw?.checked === "true",
       icon: typeof raw.icon === "string" ? raw.icon : "",
       color: normalizeRowColor(raw.color || raw.rowColor || ""),
       cellColors: normalizeRowCellColors(raw.cellColors || {}, properties),
       values: {}
     };
+
+    if (!row.archived) {
+      row.archivedAt = "";
+    }
 
     const sourceValues = raw.values && typeof raw.values === "object" ? raw.values : {};
 
@@ -987,6 +1563,31 @@
     return ["compact", "list", "default"].includes(safe) ? safe : "default";
   }
 
+  function normalizeGalleryCardSize(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return ["small", "medium", "large"].includes(safe) ? safe : "medium";
+  }
+
+  function normalizeGalleryCardFieldCount(value = 0) {
+    const safeCount = Math.round(Number(value));
+    return Number.isFinite(safeCount) ? Math.max(0, Math.min(3, safeCount)) : 0;
+  }
+
+  function normalizeChecklistProgressStyle(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return safe === "ring" ? "ring" : "bar";
+  }
+
+  function normalizeChecklistDensity(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return safe === "compact" ? "compact" : "default";
+  }
+
+  function normalizeChecklistToneColor(value = "") {
+    const safe = normalizeRowColor(value);
+    return safe || "";
+  }
+
   function getDefaultPropertyWidth(property) {
     if (!property) return 180;
     if (property.type === "title") return 340;
@@ -1003,13 +1604,90 @@
     return 180;
   }
 
+  function getResponsivePropertyMinWidth(property) {
+    if (!property) return 104;
+    if (property.type === "title") return 190;
+    if (property.type === "notes") return 156;
+    if (property.type === "checkbox") return 48;
+    if (property.type === "number") return 96;
+    if (property.type === "date") return 122;
+    if (property.type === "status" || property.type === "select" || property.type === "tag") return 116;
+    if (property.type === "relation" || property.type === "summary" || property.type === "formula") return 128;
+    return 108;
+  }
+
+  function getManualPropertyMinWidth(property) {
+    if (!property) return 108;
+    if (property.type === "title") return 190;
+    if (property.type === "notes") return 156;
+    if (property.type === "checkbox") return 48;
+    if (property.type === "number") return 96;
+    if (property.type === "date") return 122;
+    if (property.type === "status" || property.type === "select" || property.type === "tag") return 116;
+    if (property.type === "relation" || property.type === "summary" || property.type === "formula") return 128;
+    return 108;
+  }
+
+  function getCompactPropertyHeaderThreshold(property) {
+    if (!property) return 0;
+    return property.type === "checkbox" ? 64 : 0;
+  }
+
+  function getPageEditorColumnWidths(database, options = {}) {
+    const properties = getVisibleTableProperties(database);
+    return options.fitWidth
+      ? fitPageEditorColumnWidths(database, properties, options.availableWidth || 0)
+      : properties.map((property) => database.columnWidths?.[property.id] || getDefaultPropertyWidth(property));
+  }
+
+  function fitPageEditorColumnWidths(database, properties = [], availableWidth = 0) {
+    const safeProperties = Array.isArray(properties) ? properties : [];
+    const safeAvailableWidth = Math.max(0, Math.floor(Number(availableWidth) || 0));
+    const widths = safeProperties.map((property) => database.columnWidths?.[property.id] || getDefaultPropertyWidth(property));
+    if (!safeAvailableWidth || !widths.length) return widths;
+
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+    if (totalWidth <= safeAvailableWidth) return widths;
+
+    const minimumWidths = safeProperties.map((property) => getResponsivePropertyMinWidth(property));
+    const capacities = widths.map((width, index) => Math.max(0, width - minimumWidths[index]));
+    const totalCapacity = capacities.reduce((sum, width) => sum + width, 0);
+    if (totalCapacity <= 0) return widths;
+
+    const deficit = totalWidth - safeAvailableWidth;
+    const ratio = Math.min(1, deficit / totalCapacity);
+    const nextWidths = widths.map((width, index) => {
+      const reducedWidth = Math.round(width - (capacities[index] * ratio));
+      return Math.max(minimumWidths[index], reducedWidth);
+    });
+
+    let overflow = nextWidths.reduce((sum, width) => sum + width, 0) - safeAvailableWidth;
+    while (overflow > 0) {
+      let widestIndex = -1;
+      let widestSlack = 0;
+      nextWidths.forEach((width, index) => {
+        const slack = width - minimumWidths[index];
+        if (slack > widestSlack) {
+          widestSlack = slack;
+          widestIndex = index;
+        }
+      });
+      if (widestIndex === -1) break;
+      nextWidths[widestIndex] -= 1;
+      overflow -= 1;
+    }
+
+    return nextWidths;
+  }
+
   function normalizeColumnWidths(rawValue = {}, properties = []) {
     const parsed = safeParseObject(rawValue);
-    const propertyIds = new Set((properties || []).map((property) => property.id));
+    const propertyMap = new Map((properties || []).map((property) => [property.id, property]));
     return Object.entries(parsed).reduce((next, [propertyId, width]) => {
       const safeWidth = Math.round(Number(width));
-      if (propertyIds.has(propertyId) && Number.isFinite(safeWidth)) {
-        next[propertyId] = Math.max(120, Math.min(640, safeWidth));
+      const property = propertyMap.get(propertyId);
+      if (property && Number.isFinite(safeWidth)) {
+        next[propertyId] = Math.max(getManualPropertyMinWidth(property), Math.min(640, safeWidth));
       }
       return next;
     }, {});
@@ -1024,16 +1702,66 @@
     return properties;
   }
 
+  function normalizeISODateTime(value = "") {
+    const timestamp = Date.parse(String(value || "").trim());
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+  }
+
+  function normalizeResetFrequency(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return ["daily", "weekly", "monthly", "custom"].includes(safe) ? safe : "none";
+  }
+
+  function normalizeResetMode(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return safe === "delete-all" ? "delete-all" : "clear-fields";
+  }
+
+  function normalizeResetCustomDays(value = 1) {
+    const next = Math.round(Number(value));
+    if (!Number.isFinite(next)) return 1;
+    return Math.max(1, Math.min(365, next));
+  }
+
+  function normalizeResetFieldsToClear(value = [], properties = []) {
+    const propertyIds = new Set(safeParseArray(properties).map((property) => property?.id).filter(Boolean));
+    return safeParseArray(value)
+      .map((entry) => String(entry || "").trim())
+      .filter((entry, index, array) => entry && array.indexOf(entry) === index)
+      .filter((entry) => propertyIds.has(entry) && entry !== "name");
+  }
+
+  function normalizeResetConfig(rawValue = {}, properties = []) {
+    const raw = safeParseObject(rawValue);
+    const frequency = normalizeResetFrequency(raw.frequency || "none");
+    return {
+      enabled: !!raw.enabled && frequency !== "none",
+      frequency,
+      customDays: normalizeResetCustomDays(raw.customDays),
+      mode: normalizeResetMode(raw.mode),
+      fieldsToClear: normalizeResetFieldsToClear(raw.fieldsToClear || [], properties),
+      lastResetAt: normalizeISODateTime(raw.lastResetAt || ""),
+      updatedAt: normalizeISODateTime(raw.updatedAt || "")
+    };
+  }
+
   function normalizeDatabase(raw = {}, options = {}) {
     const defaultView = options.defaultView || "table";
     let properties = safeParseArray(raw.properties || raw.dbProperties || "[]");
     let rows = safeParseArray(raw.rows || raw.dbRows || "[]");
     const legacyItems = safeParseArray(raw.items || raw.calendarItems || "[]");
+    let folderState = normalizeFolderState(raw.folderState || raw.dbFolderState || {}, properties);
+
+    if (folderState.enabled) {
+      properties = ensureFolderDatabaseProperties(properties);
+      folderState = normalizeFolderState(raw.folderState || raw.dbFolderState || folderState, properties);
+      rows = buildFolderDatabaseRows(folderState, properties);
+    }
 
     if (!properties.length) properties = [createNameProperty()];
     properties = ensureTitleProperty(properties);
 
-    if (!rows.length && legacyItems.length) {
+    if (!folderState.enabled && !rows.length && legacyItems.length) {
       if (!safeParseArray(raw.properties || raw.dbProperties || "[]").length) {
         properties = ensureTitleProperty(buildLegacyProperties(legacyItems));
       }
@@ -1056,10 +1784,19 @@
       title: normalizeDatabaseTitle(raw.title || raw.calendarTitle || ""),
       view: normalizeViewMode(raw.view || raw.calendarView || "", defaultView),
       month: normalizeMonthKey(raw.month || raw.calendarMonth || "", new Date()),
+      showHistory: !!raw.showHistory,
+      checklistProgressStyle: normalizeChecklistProgressStyle(raw.checklistProgressStyle || "bar"),
+      checklistDensity: normalizeChecklistDensity(raw.checklistDensity || "default"),
+      checklistRowBgColor: normalizeChecklistToneColor(raw.checklistRowBgColor || ""),
+      checklistCheckboxColor: normalizeChecklistToneColor(raw.checklistCheckboxColor || ""),
+      checklistTextColor: normalizeChecklistToneColor(raw.checklistTextColor || ""),
+      checklistProgressColor: normalizeChecklistToneColor(raw.checklistProgressColor || ""),
       showPageIcon: !!raw.showPageIcon,
       boardCardPreview: normalizeBoardCardPreview(raw.boardCardPreview || "none"),
       boardCardSize: normalizeBoardCardSize(raw.boardCardSize || "large"),
       boardCardLayout: normalizeBoardCardLayout(raw.boardCardLayout || "default"),
+      galleryCardSize: normalizeGalleryCardSize(raw.galleryCardSize || "medium"),
+      galleryCardFields: normalizeGalleryCardFieldCount(raw.galleryCardFields),
       filters: normalizeFilters(raw.filters || []),
       sorts: normalizeSorts(raw.sorts || []),
       groupBy: typeof raw.groupBy === "string" ? raw.groupBy : "",
@@ -1067,6 +1804,8 @@
       unwrappedPropertyIds: normalizeIdList(raw.unwrappedPropertyIds || []),
       calculations: normalizeCalculations(raw.calculations || {}),
       columnWidths: normalizeColumnWidths(raw.columnWidths || {}, properties),
+      resetConfig: normalizeResetConfig(raw.resetConfig || raw.dbResetConfig || {}, properties),
+      folderState,
       properties,
       rows
     };
@@ -1115,7 +1854,7 @@
       title: page?.title || "Database"
     }, { defaultView: "table" });
 
-    all[pageId] = normalized;
+    all[pageId] = serializeDatabaseForStorage(normalized);
     writePageDatabases(all);
     return normalized;
   }
@@ -1123,10 +1862,11 @@
   function savePageDatabase(pageId, database) {
     const page = getCurrentPageRecord(pageId);
     const all = readPageDatabases();
-    all[pageId] = normalizeDatabase({
+    const normalized = normalizeDatabase({
       ...(database || {}),
       title: page?.title || database?.title || "Database"
     }, { defaultView: "table" });
+    all[pageId] = serializeDatabaseForStorage(normalized);
     writePageDatabases(all);
   }
 
@@ -1168,6 +1908,8 @@
       properties: block?.dataset?.dbProperties || "[]",
       rows: block?.dataset?.dbRows || "[]",
       columnWidths: block?.dataset?.dbColumnWidths || "{}",
+      folderState: block?.dataset?.dbFolderState || "{}",
+      resetConfig: block?.dataset?.dbResetConfig || "{}",
       items: block?.dataset?.calendarItems || "[]"
     }, { defaultView: "table" });
   }
@@ -1175,14 +1917,19 @@
   function saveBlockDatabase(block, database) {
     if (!block) return;
     const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const stored = serializeDatabaseForStorage(normalized);
     block.dataset.calendarTitle = normalized.title;
     block.dataset.calendarView = normalizeEmbedView(normalized.view, "table");
+    block.dataset.dbResetConfig = JSON.stringify(normalized.resetConfig || {});
     if (!isSourceBoundDatabaseRecord(block)) {
       block.dataset.calendarMonth = normalized.month;
-      block.dataset.dbProperties = JSON.stringify(normalized.properties);
-      block.dataset.dbRows = JSON.stringify(normalized.rows);
-      block.dataset.dbColumnWidths = JSON.stringify(normalized.columnWidths || {});
+      block.dataset.dbProperties = JSON.stringify(stored.properties || []);
+      block.dataset.dbRows = JSON.stringify(stored.rows || []);
+      block.dataset.dbColumnWidths = JSON.stringify(stored.columnWidths || {});
+      block.dataset.dbFolderState = JSON.stringify(stored.folderState || {});
       block.dataset.calendarItems = JSON.stringify(serializeLegacyItems(normalized));
+    } else {
+      delete block.dataset.dbFolderState;
     }
     if (typeof saveState === "function") saveState();
   }
@@ -1197,6 +1944,23 @@
     return target?.kind === "block"
       ? `block:${target.pageId || ""}:${target.blockId || ""}`
       : `page:${target?.pageId || ""}`;
+  }
+
+  function emitDatabaseSourceUpdated(source = {}) {
+    if (typeof window.dispatchEvent !== "function" || typeof window.CustomEvent !== "function") return;
+    const normalized = {
+      kind: source?.kind === "block" ? "block" : "page",
+      pageId: String(source?.pageId || "").trim(),
+      blockId: source?.kind === "block" ? String(source?.blockId || "").trim() : ""
+    };
+    if (!normalized.pageId) return;
+
+    window.dispatchEvent(new window.CustomEvent("sanctum:database-updated", {
+      detail: {
+        sourceKey: getDatabaseSourceKey(normalized),
+        source: normalized
+      }
+    }));
   }
 
   function getStoredBlockDatabase(blockData = {}) {
@@ -1218,6 +1982,8 @@
       month: blockData?.calendarMonth || getMonthKey(),
       properties: blockData?.dbProperties || "[]",
       rows: blockData?.dbRows || "[]",
+      folderState: blockData?.dbFolderState || "{}",
+      resetConfig: blockData?.dbResetConfig || "{}",
       items: blockData?.calendarItems || "[]"
     }, { defaultView: "table" });
   }
@@ -1293,16 +2059,63 @@
         month: blockData?.calendarMonth || getMonthKey(),
         properties: blockData?.dbProperties || "[]",
         rows: blockData?.dbRows || "[]",
+        folderState: blockData?.dbFolderState || "{}",
+        resetConfig: blockData?.dbResetConfig || "{}",
         items: blockData?.calendarItems || "[]"
       }, { defaultView: "table" });
     }
     return blockData ? getStoredBlockDatabase(blockData) : null;
   }
 
+  function getDatabaseCalloutSources() {
+    return getDatabaseTableSources().map((source) => ({
+      kind: source.kind === "block" ? "block" : "page",
+      pageId: source.pageId || "",
+      blockId: source.kind === "block" ? source.blockId || "" : "",
+      label: String(source.label || source.title || "Database").trim() || "Database",
+      title: String(source.title || source.label || "Database").trim() || "Database"
+    }));
+  }
+
+  function getDatabaseCalloutSourceData(sourceInput = {}) {
+    const source = {
+      kind: sourceInput?.kind === "block" ? "block" : "page",
+      pageId: String(sourceInput?.pageId || "").trim(),
+      blockId: sourceInput?.kind === "block" ? String(sourceInput?.blockId || "").trim() : ""
+    };
+    if (!source.pageId) return null;
+
+    const database = getDatabaseFromSource(source);
+    if (!database) return null;
+
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    return {
+      source,
+      database: {
+        title: String(normalized.title || "Database").trim() || "Database",
+        properties: safeParseArray(normalized.properties || []).map((property) => ({
+          id: property.id,
+          name: String(property.name || "").trim() || "Property",
+          type: normalizePropertyType(property.type || "text", "text")
+        })),
+        rows: safeParseArray(normalized.rows || []).map((row) => ({
+          id: row.id,
+          title: getRowTitle(normalized, row),
+          values: { ...(row?.values || {}) }
+        }))
+      }
+    };
+  }
+
   function saveDatabaseToSource(source, database) {
     if (!source || !database) return false;
     if (source.kind === "page") {
       savePageDatabase(source.pageId || "", database);
+      emitDatabaseSourceUpdated({
+        kind: "page",
+        pageId: source.pageId || "",
+        blockId: ""
+      });
       return true;
     }
 
@@ -1316,20 +2129,28 @@
     if (blockIndex === -1) return false;
 
     const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const stored = serializeDatabaseForStorage(normalized);
     const nextBlock = {
       ...blocks[blockIndex],
       calendarTitle: normalized.title,
       calendarView: normalized.view,
       calendarMonth: normalized.month,
       calendarItems: JSON.stringify(serializeLegacyItems(normalized)),
-      dbProperties: JSON.stringify(normalized.properties),
-      dbRows: JSON.stringify(normalized.rows),
-      dbColumnWidths: JSON.stringify(normalized.columnWidths || {})
+      dbProperties: JSON.stringify(stored.properties || []),
+      dbRows: JSON.stringify(stored.rows || []),
+      dbColumnWidths: JSON.stringify(stored.columnWidths || {}),
+      dbFolderState: JSON.stringify(stored.folderState || {}),
+      dbResetConfig: JSON.stringify(normalized.resetConfig || {})
     };
 
     blocks[blockIndex] = nextBlock;
     allBlocks[source.pageId] = blocks;
     window.writeAllPageBlocks(allBlocks);
+    emitDatabaseSourceUpdated({
+      kind: "block",
+      pageId: source.pageId || "",
+      blockId: source.blockId || ""
+    });
     return true;
   }
 
@@ -1364,6 +2185,528 @@
       blockId: context.blockId || "",
       label: `${getPageTitleText(hostPageId, "Page")} / ${blockDatabase.title || "Database view"}`
     };
+  }
+
+  function getResetDueTimestamp(config) {
+    const normalized = normalizeResetConfig(config || {});
+    const anchorValue = normalized.lastResetAt || normalized.updatedAt || "";
+    const anchorMs = Date.parse(anchorValue);
+    if (!normalized.enabled || !Number.isFinite(anchorMs)) return null;
+
+    const intervalCount = normalizeResetCustomDays(normalized.customDays);
+
+    if (normalized.frequency === "monthly") {
+      const next = new Date(anchorMs);
+      next.setMonth(next.getMonth() + intervalCount);
+      return next.getTime();
+    }
+
+    const dayCount = normalized.frequency === "daily"
+      ? intervalCount
+      : normalized.frequency === "weekly"
+        ? intervalCount * 7
+        : normalized.frequency === "custom"
+          ? intervalCount
+          : 0;
+
+    if (!dayCount) return null;
+    return anchorMs + (dayCount * 24 * 60 * 60 * 1000);
+  }
+
+  function isDatabaseResetDue(database, nowMs = Date.now()) {
+    const config = normalizeResetConfig(database?.resetConfig || {}, database?.properties || []);
+    const dueAt = getResetDueTimestamp(config);
+    return Number.isFinite(dueAt) && nowMs >= dueAt;
+  }
+
+  function applyScheduledReset(database, source) {
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const config = normalizeResetConfig(normalized.resetConfig || {}, normalized.properties);
+    if (!config.enabled) return normalized;
+
+    const nowIso = new Date().toISOString();
+    const allRows = safeParseArray(normalized.rows || []);
+    const archivedRows = allRows.filter((row) => !!row?.archived);
+    const activeRows = allRows.filter((row) => !row?.archived);
+    const archivedSnapshots = activeRows.map((row) => normalizeRow({
+      ...row,
+      id: createId("row"),
+      pageId: "",
+      archived: true,
+      archivedAt: nowIso,
+      values: { ...(row?.values || {}) }
+    }, normalized.properties));
+
+    if (config.mode === "delete-all") {
+      activeRows.forEach((row) => {
+        syncRowBacklinksOnDelete(source, normalized, row);
+        removeDatabaseRowPageRecord(row);
+      });
+      normalized.rows = [...archivedRows, ...archivedSnapshots];
+    } else {
+      const selectedFields = normalizeResetFieldsToClear(config.fieldsToClear || [], normalized.properties);
+      if (selectedFields.length) {
+        const propertyMap = new Map(normalized.properties.map((property) => [property.id, property]));
+        activeRows.forEach((row) => {
+          selectedFields.forEach((propertyId) => {
+            const property = propertyMap.get(propertyId);
+            if (!property || property.type === "title") return;
+            const previousValue = getRowValue(row, propertyId);
+            if (property.type === "relation") {
+              syncRelationBacklinks(source, normalized, row.id, property, previousValue, "");
+            }
+            row.values[propertyId] = normalizeCellValue(property, "");
+          });
+        });
+      }
+      normalized.rows = [...activeRows, ...archivedRows, ...archivedSnapshots];
+    }
+
+    normalized.resetConfig = normalizeResetConfig({
+      ...config,
+      enabled: true,
+      lastResetAt: nowIso,
+      updatedAt: nowIso,
+      fieldsToClear: normalizeResetFieldsToClear(config.fieldsToClear || [], normalized.properties)
+    }, normalized.properties);
+
+    return normalized;
+  }
+
+  function runScheduledDatabaseReset(context, database, options = {}) {
+    const source = options.source || getContextDatabaseSource(context);
+    if (!source || !database) return Promise.resolve(false);
+
+    const sourceKey = getDatabaseSourceKey(source);
+    if (pendingScheduledResets.has(sourceKey)) return Promise.resolve(false);
+    if (!isDatabaseResetDue(database)) return Promise.resolve(false);
+
+    pendingScheduledResets.add(sourceKey);
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+
+    try {
+      const nextDatabase = applyScheduledReset(normalized, source);
+      if (context) saveDatabaseForContext(context, nextDatabase);
+      else saveDatabaseToSource(source, nextDatabase);
+      if (context) rerenderCalendarContext(context);
+      return Promise.resolve(true);
+    } catch (error) {
+      console.warn("[database] Scheduled reset failed.", error);
+      return Promise.resolve(false);
+    } finally {
+      pendingScheduledResets.delete(sourceKey);
+    }
+  }
+
+  function runScheduledResetsForAllSources() {
+    const sources = getDatabaseTableSources();
+    if (!sources.length) return;
+
+    sources.forEach((source) => {
+      const sourceKey = getDatabaseSourceKey(source);
+      if (pendingScheduledResets.has(sourceKey)) return;
+      const sourceDatabase = getDatabaseFromSource(source);
+      if (!sourceDatabase || !isDatabaseResetDue(sourceDatabase)) return;
+      runScheduledDatabaseReset(null, sourceDatabase, { source, trigger: "load" });
+    });
+  }
+
+  function getResetFrequencyLabel(config = {}) {
+    const normalized = normalizeResetConfig(config || {});
+    const intervalCount = normalizeResetCustomDays(normalized.customDays);
+    if (!normalized.enabled || normalized.frequency === "none") return "Off";
+    if (normalized.frequency === "daily") return intervalCount === 1 ? "Daily" : `Every ${intervalCount} days`;
+    if (normalized.frequency === "weekly") return intervalCount === 1 ? "Weekly" : `Every ${intervalCount} weeks`;
+    if (normalized.frequency === "monthly") return intervalCount === 1 ? "Monthly" : `Every ${intervalCount} months`;
+    return `Every ${intervalCount} days`;
+  }
+
+  function getResetMenuHeading(config = {}) {
+    const normalized = normalizeResetConfig(config || {});
+    if (!normalized.enabled || normalized.frequency === "none") return "Reset schedule: Off";
+    return `Reset schedule: ${getResetFrequencyLabel(normalized)}`;
+  }
+
+  function isDatabaseRowPageRecord(page) {
+    return String(page?.containerType || "").trim() === DATABASE_ROW_PAGE_CONTAINER;
+  }
+
+  function normalizeDatabaseRowPageRef(raw = {}) {
+    return {
+      sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+      sourcePageId: typeof raw?.sourcePageId === "string" ? raw.sourcePageId : "",
+      sourceBlockId: typeof raw?.sourceBlockId === "string" ? raw.sourceBlockId : "",
+      rowId: typeof raw?.rowId === "string" ? raw.rowId : ""
+    };
+  }
+
+  function getDatabaseRowPageIcon(row) {
+    const iconValue = String(row?.icon || "").trim();
+    return iconValue && !isImageLikeValue(iconValue) ? iconValue : "";
+  }
+
+  function saveDatabaseRowPageRegistry() {
+    if (typeof window.saveSanctumRegistry === "function") {
+      return !!window.saveSanctumRegistry();
+    }
+    if (typeof window.writeStorageJSON === "function" && window.STORAGE_KEYS?.pagesRegistry) {
+      return !!window.writeStorageJSON(window.STORAGE_KEYS.pagesRegistry, Array.isArray(window.userPages) ? window.userPages : []);
+    }
+    return false;
+  }
+
+  function syncDatabaseRowPageRecordFromSource(source, database, row) {
+    if (!source?.pageId || !database || !row || !Array.isArray(window.userPages)) {
+      return { databaseChanged: false, registryChanged: false };
+    }
+
+    let databaseChanged = false;
+    if (!row.pageId) {
+      row.pageId = createId("page");
+      databaseChanged = true;
+    }
+
+    const pages = window.userPages;
+    const title = getRowTitle(database, row);
+    const icon = getDatabaseRowPageIcon(row);
+    const parentId = source.pageId || getCurrentPageId();
+    const ref = {
+      sourceKind: source.kind === "block" ? "block" : "page",
+      sourcePageId: source.pageId || "",
+      sourceBlockId: source.kind === "block" ? source.blockId || "" : "",
+      rowId: row.id || ""
+    };
+
+    let page = pages.find((entry) => entry?.id === row.pageId) || null;
+    if (!page) {
+      pages.push({
+        id: row.pageId,
+        title,
+        parent: parentId,
+        layout: "document",
+        category: DATABASE_ROW_PAGE_CONTAINER,
+        containerType: DATABASE_ROW_PAGE_CONTAINER,
+        openBehavior: "peek",
+        icon,
+        summary: "",
+        tags: [],
+        hiddenInSidebar: true,
+        databaseRowRef: ref
+      });
+      return { databaseChanged, registryChanged: true };
+    }
+
+    let registryChanged = false;
+    const currentRef = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
+
+    if ((page.title || "") !== title) {
+      page.title = title;
+      registryChanged = true;
+    }
+    if ((page.parent || "") !== parentId) {
+      page.parent = parentId;
+      registryChanged = true;
+    }
+    if ((page.layout || "") !== "document") {
+      page.layout = "document";
+      registryChanged = true;
+    }
+    if ((page.category || "") !== DATABASE_ROW_PAGE_CONTAINER) {
+      page.category = DATABASE_ROW_PAGE_CONTAINER;
+      registryChanged = true;
+    }
+    if ((page.containerType || "") !== DATABASE_ROW_PAGE_CONTAINER) {
+      page.containerType = DATABASE_ROW_PAGE_CONTAINER;
+      registryChanged = true;
+    }
+    if ((page.openBehavior || "") !== "peek") {
+      page.openBehavior = "peek";
+      registryChanged = true;
+    }
+    if ((page.icon || "") !== icon) {
+      page.icon = icon;
+      registryChanged = true;
+    }
+    if (page.hiddenInSidebar !== true) {
+      page.hiddenInSidebar = true;
+      registryChanged = true;
+    }
+    if (typeof page.summary !== "string") {
+      page.summary = String(page.summary || "");
+      registryChanged = true;
+    }
+    if (!Array.isArray(page.tags)) {
+      page.tags = [];
+      registryChanged = true;
+    }
+    if (
+      currentRef.sourceKind !== ref.sourceKind
+      || currentRef.sourcePageId !== ref.sourcePageId
+      || currentRef.sourceBlockId !== ref.sourceBlockId
+      || currentRef.rowId !== ref.rowId
+    ) {
+      page.databaseRowRef = ref;
+      registryChanged = true;
+    }
+
+    return { databaseChanged, registryChanged };
+  }
+
+  function syncDatabaseRowPages(context, database, rowIds = []) {
+    if (!context || !database) return false;
+    if (isFolderDatabase(database)) return false;
+    const source = getContextDatabaseSource(context);
+    if (!source?.pageId || !Array.isArray(window.userPages)) return false;
+
+    const requestedIds = Array.isArray(rowIds) && rowIds.length
+      ? new Set(rowIds.map((entry) => String(entry || "")).filter(Boolean))
+      : null;
+
+    let databaseChanged = false;
+    let registryChanged = false;
+
+    safeParseArray(database.rows || []).forEach((row) => {
+      if (!row || (requestedIds && !requestedIds.has(row.id || ""))) return;
+      if (row.archived) {
+        if (row.pageId) {
+          removeDatabaseRowPageRecord(row);
+          row.pageId = "";
+          databaseChanged = true;
+        }
+        return;
+      }
+      const result = syncDatabaseRowPageRecordFromSource(source, database, row);
+      databaseChanged = databaseChanged || result.databaseChanged;
+      registryChanged = registryChanged || result.registryChanged;
+    });
+
+    if (registryChanged) {
+      saveDatabaseRowPageRegistry();
+    }
+
+    return databaseChanged;
+  }
+
+  function syncDatabaseRowPageForRow(context, database, rowId = "") {
+    if (!rowId) return false;
+    if (isFolderDatabase(database)) return false;
+    return syncDatabaseRowPages(context, database, [rowId]);
+  }
+
+  function removeDatabaseRowPageRecord(row) {
+    const pageId = String(row?.pageId || "").trim();
+    if (!pageId) return;
+
+    if (Array.isArray(window.userPages)) {
+      const pageIndex = window.userPages.findIndex((page) => page?.id === pageId);
+      if (pageIndex !== -1) {
+        window.userPages.splice(pageIndex, 1);
+        saveDatabaseRowPageRegistry();
+      }
+    }
+
+    if (typeof window.readAllDocuments === "function" && typeof window.writeAllDocuments === "function") {
+      const documents = window.readAllDocuments() || {};
+      if (Object.prototype.hasOwnProperty.call(documents, pageId)) {
+        delete documents[pageId];
+        window.writeAllDocuments(documents);
+      }
+    }
+
+    if (typeof window.readAllPageBlocks === "function" && typeof window.writeAllPageBlocks === "function") {
+      const allBlocks = window.readAllPageBlocks() || {};
+      if (Object.prototype.hasOwnProperty.call(allBlocks, pageId)) {
+        delete allBlocks[pageId];
+        window.writeAllPageBlocks(allBlocks);
+      }
+    }
+  }
+
+  function buildDatabaseRowPeekPropertyValueHTML(database, row, property) {
+    const rawValue = property.type === "summary" || property.type === "formula"
+      ? getComputedPropertyRawValue(database, row, property)
+      : property.type === "relation"
+        ? getComparablePropertyValue(database, row, property)
+        : getRowValue(row, property.id);
+    const safeRawValue = String(rawValue || "").trim();
+
+    if (property.type === "checkbox") {
+      return safeRawValue === "true"
+        ? '<span class="peek-row-property-bool">Checked</span>'
+        : '<span class="peek-row-property-empty">Unchecked</span>';
+    }
+
+    if (!safeRawValue) {
+      return '<span class="peek-row-property-empty">Empty</span>';
+    }
+
+    if (property.type === "status" || property.type === "tag" || property.type === "select") {
+      return buildValuePillHTML(property, safeRawValue);
+    }
+
+    if (property.type === "notes") {
+      return escapeHTML(safeRawValue);
+    }
+
+    const displayValue = property.type === "relation"
+      ? safeRawValue
+      : String(formatCellDisplay(property, safeRawValue) || "").trim();
+
+    if (!displayValue || displayValue === "—") {
+      return '<span class="peek-row-property-empty">Empty</span>';
+    }
+
+    return escapeHTML(displayValue);
+  }
+
+  function buildDatabaseRowPeekPropertyEditorHTML(database, row, property) {
+    return buildEditableCellHTML(database, row, property);
+  }
+
+  function refreshOpenDatabaseRowPeek(pageId = "") {
+    const drawer = document.getElementById("peekDrawer");
+    if (!drawer || !pageId) return;
+    if (drawer.dataset.peekPageId !== pageId) return;
+    if (typeof window.openPeek === "function") {
+      window.requestAnimationFrame(() => window.openPeek(pageId));
+    }
+  }
+
+  function getDatabaseRowPeekData(pageId = "") {
+    const page = getCurrentPageRecord(pageId);
+    if (!page || !isDatabaseRowPageRecord(page)) return null;
+
+    const ref = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
+    if (!ref.sourcePageId || !ref.rowId) {
+      return {
+        pageId,
+        title: String(page.title || "Untitled").trim() || "Untitled",
+        icon: String(page.icon || "").trim(),
+        typeLabel: "Database row",
+        properties: [],
+        missing: true
+      };
+    }
+
+    const source = ref.sourceKind === "block"
+      ? { kind: "block", pageId: ref.sourcePageId, blockId: ref.sourceBlockId }
+      : { kind: "page", pageId: ref.sourcePageId, blockId: "" };
+    const database = getDatabaseFromSource(source);
+    const row = getRowById(database, ref.rowId);
+    if (!database || !row) {
+      return {
+        pageId,
+        title: String(page.title || "Untitled").trim() || "Untitled",
+        icon: String(page.icon || "").trim(),
+        typeLabel: "Database row",
+        properties: [],
+        missing: true
+      };
+    }
+
+    const syncResult = syncDatabaseRowPageRecordFromSource(source, database, row);
+    if (syncResult.databaseChanged) {
+      saveDatabaseToSource(source, database);
+    }
+    if (syncResult.registryChanged) {
+      saveDatabaseRowPageRegistry();
+    }
+
+    return {
+      pageId: row.pageId || pageId,
+      title: getRowTitle(database, row),
+      icon: getDatabaseRowPageIcon(row),
+      coverSource: getBoardCardPreviewSource(row),
+      sourceKind: source.kind,
+      sourcePageId: source.pageId || "",
+      sourceBlockId: source.blockId || "",
+      typeLabel: `${String(database.title || "Database").trim() || "Database"} row`,
+      properties: (database.properties || [])
+        .filter((property) => property.type !== "title")
+        .map((property) => ({
+          id: property.id,
+          icon: getPropertyIcon(property),
+          label: property.name,
+          editorHTML: buildDatabaseRowPeekPropertyEditorHTML(database, row, property),
+          valueHTML: buildDatabaseRowPeekPropertyValueHTML(database, row, property)
+        })),
+      missing: false
+    };
+  }
+
+  function getDatabaseRowPeekSourceState(pageId = "") {
+    const page = getCurrentPageRecord(pageId);
+    if (!page || !isDatabaseRowPageRecord(page)) return null;
+
+    const ref = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
+    if (!ref.sourcePageId || !ref.rowId) return null;
+
+    const source = ref.sourceKind === "block"
+      ? { kind: "block", pageId: ref.sourcePageId, blockId: ref.sourceBlockId }
+      : { kind: "page", pageId: ref.sourcePageId, blockId: "" };
+    const database = getDatabaseFromSource(source);
+    const row = getRowById(database, ref.rowId);
+    if (!database || !row) return null;
+
+    const blockEl = source.kind === "block" ? document.getElementById(source.blockId || "") : null;
+    const surfaceEl = source.kind === "page"
+      ? document.querySelector(`.calendar-db-surface[data-page-id="${source.pageId}"]`)
+      : blockEl;
+
+    return {
+      source,
+      database,
+      row,
+      context: source.kind === "page"
+        ? {
+            kind: "page",
+            pageId: source.pageId,
+            surfaceEl
+          }
+        : {
+            kind: "block",
+            pageId: source.pageId,
+            blockId: source.blockId,
+            blockEl,
+            surfaceEl
+          }
+    };
+  }
+
+  function openDatabaseRowPropertyComposer(pageId = "", anchorEl) {
+    const state = getDatabaseRowPeekSourceState(pageId);
+    if (!state || !anchorEl) return false;
+
+    openPropertyComposer(anchorEl, state.context, state.database, {
+      openPanelOnComplex: false,
+      onCommit: () => {
+        if (typeof window.openPeek === "function") {
+          window.openPeek(pageId);
+        }
+      }
+    });
+    return true;
+  }
+
+  function openDatabaseRowCoverMenu(pageId = "", anchorEl) {
+    const state = getDatabaseRowPeekSourceState(pageId);
+    if (!state || !anchorEl) return false;
+
+    openBoardCardPreviewMenu(anchorEl, state.context, state.database, state.row.id, {
+      onChange: () => {
+        if (typeof window.openPeek === "function") {
+          window.openPeek(pageId);
+        }
+      }
+    });
+    return true;
+  }
+
+  function openDatabaseRowPeek(pageId = "") {
+    const safePageId = String(pageId || "").trim();
+    if (!safePageId || typeof window.openPeek !== "function") return;
+    closeDatabaseMenus();
+    window.openPeek(safePageId);
   }
 
   function rerenderDatabaseSourceIfVisible(source) {
@@ -1824,6 +3167,25 @@
   }
 
   function getCalendarContext(target) {
+    const peekDrawer = target?.closest?.('#peekDrawer[data-peek-db-kind]');
+    if (peekDrawer) {
+      if (peekDrawer.dataset.peekDbKind === "page") {
+        return {
+          kind: "page",
+          pageId: peekDrawer.dataset.peekDbPageId || getCurrentPageId(),
+          surfaceEl: document.querySelector(`.calendar-db-surface[data-page-id="${peekDrawer.dataset.peekDbPageId || getCurrentPageId()}"]`)
+        };
+      }
+
+      const blockId = peekDrawer.dataset.peekDbBlockId || "";
+      return {
+        kind: "block",
+        blockId,
+        blockEl: document.getElementById(blockId),
+        surfaceEl: document.getElementById(blockId)
+      };
+    }
+
     const propertyPanel = target?.closest?.(`#${PROPERTY_PANEL_ID}`);
     if (propertyPanel) {
       if (propertyPanel.dataset.kind === "page") {
@@ -1874,15 +3236,24 @@
 
   function getDatabaseForContext(context) {
     if (!context) return normalizeDatabase({});
-    return context.kind === "page"
+    const database = context.kind === "page"
       ? getPageDatabase(context.pageId)
       : getBlockDatabase(context.blockEl || document.getElementById(context.blockId));
+    if (syncDatabaseRowPages(context, database)) {
+      saveDatabaseForContext(context, database);
+    }
+    return database;
   }
 
   function saveDatabaseForContext(context, database) {
     if (!context) return;
     if (context.kind === "page") {
       savePageDatabase(context.pageId, database);
+      emitDatabaseSourceUpdated({
+        kind: "page",
+        pageId: context.pageId || "",
+        blockId: ""
+      });
     } else {
       const blockEl = context.blockEl || document.getElementById(context.blockId);
       const linkedSource = getEmbedSourceTarget(blockEl);
@@ -1894,9 +3265,279 @@
           month: linkedDatabase.month
         });
         saveBlockDatabase(blockEl, database);
+        emitDatabaseSourceUpdated({
+          kind: "page",
+          pageId: linkedSource.pageId || "",
+          blockId: ""
+        });
       } else {
         saveBlockDatabase(blockEl, database);
       }
+
+      emitDatabaseSourceUpdated({
+        kind: "block",
+        pageId: context.pageId || getCurrentPageId(),
+        blockId: context.blockId || blockEl?.id || ""
+      });
+    }
+  }
+
+  function isFolderAccessApiSupported() {
+    return typeof window.showDirectoryPicker === "function";
+  }
+
+  async function persistFolderHandle(source, handle) {
+    const storageKey = getFolderHandleStorageKey(source);
+    if (!storageKey || !handle || typeof window.SanctumStorage?.putBlob !== "function") return false;
+    try {
+      return await window.SanctumStorage.putBlob(storageKey, handle);
+    } catch (error) {
+      console.warn("[database] Failed to persist folder handle.", error);
+      return false;
+    }
+  }
+
+  async function readPersistedFolderHandle(source) {
+    const storageKey = getFolderHandleStorageKey(source);
+    if (!storageKey || typeof window.SanctumStorage?.getBlob !== "function") return null;
+    try {
+      const handle = await window.SanctumStorage.getBlob(storageKey);
+      return handle && typeof handle.values === "function" ? handle : null;
+    } catch (error) {
+      console.warn("[database] Failed to read persisted folder handle.", error);
+      return null;
+    }
+  }
+
+  async function ensureFolderHandlePermission(handle, options = {}) {
+    if (!handle) return false;
+    if (typeof handle.queryPermission !== "function") return true;
+
+    try {
+      const queryResult = await handle.queryPermission({ mode: "read" });
+      if (queryResult === "granted") return true;
+      if (queryResult === "denied" && options.request !== true) return false;
+    } catch (error) {
+      if (options.request !== true) return false;
+    }
+
+    if (options.request !== true || typeof handle.requestPermission !== "function") return false;
+
+    try {
+      return (await handle.requestPermission({ mode: "read" })) === "granted";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function scanFolderEntries(directoryHandle, currentPath = "", records = [], errors = []) {
+    const entries = [];
+    for await (const entry of directoryHandle.values()) {
+      entries.push(entry);
+    }
+
+    entries.sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+      return String(left.name || "").localeCompare(String(right.name || ""), undefined, {
+        sensitivity: "base",
+        numeric: true
+      });
+    });
+
+    for (const entry of entries) {
+      const relativePath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+      if (entry.kind === "directory") {
+        records.push(normalizeFolderScanRecord({
+          kind: "directory",
+          name: entry.name,
+          relativePath,
+          folderPath: getFolderPathFromRelativePath(relativePath),
+          itemType: "Folder"
+        }));
+
+        try {
+          await scanFolderEntries(entry, relativePath, records, errors);
+        } catch (error) {
+          errors.push(relativePath);
+        }
+        continue;
+      }
+
+      try {
+        const file = await entry.getFile();
+        records.push(normalizeFolderScanRecord({
+          kind: "file",
+          name: file?.name || entry.name,
+          relativePath,
+          folderPath: getFolderPathFromRelativePath(relativePath),
+          itemType: file?.type || "File",
+          extension: getFileExtension(file?.name || entry.name),
+          size: Number(file?.size || 0),
+          modifiedTimestamp: Number(file?.lastModified || 0),
+          modifiedAt: Number(file?.lastModified || 0) ? new Date(Number(file.lastModified)).toISOString() : ""
+        }));
+      } catch (error) {
+        errors.push(relativePath);
+      }
+    }
+
+    return { records, errors };
+  }
+
+  async function scanFolderHandle(directoryHandle) {
+    const records = [];
+    const errors = [];
+    await scanFolderEntries(directoryHandle, "", records, errors);
+    return { records, errors };
+  }
+
+  function getFolderRefreshErrorDetails(error) {
+    const name = String(error?.name || "").trim();
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return {
+        code: "permission-denied",
+        message: "Folder access was denied. Use Reconnect Folder to grant access again."
+      };
+    }
+    if (name === "NotFoundError") {
+      return {
+        code: "missing-folder-access",
+        message: "The connected folder is no longer available. Use Reconnect Folder to choose it again."
+      };
+    }
+    return {
+      code: "scan-failed",
+      message: "Folder refresh failed. Try reconnecting the folder and scanning again."
+    };
+  }
+
+  function setFolderStateError(database, code = "", message = "") {
+    if (!database || !isFolderDatabase(database)) return;
+    database.folderState = normalizeFolderState({
+      ...(database.folderState || {}),
+      lastErrorCode: code,
+      lastErrorMessage: message
+    }, database.properties);
+  }
+
+  async function refreshFolderDatabaseContext(context, options = {}) {
+    const source = getContextDatabaseSource(context);
+    const sourceKey = getFolderSourceKey(source);
+    if (!context || !source || !sourceKey || activeFolderScans.has(sourceKey)) return false;
+
+    activeFolderScans.add(sourceKey);
+    rerenderCalendarContext(context);
+
+    try {
+      const database = getDatabaseForContext(context);
+      let handle = options.handle || null;
+
+      if (!handle) {
+        handle = await readPersistedFolderHandle(source);
+      }
+
+      if (!handle) {
+        if (isFolderDatabase(database)) {
+          setFolderStateError(database, "missing-folder-access", "The connected folder is no longer available. Use Reconnect Folder to choose it again.");
+          saveDatabaseForContext(context, database);
+        }
+        window.showAppToast?.("Reconnect the folder to continue refreshing this database.", "info");
+        return false;
+      }
+
+      const permissionGranted = await ensureFolderHandlePermission(handle, { request: options.requestPermission !== false });
+      if (!permissionGranted) {
+        if (isFolderDatabase(database)) {
+          setFolderStateError(database, "permission-denied", "Folder access was denied. Use Reconnect Folder to grant access again.");
+          saveDatabaseForContext(context, database);
+        }
+        window.showAppToast?.("Folder access was denied.", "error");
+        return false;
+      }
+
+      if (options.persistHandle !== false) {
+        await persistFolderHandle(source, handle);
+      }
+
+      database.properties = ensureFolderDatabaseProperties(database.properties);
+      const folderState = normalizeFolderState(database.folderState || {}, database.properties);
+      const scanResult = await scanFolderHandle(handle);
+      const nowIso = new Date().toISOString();
+
+      database.folderState = normalizeFolderState({
+        ...folderState,
+        enabled: true,
+        handleKey: getFolderHandleStorageKey(source),
+        rootName: String(handle.name || folderState.rootName || "").trim(),
+        lastConnectedAt: folderState.lastConnectedAt || nowIso,
+        lastScanAt: nowIso,
+        lastErrorCode: scanResult.errors.length ? "scan-partial" : "",
+        lastErrorMessage: scanResult.errors.length
+          ? `${scanResult.errors.length} item${scanResult.errors.length === 1 ? " was" : "s were"} skipped during the last scan.`
+          : "",
+        scanRecords: scanResult.records,
+        userMetadata: folderState.userMetadata,
+        lastUnmatchedCount: folderState.lastUnmatchedCount
+      }, database.properties);
+      safeParseArray(database.folderState.scanRecords || []).forEach((record) => {
+        const metadata = getFolderMetadataEntry(database, record.stableKey);
+        if (!metadata) return;
+        metadata.firstSeenAt = metadata.firstSeenAt || folderState.userMetadata?.[record.stableKey]?.firstSeenAt || nowIso;
+        metadata.fingerprint = record.fingerprint || metadata.fingerprint || "";
+        applyFolderAutoFillToMetadata(record, metadata, database.properties);
+      });
+      database.view = "table";
+
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+
+      const unmatchedCount = Math.max(0, Number(database.folderState?.lastUnmatchedCount || 0));
+      let toastMessage = `${options.handle ? "Folder connected" : "Folder refreshed"} with ${scanResult.records.length} item${scanResult.records.length === 1 ? "" : "s"}.`;
+      if (unmatchedCount) {
+        toastMessage += ` ${unmatchedCount} saved metadata entr${unmatchedCount === 1 ? "y" : "ies"} could not be matched and may belong to renamed or deleted files.`;
+      }
+      if (scanResult.errors.length) {
+        toastMessage += ` ${scanResult.errors.length} item${scanResult.errors.length === 1 ? "" : "s"} could not be read.`;
+      }
+
+      window.showAppToast?.(toastMessage, scanResult.errors.length || unmatchedCount ? "info" : "success");
+      return true;
+    } catch (error) {
+      console.warn("[database] Folder refresh failed.", error);
+      const database = getDatabaseForContext(context);
+      const details = getFolderRefreshErrorDetails(error);
+      if (isFolderDatabase(database)) {
+        setFolderStateError(database, details.code, details.message);
+        saveDatabaseForContext(context, database);
+      }
+      window.showAppToast?.(details.message, "error");
+      return false;
+    } finally {
+      activeFolderScans.delete(sourceKey);
+      rerenderCalendarContext(context);
+    }
+  }
+
+  async function connectFolderDatabaseContext(context) {
+    if (!context) return false;
+    if (!isFolderAccessApiSupported()) {
+      window.showAppToast?.("This browser does not support folder access here. Try a Chromium-based browser.", "error");
+      return false;
+    }
+
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "read" });
+      if (!handle) return false;
+      return refreshFolderDatabaseContext(context, {
+        handle,
+        persistHandle: true,
+        requestPermission: true
+      });
+    } catch (error) {
+      if (String(error?.name || "") !== "AbortError") {
+        console.warn("[database] Folder picker failed.", error);
+      }
+      return false;
     }
   }
 
@@ -1937,6 +3578,14 @@
   function formatCellDisplay(property, value = "") {
     const safeValue = String(value || "").trim();
     if (!safeValue) return "—";
+
+    if (normalizeFolderField(property?.folderField || "") === "sizeBytes") {
+      return formatFolderSizeValue(safeValue);
+    }
+
+    if (normalizeFolderField(property?.folderField || "") === "modifiedAt") {
+      return formatFolderModifiedLabel(safeValue);
+    }
 
     if (property?.type === "summary") {
       const mode = normalizeSummaryMode(property.summaryConfig?.mode || "count");
@@ -2051,6 +3700,53 @@
     return "Default";
   }
 
+  function getGalleryCardSize(database) {
+    return normalizeGalleryCardSize(database?.galleryCardSize || "medium");
+  }
+
+  function getGalleryCardFieldCount(database) {
+    return normalizeGalleryCardFieldCount(database?.galleryCardFields);
+  }
+
+  function getGalleryCardSizeLabel(size = "") {
+    return getBoardCardSizeLabel(normalizeGalleryCardSize(size));
+  }
+
+  function getGalleryCardContentLabel(count = 0) {
+    const normalized = normalizeGalleryCardFieldCount(count);
+    if (normalized === 0) return "Title only";
+    if (normalized === 1) return "1 property";
+    return `${normalized} properties`;
+  }
+
+  function getChecklistProgressStyle(database) {
+    return normalizeChecklistProgressStyle(database?.checklistProgressStyle || "bar");
+  }
+
+  function getChecklistProgressStyleLabel(style = "bar") {
+    return normalizeChecklistProgressStyle(style) === "ring" ? "Ring" : "Bar";
+  }
+
+  function getChecklistDensity(database) {
+    return normalizeChecklistDensity(database?.checklistDensity || "default");
+  }
+
+  function getChecklistDensityLabel(value = "default") {
+    return normalizeChecklistDensity(value) === "compact" ? "Compact" : "Default";
+  }
+
+  function getChecklistToneColor(database, key = "") {
+    const value = database?.[key] || "";
+    return getRowToneColor(normalizeChecklistToneColor(value));
+  }
+
+  function getChecklistColorLabel(value = "") {
+    const normalized = normalizeChecklistToneColor(value || "");
+    if (!normalized) return "Default";
+    const match = STATUS_COLOR_OPTIONS.find((entry) => entry.value === normalized);
+    return match?.label || "Custom";
+  }
+
   function saveAndRerenderDatabaseSettings(context, database) {
     saveDatabaseForContext(context, database);
     rerenderCalendarContext(context);
@@ -2087,6 +3783,81 @@
     });
   }
 
+  function openGalleryLayoutSettingsMenu(anchorEl, context, database) {
+    return openPropertySubmenu(anchorEl, "Layout", (submenuEl) => {
+      appendMenuLabel(submenuEl, `Card size: ${getGalleryCardSizeLabel(getGalleryCardSize(database))}`);
+      ["large", "medium", "small"].forEach((size) => {
+        appendMenuButton(submenuEl, getGalleryCardSizeLabel(size), () => {
+          database.galleryCardSize = size;
+          saveAndRerenderDatabaseSettings(context, database);
+        }, { active: getGalleryCardSize(database) === size });
+      });
+      appendMenuDivider(submenuEl);
+      appendMenuLabel(submenuEl, `Properties: ${getGalleryCardContentLabel(getGalleryCardFieldCount(database))}`);
+      [0, 1, 2, 3].forEach((count) => {
+        appendMenuButton(submenuEl, getGalleryCardContentLabel(count), () => {
+          database.galleryCardFields = count;
+          saveAndRerenderDatabaseSettings(context, database);
+        }, { active: getGalleryCardFieldCount(database) === count });
+      });
+    });
+  }
+
+  function openChecklistLayoutSettingsMenu(anchorEl, context, database) {
+    return openPropertySubmenu(anchorEl, "Layout", (submenuEl) => {
+      appendMenuLabel(submenuEl, `Progress: ${getChecklistProgressStyleLabel(getChecklistProgressStyle(database))}`);
+      ["bar", "ring"].forEach((style) => {
+        appendMenuButton(submenuEl, getChecklistProgressStyleLabel(style), () => {
+          database.checklistProgressStyle = style;
+          saveAndRerenderDatabaseSettings(context, database);
+        }, { active: getChecklistProgressStyle(database) === style });
+      });
+
+      appendMenuDivider(submenuEl);
+      appendMenuLabel(submenuEl, `Density: ${getChecklistDensityLabel(getChecklistDensity(database))}`);
+      ["default", "compact"].forEach((mode) => {
+        appendMenuButton(submenuEl, getChecklistDensityLabel(mode), () => {
+          database.checklistDensity = mode;
+          saveAndRerenderDatabaseSettings(context, database);
+        }, { active: getChecklistDensity(database) === mode });
+      });
+
+      const openChecklistColorMenu = (buttonEl, title, key) => {
+        openPropertySubmenu(buttonEl, title, (colorMenuEl) => {
+          appendMenuLabel(colorMenuEl, title);
+          TAG_COLOR_OPTIONS.forEach((entry) => {
+            const colorValue = entry.value === "none" ? "" : entry.value;
+            const swatchClass = entry.value === "none" ? "tag-none" : statusClassName(entry.value);
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `topbar-dropdown-btn page-database-color-option${normalizeChecklistToneColor(database[key] || "") === normalizeChecklistToneColor(colorValue) ? " active" : ""}`;
+            button.innerHTML = `<span class="page-database-color-option-main"><span class="page-database-color-swatch ${escapeHTML(swatchClass)}"></span><span>${escapeHTML(entry.label)}</span></span>`;
+            button.addEventListener("click", (event) => {
+              event.stopPropagation();
+              database[key] = normalizeChecklistToneColor(colorValue);
+              saveAndRerenderDatabaseSettings(context, database);
+            });
+            colorMenuEl.appendChild(button);
+          });
+        });
+      };
+
+      appendMenuDivider(submenuEl);
+      appendMenuSubmenuButton(submenuEl, `Row background color: ${getChecklistColorLabel(database.checklistRowBgColor || "")}`, (buttonEl) => {
+        openChecklistColorMenu(buttonEl, "Row background color", "checklistRowBgColor");
+      }, { active: !!normalizeChecklistToneColor(database.checklistRowBgColor || "") });
+      appendMenuSubmenuButton(submenuEl, `Checkbox color: ${getChecklistColorLabel(database.checklistCheckboxColor || "")}`, (buttonEl) => {
+        openChecklistColorMenu(buttonEl, "Checkbox color", "checklistCheckboxColor");
+      }, { active: !!normalizeChecklistToneColor(database.checklistCheckboxColor || "") });
+      appendMenuSubmenuButton(submenuEl, `Text color: ${getChecklistColorLabel(database.checklistTextColor || "")}`, (buttonEl) => {
+        openChecklistColorMenu(buttonEl, "Text color", "checklistTextColor");
+      }, { active: !!normalizeChecklistToneColor(database.checklistTextColor || "") });
+      appendMenuSubmenuButton(submenuEl, `Progress color: ${getChecklistColorLabel(database.checklistProgressColor || "")}`, (buttonEl) => {
+        openChecklistColorMenu(buttonEl, "Progress color", "checklistProgressColor");
+      }, { active: !!normalizeChecklistToneColor(database.checklistProgressColor || "") });
+    });
+  }
+
   function getBoardCardPreviewSource(row) {
     const iconValue = String(row?.icon || "").trim();
     return isImageLikeValue(iconValue) ? iconValue : "";
@@ -2097,17 +3868,27 @@
     if (!row) return false;
     const nextValue = String(imageSource || "").trim();
     row.icon = isImageLikeValue(nextValue) ? nextValue : "";
+    if (isFolderDatabase(database)) {
+      const metadata = getFolderMetadataEntry(database, row);
+      if (metadata) metadata.icon = row.icon;
+    }
     return true;
   }
 
-  function applyBoardCardPreviewImage(context, database, rowId = "", imageSource = "") {
+  function applyBoardCardPreviewImage(context, database, rowId = "", imageSource = "", options = {}) {
     if (!setRowPreviewImage(database, rowId, imageSource)) return;
+    const row = getRowById(database, rowId);
+    syncDatabaseRowPageForRow(context, database, rowId);
     saveDatabaseForContext(context, database);
     rerenderCalendarContext(context);
     closeDatabaseMenus();
+    if (row?.pageId) refreshOpenDatabaseRowPeek(row.pageId);
+    if (typeof options.onChange === "function") {
+      window.requestAnimationFrame(() => options.onChange());
+    }
   }
 
-  function pickBoardCardPreviewFile(context, database, rowId = "") {
+  function pickBoardCardPreviewFile(context, database, rowId = "", options = {}) {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*,.gif";
@@ -2118,14 +3899,14 @@
       reader.onload = (event) => {
         const source = String(event?.target?.result || "").trim();
         if (!source) return;
-        applyBoardCardPreviewImage(context, database, rowId, source);
+        applyBoardCardPreviewImage(context, database, rowId, source, options);
       };
       reader.readAsDataURL(file);
     };
     input.click();
   }
 
-  function openBoardCardPreviewMenu(anchorEl, context, database, rowId = "") {
+  function openBoardCardPreviewMenu(anchorEl, context, database, rowId = "", options = {}) {
     const row = getRowById(database, rowId);
     if (!row) return;
     const currentSource = getBoardCardPreviewSource(row);
@@ -2135,16 +3916,16 @@
     appendMenuLabel(menuEl, "Card cover");
     appendMenuButton(menuEl, currentSource ? "Replace image" : "Upload image", () => {
       closeDatabaseMenus();
-      pickBoardCardPreviewFile(context, database, rowId);
+      pickBoardCardPreviewFile(context, database, rowId, options);
     });
     appendMenuButton(menuEl, "Image link...", () => {
       const nextValue = window.prompt?.("Enter an image URL or local image path", currentSource) || "";
       if (nextValue === currentSource) return;
-      applyBoardCardPreviewImage(context, database, rowId, nextValue);
+      applyBoardCardPreviewImage(context, database, rowId, nextValue, options);
     });
     if (currentSource) {
       appendMenuButton(menuEl, "Remove cover", () => {
-        applyBoardCardPreviewImage(context, database, rowId, "");
+        applyBoardCardPreviewImage(context, database, rowId, "", options);
       }, { danger: true });
     }
     return menuEl;
@@ -2192,6 +3973,10 @@
     const row = getRowById(database, rowId);
     if (!row) return;
     row.color = normalizeRowColor(color);
+    if (isFolderDatabase(database)) {
+      const metadata = getFolderMetadataEntry(database, row);
+      if (metadata) metadata.color = row.color;
+    }
   }
 
   function setCellColor(database, rowId = "", propertyId = "", color = "") {
@@ -2204,6 +3989,10 @@
     else delete nextColors[propertyId];
 
     row.cellColors = normalizeRowCellColors(nextColors, database.properties);
+    if (isFolderDatabase(database)) {
+      const metadata = getFolderMetadataEntry(database, row);
+      if (metadata) metadata.cellColors = row.cellColors;
+    }
   }
 
   function setPropertyHeaderColor(database, propertyId = "", color = "") {
@@ -2508,6 +4297,10 @@
   function getVisibleRows(database) {
     let rows = Array.isArray(database.rows) ? database.rows.slice() : [];
 
+    if (!database?.showHistory) {
+      rows = rows.filter((row) => !row?.archived);
+    }
+
     if (Array.isArray(database.filters) && database.filters.length) {
       rows = rows.filter((row) => database.filters.every((filter) => rowMatchesFilter(database, row, filter)));
     }
@@ -2590,11 +4383,13 @@
     const row = getRowById(database, rowId);
     const previousValue = property && row ? getRowValue(row, propertyId) : "";
     updateRowValue(database, rowId, propertyId, value);
+    syncDatabaseRowPageForRow(context, database, rowId);
     saveDatabaseForContext(context, database);
     if (property && normalizePropertyType(property.type || "", "") === "relation") {
       syncRelationBacklinks(getContextDatabaseSource(context), database, rowId, property, previousValue, getRowValue(getRowById(database, rowId), propertyId));
     }
     rerenderCalendarContext(context);
+    if (row?.pageId) refreshOpenDatabaseRowPeek(row.pageId);
     if (options.closeMenus !== false) closeDatabaseMenus();
   }
 
@@ -3252,6 +5047,7 @@
   function renameProperty(database, propertyId = "", name = "") {
     const property = getPropertyById(database, propertyId);
     if (!property) return;
+    if (isFolderSystemProperty(property)) return;
     property.name = normalizePropertyName(name, property.type, database.properties.indexOf(property));
   }
 
@@ -3275,11 +5071,39 @@
     else delete property.summaryConfig;
     if (safeType === "formula") property.formulaConfig = normalizeFormulaConfig(property.formulaConfig || {});
     else delete property.formulaConfig;
+    property.folderAutoFill = normalizeFolderAutoFill(property.folderAutoFill || "", safeType);
     database.rows = database.rows.map((row) => {
       const nextRow = normalizeRow(row, database.properties);
       nextRow.values[property.id] = normalizeCellValue(property, row?.values?.[property.id] ?? "");
       return nextRow;
     });
+  }
+
+  function setPropertyFolderAutoFill(database, propertyId = "", nextMode = "") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.type === "title" || isFolderSystemProperty(property)) return;
+
+    const normalizedMode = normalizeFolderAutoFill(nextMode, property.type);
+    property.folderAutoFill = normalizedMode;
+
+    if (!isFolderDatabase(database)) return;
+
+    database.folderState = normalizeFolderState(database.folderState || {}, database.properties);
+    safeParseArray(database.folderState.scanRecords || []).forEach((record) => {
+      const metadata = getFolderMetadataEntry(database, record.stableKey);
+      if (!metadata) return;
+      metadata.firstSeenAt = metadata.firstSeenAt || database.folderState.lastScanAt || database.folderState.lastConnectedAt || new Date().toISOString();
+
+      if (!normalizedMode) {
+        if (metadata.autoValues) delete metadata.autoValues[property.id];
+        if (metadata.manualOverrides) delete metadata.manualOverrides[property.id];
+        return;
+      }
+
+      applyFolderAutoFillToMetadata(record, metadata, database.properties);
+    });
+
+    database.rows = buildFolderDatabaseRows(database.folderState, database.properties);
   }
 
   function setRelationTarget(database, propertyId = "", target = {}) {
@@ -3501,6 +5325,7 @@
   function deletePropertyFromDatabase(database, propertyId = "") {
     const property = getPropertyById(database, propertyId);
     if (!property || property.type === "title") return;
+    if (isFolderSystemProperty(property)) return;
     database.properties = database.properties.filter((entry) => entry.id !== propertyId);
     database.rows = database.rows.map((row) => normalizeRow(row, database.properties));
     database.filters = (database.filters || []).filter((entry) => entry.propertyId !== propertyId);
@@ -3519,7 +5344,7 @@
   function setPropertyWidth(database, propertyId = "", width = 0) {
     const property = getPropertyById(database, propertyId);
     if (!property) return;
-    const safeWidth = Math.max(120, Math.min(640, Math.round(Number(width) || getDefaultPropertyWidth(property))));
+    const safeWidth = Math.max(getManualPropertyMinWidth(property), Math.min(640, Math.round(Number(width) || getDefaultPropertyWidth(property))));
     database.columnWidths = { ...(database.columnWidths || {}), [propertyId]: safeWidth };
   }
 
@@ -3553,6 +5378,7 @@
   }
 
   function addRowToDatabase(database, defaults = {}) {
+    if (isFolderDatabase(database)) return null;
     database.properties = ensureTitleProperty(database.properties);
     const row = normalizeRow({ id: createId("row"), values: defaults }, database.properties);
     database.rows.push(row);
@@ -3560,6 +5386,7 @@
   }
 
   function duplicateRowInDatabase(database, rowId = "") {
+    if (isFolderDatabase(database)) return null;
     const source = getRowById(database, rowId);
     if (!source) return null;
 
@@ -3567,6 +5394,7 @@
       id: createId("row"),
       icon: source.icon || "",
       color: source.color || "",
+      checklistChecked: !!source.checklistChecked,
       values: { ...(source.values || {}) }
     }, database.properties);
 
@@ -3577,6 +5405,7 @@
   }
 
   function deleteRowFromDatabase(database, rowId = "") {
+    if (isFolderDatabase(database)) return;
     database.rows = database.rows.filter((row) => row.id !== rowId);
   }
 
@@ -3584,7 +5413,118 @@
     const row = getRowById(database, rowId);
     const property = getPropertyById(database, propertyId);
     if (!row || !property) return;
-    row.values[propertyId] = normalizeCellValue(property, value);
+    const normalizedValue = normalizeCellValue(property, value);
+    if (isFolderDatabase(database)) {
+      if (isFolderSystemProperty(property)) return;
+      const metadata = getFolderMetadataEntry(database, row);
+      if (metadata) {
+        if (normalizedValue) metadata.values[propertyId] = normalizedValue;
+        else delete metadata.values[propertyId];
+        metadata.fingerprint = row.folderFingerprint || metadata.fingerprint || "";
+        metadata.autoValues = metadata.autoValues && typeof metadata.autoValues === "object" ? metadata.autoValues : {};
+        metadata.manualOverrides = metadata.manualOverrides && typeof metadata.manualOverrides === "object" ? metadata.manualOverrides : {};
+        if (normalizeFolderAutoFill(property.folderAutoFill || "", property.type)) {
+          const autoValue = String(metadata.autoValues?.[propertyId] || "").trim();
+          if (!normalizedValue || normalizedValue === autoValue) {
+            delete metadata.manualOverrides[propertyId];
+          } else {
+            metadata.manualOverrides[propertyId] = true;
+          }
+        } else {
+          delete metadata.manualOverrides[propertyId];
+          delete metadata.autoValues[propertyId];
+        }
+      }
+    }
+    row.values[propertyId] = normalizedValue;
+  }
+
+  function setRowChecklistChecked(database, rowId = "", checked = false) {
+    const row = getRowById(database, rowId);
+    if (!row) return;
+    row.checklistChecked = !!checked;
+    if (isFolderDatabase(database)) {
+      const metadata = getFolderMetadataEntry(database, row);
+      if (metadata) metadata.checklistChecked = row.checklistChecked;
+    }
+  }
+
+  function buildChecklistProgressRingSVG(percent = 0) {
+    const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+    const radius = 16;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - ((safePercent / 100) * circumference);
+    return `
+      <svg viewBox="0 0 40 40" class="page-database-checklist-ring" aria-hidden="true">
+        <circle class="page-database-checklist-ring-track" cx="20" cy="20" r="${radius}"></circle>
+        <circle class="page-database-checklist-ring-fill" cx="20" cy="20" r="${radius}" style="stroke-dasharray:${circumference.toFixed(2)};stroke-dashoffset:${offset.toFixed(2)};"></circle>
+      </svg>
+    `;
+  }
+
+  function buildChecklistViewHTML(database, options = {}) {
+    const readOnly = !!options.readOnly;
+    const visibleRows = getVisibleRows(database);
+    const totalCount = visibleRows.length;
+    const checkedCount = visibleRows.filter((row) => !!row?.checklistChecked).length;
+    const percent = totalCount ? Math.round((checkedCount / totalCount) * 100) : 0;
+    const progressStyle = getChecklistProgressStyle(database);
+    const density = getChecklistDensity(database);
+    const checklistStyleVars = [
+      ["--page-db-checklist-row-bg", getChecklistToneColor(database, "checklistRowBgColor")],
+      ["--page-db-checklist-checkbox", getChecklistToneColor(database, "checklistCheckboxColor")],
+      ["--page-db-checklist-text", getChecklistToneColor(database, "checklistTextColor")],
+      ["--page-db-checklist-progress", getChecklistToneColor(database, "checklistProgressColor")]
+    ]
+      .filter(([, value]) => !!value)
+      .map(([key, value]) => `${key}:${value};`)
+      .join("");
+
+    const listHTML = totalCount
+      ? visibleRows.map((row) => `
+          <div class="page-database-checklist-item${row.archived ? " is-archived" : ""}${row.checklistChecked ? " is-checked" : ""}" data-item-id="${escapeHTML(row.id)}" data-db-row-page-id="${escapeHTML(row.pageId || "")}">
+            <button type="button" class="page-database-checklist-checkbox${row.checklistChecked ? " checked" : ""}" data-db-action="toggle-checklist-row" data-row-id="${escapeHTML(row.id)}" aria-label="${row.checklistChecked ? "Uncheck" : "Check"} ${escapeHTML(getRowTitle(database, row))}"${readOnly ? " disabled" : ""}>
+              <span>${row.checklistChecked ? "✓" : ""}</span>
+            </button>
+            <button type="button" class="page-database-checklist-title" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}">${escapeHTML(getRowTitle(database, row))}</button>
+          </div>
+        `).join("")
+      : `
+          <div class="page-calendar-empty page-database-checklist-empty">
+            <div class="page-calendar-empty-title">No checklist items yet.</div>
+            <div class="page-calendar-empty-copy">Rows become checklist items automatically in this view.</div>
+            ${readOnly ? "" : `<button type="button" class="page-calendar-add-btn" data-db-action="add-row">+ New item</button>`}
+          </div>
+        `;
+
+    const progressHTML = progressStyle === "ring"
+      ? `
+          <div class="page-database-checklist-progress-ring-wrap">
+            ${buildChecklistProgressRingSVG(percent)}
+            <div class="page-database-checklist-progress-ring-label">${percent}%</div>
+          </div>
+        `
+      : `
+          <div class="page-database-checklist-progress-bar-wrap">
+            <div class="page-database-checklist-progress-bar"><span style="width:${percent}%;"></span></div>
+            <div class="page-database-checklist-progress-value">${percent}%</div>
+          </div>
+        `;
+
+    return {
+      weekdaysHTML: "",
+      bodyHTML: `
+        <div class="page-database-checklist size-${escapeHTML(progressStyle)} density-${escapeHTML(density)}"${checklistStyleVars ? ` style="${escapeHTML(checklistStyleVars)}"` : ""}>
+          <div class="page-database-checklist-list">${listHTML}</div>
+          <div class="page-database-checklist-progress" aria-label="Checklist progress">
+            ${progressHTML}
+            <div class="page-database-checklist-count">${checkedCount}/${totalCount} done</div>
+          </div>
+        </div>
+      `,
+      metaText: `${totalCount} item${totalCount === 1 ? "" : "s"}`,
+      monthLabel: "Checklist view"
+    };
   }
 
   function addPropertyToDatabase(database, property) {
@@ -3615,11 +5555,9 @@
     }, 1);
   }
 
-  function getPageEditorGridTemplate(database) {
-    const cols = getVisibleTableProperties(database).map((property) => {
-      const width = database.columnWidths?.[property.id] || getDefaultPropertyWidth(property);
-      return `${width}px`;
-    });
+  function getPageEditorGridTemplate(database, options = {}) {
+    const widths = getPageEditorColumnWidths(database, options);
+    const cols = widths.map((width) => `${width}px`);
     return cols.join(" ");
   }
 
@@ -3660,13 +5598,17 @@
     const cellClasses = ["page-database-cell"];
     const cellColor = getCellToneColor(row, property.id);
     if (property.type === "title") cellClasses.push("is-title");
+    if (property.type === "checkbox") cellClasses.push("is-checkbox");
     if (isPropertyFrozen(database, property.id)) cellClasses.push("is-frozen");
+    if (isFolderReadonlyProperty(database, property)) cellClasses.push("is-readonly");
     if (property.type === "date" || property.type === "status" || property.type === "tag" || property.type === "select" || property.type === "relation" || property.type === "checkbox") cellClasses.push("has-value-trigger");
     if (cellColor) cellClasses.push("has-cell-color");
 
     let controlHTML = "";
 
-    if (property.type === "date") {
+    if (isFolderReadonlyProperty(database, property)) {
+      controlHTML = `<div class="page-db-cell-summary">${escapeHTML(formatCellDisplay(property, value) || "—")}</div>`;
+    } else if (property.type === "date") {
       controlHTML = `
         <button type="button" class="page-db-cell-trigger page-db-cell-date-trigger${value ? " has-value" : ""}" ${baseAttrs} data-db-action="open-cell-value-menu">
           ${buildValuePillHTML(property, value)}
@@ -3764,29 +5706,38 @@
     `;
   }
 
-  function buildPageTableEditorHTML(database) {
-    const gridTemplate = getPageEditorGridTemplate(database);
+  function buildPageTableEditorHTML(database, options = {}) {
+    const folderMode = isFolderDatabase(database);
     const visibleProperties = getVisibleTableProperties(database);
+    const columnWidths = getPageEditorColumnWidths(database, options);
+    const gridTemplate = columnWidths.map((width) => `${width}px`).join(" ");
     const visibleRows = getVisibleRows(database);
     const groupedRows = getGroupedRows(database, visibleRows);
     const headTemplate = `${gridTemplate} ${DB_CONTROL_WIDTH}px`;
     const rowTemplate = `${gridTemplate} ${DB_CONTROL_WIDTH}px`;
 
     const headerCols = visibleProperties
-      .map((property) => {
+      .map((property, index) => {
         const classes = ["page-database-col-head-wrap"];
         const headerColor = getPropertyHeaderToneColor(property);
+        const columnWidth = columnWidths[index] || getDefaultPropertyWidth(property);
+        const isIconOnly = columnWidth <= getCompactPropertyHeaderThreshold(property);
         if (getPropertyFilter(database, property.id) || getPropertySort(database, property.id) || database.groupBy === property.id || isPropertyFrozen(database, property.id) || getPropertyCalculationMode(database, property.id)) {
           classes.push("is-active");
         }
         if (headerColor) classes.push("has-header-color");
+        if (isIconOnly) classes.push("is-icon-only");
+
+        const iconHTML = isIconOnly
+          ? `<span class="page-database-col-icon">${escapeHTML(getPropertyDefaultIcon(property))}</span>`
+          : buildPropertyIconHTML(property);
 
         return `
           <div class="${classes.join(" ")}" data-db-prop-col="${escapeHTML(property.id)}" data-db-header-prop-id="${escapeHTML(property.id)}" draggable="true"${headerColor ? ` style="--page-db-header-accent:${escapeHTML(headerColor)};"` : ""}>
-            <button type="button" class="page-database-col-head" data-db-action="open-property-menu" data-prop-id="${escapeHTML(property.id)}" aria-haspopup="menu">
+            <button type="button" class="page-database-col-head" data-db-action="open-property-menu" data-prop-id="${escapeHTML(property.id)}" aria-haspopup="menu" aria-label="${escapeHTML(property.name)}" title="${escapeHTML(property.name)}">
               <span class="page-database-col-main">
-                ${buildPropertyIconHTML(property)}
-                <span class="page-database-col-label">${escapeHTML(property.name)}</span>
+                ${iconHTML}
+                ${isIconOnly ? "" : `<span class="page-database-col-label">${escapeHTML(property.name)}</span>`}
               </span>
               <span class="page-database-col-markers">${buildPropertyIndicatorsHTML(database, property)}</span>
             </button>
@@ -3802,7 +5753,7 @@
             ? `<div class="page-database-group-row"><span>${escapeHTML(group.label)}</span><span>${group.rows.length}</span></div>`
             : "";
           const groupRows = group.rows.map((row) => `
-            <div class="page-database-row-shell${row.color ? " has-row-color" : ""}" data-db-row-shell-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
+            <div class="page-database-row-shell${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-row-shell-id="${escapeHTML(row.id)}" data-db-row-page-id="${escapeHTML(row.pageId || "")}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
               <div class="page-database-row-actions page-database-row-actions-left">
                 <button type="button" class="page-database-row-action page-database-row-menu-trigger" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
               </div>
@@ -3831,10 +5782,13 @@
       : "";
 
     const filteredNote = !visibleRows.length && database.rows.length
-      ? `<div class="page-database-empty-note">No pages match the current filters.</div>`
+      ? `<div class="page-database-empty-note">${folderMode ? "No items match the current filters." : "No pages match the current filters."}</div>`
       : "";
     const hiddenNote = !visibleProperties.length
       ? `<div class="page-database-empty-note">All properties are hidden in table view.</div>`
+      : "";
+    const folderNote = folderMode
+      ? `<div class="page-database-empty-note">${escapeHTML(getFolderStatusText(database) || "Folder rows are refreshed from the connected folder.")}</div>`
       : "";
 
     return `
@@ -3854,7 +5808,8 @@
         </div>
         ${filteredNote}
         ${hiddenNote}
-        <button type="button" class="page-database-new-row" data-db-action="add-row">+ New page</button>
+        ${folderNote}
+        ${folderMode ? "" : `<button type="button" class="page-database-new-row" data-db-action="add-row">+ New page</button>`}
       </div>
     `;
   }
@@ -3864,15 +5819,16 @@
     return `
       <div class="page-database-calendar-shell">
         <div class="page-calendar-toolbar">
-          <div class="page-calendar-nav">
-            <button type="button" class="page-calendar-nav-btn" data-calendar-action="prev">←</button>
-            <button type="button" class="page-calendar-nav-btn today" data-calendar-action="today">Today</button>
-            <button type="button" class="page-calendar-nav-btn" data-calendar-action="next">→</button>
-          </div>
           <div class="page-calendar-month">${escapeHTML(viewData.monthLabel)}</div>
+            <div class="page-calendar-nav">
+              <button type="button" class="page-calendar-nav-btn" data-calendar-action="prev" aria-label="Previous month">‹</button>
+              <button type="button" class="page-calendar-nav-btn today" data-calendar-action="today">Today</button>
+              <button type="button" class="page-calendar-nav-btn" data-calendar-action="next" aria-label="Next month">›</button>
+            </div>
         </div>
-        <div class="page-calendar-weekdays">${viewData.weekdaysHTML}</div>
-        <div class="page-calendar-grid">${viewData.bodyHTML}</div>
+          ${viewData.weekdaysHTML
+            ? `<div class="page-calendar-weekdays">${viewData.weekdaysHTML}</div><div class="page-calendar-grid">${viewData.bodyHTML}</div>`
+            : `<div class="page-calendar-body">${viewData.bodyHTML}</div>`}
       </div>
     `;
   }
@@ -3973,10 +5929,11 @@
     const showAddCoverButton = previewMode === "page-cover" && !previewSource;
 
     return `
-      <div class="page-database-board-card size-${escapeHTML(cardSize)} layout-${escapeHTML(cardLayout)}${previewSource ? " has-preview" : ""}${showAddCoverButton ? " can-add-cover" : ""}${row.color ? " has-row-color" : ""}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""} draggable="true">
+      <div class="page-database-board-card size-${escapeHTML(cardSize)} layout-${escapeHTML(cardLayout)}${previewSource ? " has-preview" : ""}${showAddCoverButton ? " can-add-cover" : ""}${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""} draggable="true">
         ${showPreview
           ? `<button type="button" class="page-database-board-card-preview has-image" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Replace cover"><img src="${escapeHTML(previewSource)}" alt="" /></button>`
           : ""}
+        <button type="button" class="page-database-board-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
         ${showAddCoverButton
           ? `<button type="button" class="page-database-board-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
           : ""}
@@ -4083,31 +6040,40 @@
 
   function buildGalleryCardHTML(database, row) {
     const previewSource = getBoardCardPreviewSource(row);
-    const cardFields = getGalleryCardFields(database, row, 2);
+    const cardSize = getGalleryCardSize(database);
+    const cardFields = getGalleryCardFields(database, row, getGalleryCardFieldCount(database));
+    const showAddCoverButton = !previewSource;
 
     return `
-      <button type="button" class="page-database-gallery-card${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" data-item-id="${escapeHTML(row.id)}"${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
-        ${previewSource
-          ? `<div class="page-database-gallery-card-preview"><img src="${escapeHTML(previewSource)}" alt="" /></div>`
-          : ""}
-        <div class="page-database-gallery-card-body">
-          <div class="page-database-gallery-card-title">${escapeHTML(getRowTitle(database, row))}</div>
-          ${cardFields.length
-            ? `<div class="page-database-gallery-card-fields">${cardFields.map((entry) => `
-                <div class="page-database-gallery-card-field${entry.property.type === "tag" ? " is-tag" : ""}">
-                  <span class="page-database-gallery-card-field-label">${escapeHTML(entry.property.name)}</span>
-                  <span class="page-database-gallery-card-field-value">${entry.valueHTML}</span>
-                </div>
-              `).join("")}</div>`
+      <div class="page-database-gallery-card-shell${showAddCoverButton ? " can-add-cover" : ""}${row.archived ? " is-archived" : ""}">
+        <button type="button" class="page-database-gallery-card size-${escapeHTML(cardSize)}${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-row-id="${escapeHTML(row.id)}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
+          ${previewSource
+            ? `<div class="page-database-gallery-card-preview"><img src="${escapeHTML(previewSource)}" alt="" /></div>`
             : ""}
-        </div>
-      </button>
+          <div class="page-database-gallery-card-body">
+            <div class="page-database-gallery-card-title">${escapeHTML(getRowTitle(database, row))}</div>
+            ${cardFields.length
+              ? `<div class="page-database-gallery-card-fields">${cardFields.map((entry) => `
+                  <div class="page-database-gallery-card-field${entry.property.type === "tag" ? " is-tag" : ""}">
+                    <span class="page-database-gallery-card-field-label">${escapeHTML(entry.property.name)}</span>
+                    <span class="page-database-gallery-card-field-value">${entry.valueHTML}</span>
+                  </div>
+                `).join("")}</div>`
+              : ""}
+          </div>
+        </button>
+        <button type="button" class="page-database-gallery-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
+        ${showAddCoverButton
+          ? `<button type="button" class="page-database-gallery-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
+          : ""}
+      </div>
     `;
   }
 
   function buildGalleryViewHTML(database, options = {}) {
     const readOnly = !!options.readOnly;
     const visibleRows = getVisibleRows(database);
+    const cardSize = getGalleryCardSize(database);
     const cardsHTML = visibleRows.length
       ? visibleRows.map((row) => buildGalleryCardHTML(database, row)).join("")
       : `
@@ -4120,25 +6086,29 @@
 
     return {
       weekdaysHTML: "",
-      bodyHTML: `<div class="page-database-gallery">${cardsHTML}</div>`,
+      bodyHTML: `<div class="page-database-gallery size-${escapeHTML(cardSize)}">${cardsHTML}</div>`,
       metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
       monthLabel: "Gallery view"
     };
   }
 
-  function buildPageEditorHTML(database) {
+  function buildPageEditorHTML(database, options = {}) {
     return database.view === "calendar"
       ? buildPageCalendarShellHTML(database)
       : database.view === "board"
         ? buildBoardViewHTML(database).bodyHTML
         : database.view === "gallery"
           ? buildGalleryViewHTML(database).bodyHTML
-      : buildPageTableEditorHTML(database);
+          : database.view === "checklist"
+            ? buildChecklistViewHTML(database, options).bodyHTML
+      : buildPageTableEditorHTML(database, options);
   }
 
   function buildTableViewHTML(database, options = {}) {
     const readOnly = !!options.readOnly;
+    const folderMode = isFolderDatabase(database);
     const visibleProperties = getVisibleTableProperties(database).slice(0, 4);
+    const visibleRows = getVisibleRows(database);
 
     if (!visibleProperties.length) {
       return {
@@ -4149,7 +6119,7 @@
             <div class="page-calendar-empty-copy">Open Settings and change Property visibility to show columns again.</div>
           </div>
         `,
-        metaText: `${database.rows.length} row${database.rows.length === 1 ? "" : "s"} in this view`,
+        metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
         monthLabel: "Table view"
       };
     }
@@ -4160,9 +6130,9 @@
       return "minmax(120px, 1fr)";
     }).join(" ");
 
-    const rowsHTML = database.rows.length
-      ? database.rows.map((row) => `
-          <div class="page-calendar-row" data-item-id="${escapeHTML(row.id)}" draggable="true" style="grid-template-columns:${gridTemplate}; min-width: 100%;">
+    const rowsHTML = visibleRows.length
+      ? visibleRows.map((row) => `
+          <div class="page-calendar-row${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""} draggable="true" style="grid-template-columns:${gridTemplate}; min-width: 100%;">
             ${visibleProperties.map((property, index) => {
               const rawValue = property.type === "summary"
                 ? getComputedPropertyRawValue(database, row, property)
@@ -4177,9 +6147,9 @@
         `).join("")
       : `
           <div class="page-calendar-empty">
-            <div class="page-calendar-empty-title">This view is empty.</div>
-            <div class="page-calendar-empty-copy">Rows are created on the source database page and can be shown here as a view.</div>
-            ${readOnly ? "" : `<button type="button" class="page-calendar-add-btn" data-db-action="add-row">+ New row</button>`}
+            <div class="page-calendar-empty-title">${folderMode ? "No folder items are available." : "This view is empty."}</div>
+            <div class="page-calendar-empty-copy">${folderMode ? escapeHTML(database?.folderState?.lastErrorMessage || "Refresh the connected folder to rescan files and subfolders.") : "Rows are created on the source database page and can be shown here as a view."}</div>
+            ${readOnly || folderMode ? "" : `<button type="button" class="page-calendar-add-btn" data-db-action="add-row">+ New row</button>`}
           </div>
         `;
 
@@ -4193,12 +6163,13 @@
           ${rowsHTML}
         </div>
       `,
-      metaText: `${database.rows.length} row${database.rows.length === 1 ? "" : "s"} in this view`,
+      metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
       monthLabel: "Table view"
     };
   }
 
-  function buildCalendarViewHTML(database) {
+  function buildCalendarViewHTML(database, options = {}) {
+    const readOnly = !!options.readOnly;
     const dateProperty = getDateProperty(database);
     if (!dateProperty) {
       return {
@@ -4221,8 +6192,9 @@
     startDate.setDate(1 - monthDate.getDay());
     const todayKey = toDayKey(new Date());
     const rowsByDay = new Map();
+    const visibleRows = getVisibleRows(database);
 
-    database.rows.forEach((row) => {
+    visibleRows.forEach((row) => {
       const dayKey = getDateStartValue(getRowValue(row, dateProperty.id));
       if (!dayKey) return;
       if (!rowsByDay.has(dayKey)) rowsByDay.set(dayKey, []);
@@ -4237,25 +6209,23 @@
       const cellDate = new Date(startDate);
       cellDate.setDate(startDate.getDate() + index);
       const dayKey = toDayKey(cellDate);
-      const rows = (rowsByDay.get(dayKey) || []).slice().sort((left, right) => getRowTitle(database, left).localeCompare(getRowTitle(database, right)));
+      const rows = rowsByDay.get(dayKey) || [];
       const isOutside = cellDate.getMonth() !== monthDate.getMonth();
       const isToday = dayKey === todayKey;
       const visibleItems = rows.slice(0, 3).map((row) => `
-        <div class="page-calendar-event" data-item-id="${escapeHTML(row.id)}" draggable="true">
+        <button type="button" class="page-calendar-event${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""} draggable="true">
           <span class="page-calendar-event-title">${escapeHTML(getRowTitle(database, row))}</span>
-          <span class="page-calendar-event-props">${buildRowChipsHTML(database, row)}</span>
-        </div>
+        </button>
       `).join("");
 
       return `
         <div class="page-calendar-day${isOutside ? " outside" : ""}${isToday ? " today" : ""}" data-calendar-date="${dayKey}">
           <div class="page-calendar-day-top">
             <span class="page-calendar-day-number">${cellDate.getDate()}</span>
-            ${rows.length ? `<span class="page-calendar-day-count">${rows.length}</span>` : ""}
           </div>
           <div class="page-calendar-day-events">
             ${visibleItems}
-            <button type="button" class="page-calendar-add-inline" data-db-action="add-row" data-date="${dayKey}">+ New</button>
+            ${readOnly ? "" : `<button type="button" class="page-calendar-add-inline" data-db-action="add-row" data-date="${dayKey}" aria-label="Add row on ${escapeHTML(dayKey)}">+</button>`}
             ${rows.length > 3 ? `<div class="page-calendar-more">+${rows.length - 3} more</div>` : ""}
           </div>
         </div>
@@ -4265,7 +6235,7 @@
     return {
       weekdaysHTML,
       bodyHTML: daysHTML,
-      metaText: `${database.rows.length} row${database.rows.length === 1 ? "" : "s"} in this view`,
+      metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
       monthLabel: formatMonthLabel(monthKey)
     };
   }
@@ -4427,6 +6397,8 @@
   function openRowMenu(anchorEl, context, database, rowId = "") {
     const row = getRowById(database, rowId);
     if (!row) return;
+    const folderMode = isFolderDatabase(database);
+    const isArchivedRow = !!row.archived;
     const menuEl = mountDatabaseFloatingEl(ROW_MENU_ID, "topbar-dropdown page-database-floating-menu", anchorEl, {
       align: "right",
       closeAll: false
@@ -4456,21 +6428,32 @@
         });
       });
     }, { active: !!row.color });
-    appendMenuButton(menuEl, "Duplicate", () => {
-      const nextRow = duplicateRowInDatabase(database, rowId);
-      saveDatabaseForContext(context, database);
-      if (context.kind === "page" && nextRow) {
-        pendingDatabaseFocus = {
-          context,
-          rowId: nextRow.id,
-          propId: getTitleProperty(database).id
-        };
+    if (folderMode) {
+      appendMenuDivider(menuEl);
+      appendMenuLabel(menuEl, "Folder rows are refreshed from the connected folder.");
+      return;
+    }
+    if (!isArchivedRow) {
+      appendMenuButton(menuEl, "Duplicate", () => {
+        const nextRow = duplicateRowInDatabase(database, rowId);
+        if (nextRow) syncDatabaseRowPageForRow(context, database, nextRow.id);
+        saveDatabaseForContext(context, database);
+        if (context.kind === "page" && nextRow) {
+          pendingDatabaseFocus = {
+            context,
+            rowId: nextRow.id,
+            propId: getTitleProperty(database).id
+          };
+        }
+        rerenderCalendarContext(context);
+        closeDatabaseMenus();
+      });
+    }
+    appendMenuButton(menuEl, isArchivedRow ? "Delete permanently" : "Delete", () => {
+      if (!isArchivedRow) {
+        syncRowBacklinksOnDelete(getContextDatabaseSource(context), database, row);
       }
-      rerenderCalendarContext(context);
-      closeDatabaseMenus();
-    });
-    appendMenuButton(menuEl, "Delete", () => {
-      syncRowBacklinksOnDelete(getContextDatabaseSource(context), database, row);
+      removeDatabaseRowPageRecord(row);
       deleteRowFromDatabase(database, rowId);
       saveDatabaseForContext(context, database);
       rerenderCalendarContext(context);
@@ -4552,14 +6535,12 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { active: database.view === "table" });
-    if (context.kind === "page") {
       appendMenuButton(menuEl, "Calendar", () => {
         database.view = "calendar";
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         closeDatabaseMenus();
       }, { active: database.view === "calendar" });
-    }
     appendMenuButton(menuEl, "Board", () => {
       database.view = "board";
       saveDatabaseForContext(context, database);
@@ -4572,6 +6553,12 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { active: database.view === "gallery" });
+    appendMenuButton(menuEl, "Checklist", () => {
+      database.view = "checklist";
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+      closeDatabaseMenus();
+    }, { active: database.view === "checklist" });
   }
 
   function getInlineDatabaseHost(context) {
@@ -4691,6 +6678,12 @@
           rerenderCalendarContext(context);
           closeDatabaseMenus();
         }, { active: activeView === "table" });
+        appendMenuButton(submenuEl, "Calendar", () => {
+          database.view = "calendar";
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: activeView === "calendar" });
         appendMenuButton(submenuEl, "Board", () => {
           database.view = "board";
           saveDatabaseForContext(context, database);
@@ -4703,6 +6696,12 @@
           rerenderCalendarContext(context);
           closeDatabaseMenus();
         }, { active: activeView === "gallery" });
+        appendMenuButton(submenuEl, "Checklist", () => {
+          database.view = "checklist";
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: activeView === "checklist" });
       });
     });
 
@@ -4758,6 +6757,8 @@
         ? "Board"
         : database.view === "gallery"
           ? "Gallery"
+          : database.view === "checklist"
+            ? "Checklist"
         : "Table";
   }
 
@@ -4863,9 +6864,25 @@
     appendMenuButton(menuEl, `View: ${getDatabaseViewLabel(database)}`, () => {
       openViewMenu(anchorEl, context, database);
     });
+    appendMenuButton(menuEl, `Show history${database.showHistory ? ": On" : ""}`, () => {
+      database.showHistory = !database.showHistory;
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+      closeDatabaseMenus();
+    }, { active: !!database.showHistory });
     if (database.view === "board") {
       appendMenuSubmenuButton(menuEl, "Layout", (buttonEl) => {
         openBoardLayoutSettingsMenu(buttonEl, context, database);
+      });
+    }
+    if (database.view === "gallery") {
+      appendMenuSubmenuButton(menuEl, "Layout", (buttonEl) => {
+        openGalleryLayoutSettingsMenu(buttonEl, context, database);
+      });
+    }
+    if (database.view === "checklist") {
+      appendMenuSubmenuButton(menuEl, "Layout", (buttonEl) => {
+        openChecklistLayoutSettingsMenu(buttonEl, context, database);
       });
     }
     appendMenuSubmenuButton(menuEl, `Property visibility (${visiblePropertyCount}/${database.properties.length})`, (buttonEl) => {
@@ -4883,7 +6900,13 @@
     appendMenuSubmenuButton(menuEl, `Edit properties (${database.properties.length})`, (buttonEl) => {
       openPropertySubmenu(buttonEl, "Edit properties", (submenuEl) => {
         database.properties.forEach((property) => {
-          appendMenuButton(submenuEl, property.name, () => {
+          const folderAutoFillLabel = isFolderDatabase(database) && !isFolderSystemProperty(property)
+            ? normalizeFolderAutoFill(property.folderAutoFill || "", property.type)
+            : "";
+          const propertyMenuLabel = folderAutoFillLabel
+            ? `${property.name} · ${getFolderAutoFillLabel(folderAutoFillLabel, property.type)}`
+            : property.name;
+          appendMenuButton(submenuEl, propertyMenuLabel, () => {
             closeDatabaseMenus();
             const propertyAnchor = findPropertyHeaderButton(context, property.id) || anchorEl;
             openPropertyMenu(propertyAnchor, context, database, property.id);
@@ -4895,6 +6918,11 @@
           openPropertyComposer(anchorEl, context, database);
         });
       });
+    });
+    appendMenuSubmenuButton(menuEl, getResetMenuHeading(database.resetConfig), (buttonEl) => {
+      openDatabaseResetScheduleMenu(buttonEl, context, database);
+    }, {
+      active: normalizeResetConfig(database.resetConfig || {}).enabled
     });
 
     appendMenuDivider(menuEl);
@@ -4929,6 +6957,163 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { active: hasCalculations });
+  }
+
+  function openDatabaseResetScheduleMenu(anchorEl, context, database) {
+    const menuEl = mountDatabaseFloatingEl(DATABASE_SUBMENU_ID, "topbar-dropdown page-database-floating-menu page-database-reset-menu", anchorEl, {
+      align: "submenu-right",
+      offset: 4,
+      closeAll: false
+    });
+
+    const properties = safeParseArray(database?.properties || []);
+    const selectableFields = properties.filter((property) => property.type !== "title");
+    const current = normalizeResetConfig(database?.resetConfig || {}, properties);
+
+    menuEl.innerHTML = `
+      <div class="topbar-dropdown-label">Reset schedule</div>
+      <div class="page-database-reset-fields">
+        <label class="page-database-reset-field">
+          <span class="page-database-reset-field-label">Frequency</span>
+          <select class="page-database-reset-select" data-reset-input="frequency">
+            <option value="none">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label class="page-database-reset-field">
+          <span class="page-database-reset-field-label">Interval</span>
+          <input class="page-database-reset-input" data-reset-input="custom-days" type="number" min="1" max="365" step="1" value="${normalizeResetCustomDays(current.customDays)}" />
+          <span class="page-database-reset-field-help" data-reset-input="interval-help">days</span>
+        </label>
+        <label class="page-database-reset-field">
+          <span class="page-database-reset-field-label">Reset mode</span>
+          <select class="page-database-reset-select" data-reset-input="mode">
+            <option value="clear-fields">Clear selected fields</option>
+            <option value="delete-all">Delete all rows</option>
+          </select>
+        </label>
+      </div>
+      <div class="page-database-reset-fields-title">Fields to clear</div>
+      <div class="page-database-reset-checkboxes" data-reset-input="fields"></div>
+      <div class="page-database-reset-caption">When a reset runs, previous row state is marked as archived and moved into history.</div>
+      <div class="page-database-reset-actions">
+        <button type="button" class="topbar-dropdown-btn" data-reset-action="save">Save schedule</button>
+        <button type="button" class="topbar-dropdown-btn" data-reset-action="disable">Disable</button>
+      </div>
+    `;
+
+    const frequencyEl = menuEl.querySelector('[data-reset-input="frequency"]');
+    const customDaysEl = menuEl.querySelector('[data-reset-input="custom-days"]');
+    const modeEl = menuEl.querySelector('[data-reset-input="mode"]');
+    const fieldsEl = menuEl.querySelector('[data-reset-input="fields"]');
+    const saveBtn = menuEl.querySelector('[data-reset-action="save"]');
+    const disableBtn = menuEl.querySelector('[data-reset-action="disable"]');
+    const intervalHelpEl = menuEl.querySelector('[data-reset-input="interval-help"]');
+
+    if (!frequencyEl || !customDaysEl || !modeEl || !fieldsEl || !saveBtn || !disableBtn || !intervalHelpEl) return menuEl;
+
+    frequencyEl.value = current.enabled ? current.frequency : "none";
+    modeEl.value = current.mode;
+
+    if (!selectableFields.length) {
+      fieldsEl.innerHTML = `<div class="page-database-reset-empty">No editable fields are available for clearing.</div>`;
+    } else {
+      fieldsEl.innerHTML = selectableFields.map((property) => {
+        const checked = current.fieldsToClear.includes(property.id) ? "checked" : "";
+        return `
+          <label class="page-database-reset-checkbox-item">
+            <input type="checkbox" value="${escapeHTML(property.id)}" ${checked} />
+            <span>${escapeHTML(property.name)}</span>
+          </label>
+        `;
+      }).join("");
+    }
+
+    const updateFieldState = () => {
+      const frequencyValue = normalizeResetFrequency(frequencyEl.value || "none");
+      const fieldsEnabled = modeEl.value === "clear-fields";
+      const intervalUnit = frequencyValue === "weekly"
+        ? "weeks"
+        : frequencyValue === "monthly"
+          ? "months"
+          : "days";
+      customDaysEl.disabled = frequencyValue === "none";
+      intervalHelpEl.textContent = intervalUnit;
+      fieldsEl.classList.toggle("is-disabled", !fieldsEnabled);
+      fieldsEl.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.disabled = !fieldsEnabled;
+      });
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "submenu-right", offset: 4 });
+    };
+
+    frequencyEl.addEventListener("change", updateFieldState);
+    modeEl.addEventListener("change", updateFieldState);
+    updateFieldState();
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "submenu-right", offset: 4 });
+
+    saveBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+
+      const selectedFields = Array.from(fieldsEl.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value || "");
+      const nextFrequency = normalizeResetFrequency(frequencyEl.value || "none");
+      const nextMode = normalizeResetMode(modeEl.value || "clear-fields");
+      const nextCustomDays = normalizeResetCustomDays(customDaysEl.value || current.customDays);
+
+      if (nextFrequency === "none") {
+        showAppToast?.("Reset schedule is off. Choose a frequency to enable it.", "info");
+        return;
+      }
+
+      if (nextMode === "clear-fields" && !selectedFields.length) {
+        showAppToast?.("Select at least one field to clear, or choose Delete all rows.", "info");
+        return;
+      }
+
+      const previous = normalizeResetConfig(database.resetConfig || {}, properties);
+      const normalizedFields = normalizeResetFieldsToClear(selectedFields, properties);
+      const nowIso = new Date().toISOString();
+      const scheduleChanged = previous.frequency !== nextFrequency
+        || previous.mode !== nextMode
+        || normalizeResetCustomDays(previous.customDays) !== nextCustomDays
+        || JSON.stringify([...previous.fieldsToClear].sort()) !== JSON.stringify([...normalizedFields].sort());
+
+      database.resetConfig = normalizeResetConfig({
+        enabled: true,
+        frequency: nextFrequency,
+        mode: nextMode,
+        customDays: nextCustomDays,
+        fieldsToClear: normalizedFields,
+        updatedAt: nowIso,
+        lastResetAt: (!previous.enabled || scheduleChanged) ? nowIso : (previous.lastResetAt || nowIso)
+      }, properties);
+
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+      closeDatabaseMenus();
+      showAppToast?.(`Reset schedule saved (${getResetFrequencyLabel(database.resetConfig)}).`, "success");
+    });
+
+    disableBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      database.resetConfig = normalizeResetConfig({
+        enabled: false,
+        frequency: "none",
+        mode: current.mode,
+        customDays: current.customDays,
+        fieldsToClear: current.fieldsToClear,
+        updatedAt: new Date().toISOString(),
+        lastResetAt: current.lastResetAt
+      }, properties);
+      saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context);
+      closeDatabaseMenus();
+      showAppToast?.("Reset schedule disabled.", "success");
+    });
+
+    return menuEl;
   }
 
   function openDatabaseFilterMenu(anchorEl, context, database) {
@@ -5037,6 +7222,8 @@
 
   function openPropertyComposer(anchorEl, context, database, options = {}) {
     const insertIndex = Number.isInteger(options.insertIndex) ? options.insertIndex : database.properties.length;
+    const openPanelOnComplex = options.openPanelOnComplex !== false;
+    const onCommit = typeof options.onCommit === "function" ? options.onCommit : null;
     const composerEl = mountDatabaseFloatingEl(PROPERTY_COMPOSER_ID, "page-database-composer topbar-dropdown", anchorEl);
     composerEl.innerHTML = `
       <div class="page-database-composer-head">New property</div>
@@ -5056,7 +7243,10 @@
       }, insertIndex);
       saveDatabaseForContext(context, database);
       rerenderCalendarContext(context);
-      if (["status", "select", "relation", "summary", "formula"].includes(type)) {
+      if (typeof onCommit === "function") {
+        window.requestAnimationFrame(() => onCommit({ propertyId, type }));
+      }
+      if (openPanelOnComplex && ["status", "select", "relation", "summary", "formula"].includes(type)) {
         closeDatabaseMenus();
         openPropertyPanel(context, database, propertyId);
         return;
@@ -5193,6 +7383,7 @@
 
   function buildSelectPropertyPanelHTML(property, database) {
     const options = getPropertySelectOptions(property);
+    const showFolderAutoFill = isFolderDatabase(database) && !isFolderSystemProperty(property) && getSupportedFolderAutoFillOptions(property.type).length > 1;
     return `
       <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
       <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
@@ -5214,6 +7405,12 @@
             <span>Icon</span>
             <span class="page-database-property-panel-item-meta">${escapeHTML(getPropertyIconLabel(property))}</span>
           </button>
+          ${showFolderAutoFill ? `
+            <button type="button" class="page-database-property-panel-item" data-db-action="open-folder-autofill-menu" data-prop-id="${escapeHTML(property.id)}">
+              <span>Folder autofill</span>
+              <span class="page-database-property-panel-item-meta">${escapeHTML(getFolderAutoFillLabel(property.folderAutoFill || "", property.type))}</span>
+            </button>
+          ` : ""}
           <section class="page-database-status-group page-database-select-group">
             <div class="page-database-status-group-head page-database-select-group-head">
               <span>Options</span>
@@ -5528,6 +7725,23 @@
       });
     }
 
+    if (isFolderSystemProperty(property)) {
+      appendMenuLabel(actionsEl, "Scanned folder field");
+    }
+
+    if (isFolderDatabase(database) && !isFolderSystemProperty(property) && getSupportedFolderAutoFillOptions(property.type).length > 1) {
+      appendMenuSubmenuButton(actionsEl, "Folder autofill", (buttonEl) => {
+        openPropertySubmenu(buttonEl, "Folder autofill", (submenuEl) => {
+          getSupportedFolderAutoFillOptions(property.type).forEach((entry) => {
+            appendMenuButton(submenuEl, entry.label, () => {
+              setPropertyFolderAutoFill(database, property.id, entry.value);
+              commit();
+            }, { active: normalizeFolderAutoFill(property.folderAutoFill || "", property.type) === entry.value });
+          });
+        });
+      }, { active: !!normalizeFolderAutoFill(property.folderAutoFill || "", property.type) });
+    }
+
     appendMenuSubmenuButton(actionsEl, "Icon", (buttonEl) => {
       openPropertyIconMenu(buttonEl, context, database, property.id);
     }, { active: property.showIcon === false || !!String(property.icon || "").trim() });
@@ -5658,7 +7872,13 @@
 
     if (viewPillEl) viewPillEl.textContent = getViewPillLabel(database);
 
-    if (editorHost) editorHost.innerHTML = buildPageEditorHTML(database);
+    if (editorHost) {
+      const availableWidth = Math.max(0, (editorHost.clientWidth || surfaceEl.clientWidth || 0) - DB_CONTROL_WIDTH - 30);
+      editorHost.innerHTML = buildPageEditorHTML(database, {
+        fitWidth: database.view === "table",
+        availableWidth
+      });
+    }
     autoGrowDatabaseTextareas(surfaceEl);
     applyFrozenColumns(surfaceEl, database);
 
@@ -5680,10 +7900,12 @@
     const filterButton = surfaceEl.querySelector('[data-db-action="open-filter-menu"]');
     const sortButton = surfaceEl.querySelector('[data-db-action="open-sort-menu"]');
     const groupButton = surfaceEl.querySelector('[data-db-action="open-group-menu"]');
+    const folderButton = surfaceEl.querySelector('.page-database-folder-btn');
     const moreButton = surfaceEl.querySelector('[data-db-action="open-database-menu"]');
     const newButton = surfaceEl.querySelector('.page-database-block-toolbar-actions [data-db-action="add-row"]');
     const contentEl = surfaceEl.querySelector(".page-database-block-content");
     const source = getEmbedSourceTarget(surfaceEl);
+    const folderAction = getFolderActionConfig(database, source || null);
     const activeView = normalizeEmbedView(database.view, "table");
     const collapsed = isInlineDatabaseCollapsed(surfaceEl);
 
@@ -5701,11 +7923,13 @@
     if (viewButton) {
       viewButton.textContent = getInlineViewLabel(activeView);
       viewButton.disabled = !source;
+      viewButton.hidden = !!source && collapsed;
     }
 
     if (collapseButton) {
-      collapseButton.textContent = collapsed ? "<<" : ">>";
-      collapseButton.setAttribute("aria-label", collapsed ? "Expand inline toolbar" : "Collapse inline toolbar");
+      collapseButton.hidden = !source;
+      collapseButton.textContent = collapsed ? "▸" : "▾";
+      collapseButton.setAttribute("aria-label", collapsed ? "Show database controls" : "Hide database controls");
     }
 
     surfaceEl.classList.toggle("is-inline-toolbar-collapsed", !!source && collapsed);
@@ -5714,13 +7938,25 @@
       toolbarActionsEl.hidden = !source || collapsed;
     }
 
+    if (settingsButton) settingsButton.hidden = !!source && collapsed;
+
     if (filterButton) filterButton.classList.toggle("active", Array.isArray(database.filters) && database.filters.length > 0);
     if (sortButton) sortButton.classList.toggle("active", Array.isArray(database.sorts) && database.sorts.length > 0);
     if (groupButton) groupButton.classList.toggle("active", !!database.groupBy);
+    if (folderButton) {
+      folderButton.textContent = folderAction.label;
+      folderButton.dataset.dbAction = folderAction.action;
+      folderButton.classList.toggle("active", folderAction.active);
+      folderButton.disabled = !source || folderAction.disabled;
+    }
 
     [filterButton, sortButton, groupButton, moreButton, newButton, settingsButton].forEach((button) => {
       if (button) button.disabled = !source;
     });
+    if (newButton) {
+      newButton.hidden = isFolderDatabase(database);
+      newButton.disabled = !source || isFolderDatabase(database);
+    }
 
     if (contentEl) {
       if (!source) {
@@ -5733,24 +7969,36 @@
             </div>
           </div>
         `;
-        contentEl.classList.remove("board-mode", "table-mode", "gallery-mode");
+        contentEl.classList.remove("board-mode", "calendar-mode", "table-mode", "gallery-mode", "checklist-mode");
+        surfaceEl.querySelector(".page-database-block-scroll")?.classList.remove("board-mode", "calendar-mode", "table-mode", "gallery-mode", "checklist-mode");
         syncInlineDatabaseBlockSize(surfaceEl);
         return;
       }
 
-      contentEl.innerHTML = activeView === "board"
-        ? buildBoardViewHTML({ ...database, view: "board" }).bodyHTML
-        : activeView === "gallery"
-          ? buildGalleryViewHTML({ ...database, view: "gallery" }).bodyHTML
-          : buildPageTableEditorHTML({ ...database, view: "table" });
+      contentEl.innerHTML = activeView === "calendar"
+        ? buildPageCalendarShellHTML({ ...database, view: "calendar" })
+        : activeView === "board"
+          ? buildBoardViewHTML({ ...database, view: "board" }).bodyHTML
+          : activeView === "gallery"
+            ? buildGalleryViewHTML({ ...database, view: "gallery" }).bodyHTML
+            : activeView === "checklist"
+              ? buildChecklistViewHTML({ ...database, view: "checklist" }, { readOnly: false }).bodyHTML
+            : buildPageTableEditorHTML({ ...database, view: "table" });
+      contentEl.classList.toggle("calendar-mode", activeView === "calendar");
       contentEl.classList.toggle("board-mode", activeView === "board");
       contentEl.classList.toggle("gallery-mode", activeView === "gallery");
+      contentEl.classList.toggle("checklist-mode", activeView === "checklist");
       contentEl.classList.toggle("table-mode", activeView === "table");
 
       const blockScroll = surfaceEl.querySelector(".page-database-block-scroll");
       if (blockShell && blockScroll) {
         blockShell.style.width = "100%";
         blockScroll.style.maxWidth = "100%";
+        blockScroll.classList.toggle("calendar-mode", activeView === "calendar");
+        blockScroll.classList.toggle("board-mode", activeView === "board");
+        blockScroll.classList.toggle("gallery-mode", activeView === "gallery");
+        blockScroll.classList.toggle("checklist-mode", activeView === "checklist");
+        blockScroll.classList.toggle("table-mode", activeView === "table");
       }
 
       autoGrowDatabaseTextareas(surfaceEl);
@@ -5771,6 +8019,11 @@
     const normalized = normalizeDatabase(database, {
       defaultView: surfaceEl.dataset.calendarScope === "page" ? "table" : "table"
     });
+    const context = getCalendarContext(surfaceEl);
+    runScheduledDatabaseReset(context, normalized, { trigger: "render" });
+    if (context && syncDatabaseRowPages(context, normalized)) {
+      saveDatabaseForContext(context, normalized);
+    }
 
     if (surfaceEl.dataset.calendarScope === "page") {
       renderPageEditorSurface(surfaceEl, normalized);
@@ -5787,6 +8040,8 @@
         ? "▥ Board"
         : database.view === "gallery"
           ? "◫ Gallery"
+          : database.view === "checklist"
+            ? "☑ Checklist"
         : "▦ Table";
   }
 
@@ -5801,6 +8056,8 @@
     const hasFilters = Array.isArray(database.filters) && database.filters.length;
     const hasSorts = Array.isArray(database.sorts) && database.sorts.length;
     const hasGrouping = !!database.groupBy;
+    const folderAction = getFolderActionConfig(database, { kind: "page", pageId, blockId: "" });
+    const folderMode = isFolderDatabase(database);
 
     return `
       <section class="calendar-db-surface calendar-db-page" data-calendar-scope="page" data-page-id="${escapeHTML(pageId)}">
@@ -5819,7 +8076,8 @@
                 <button type="button" class="page-database-toolbar-btn${hasFilters ? " active" : ""}" data-db-action="open-filter-menu">Filter</button>
                 <button type="button" class="page-database-toolbar-btn${hasSorts ? " active" : ""}" data-db-action="open-sort-menu">Sort</button>
                 <button type="button" class="page-database-toolbar-btn${hasGrouping ? " active" : ""}" data-db-action="open-group-menu">Group</button>
-                <button type="button" class="page-database-toolbar-new-btn" data-db-action="add-row">New</button>
+                <button type="button" class="page-database-toolbar-btn${folderAction.active ? " active" : ""}" data-db-action="${escapeHTML(folderAction.action)}"${folderAction.disabled ? " disabled" : ""}>${escapeHTML(folderAction.label)}</button>
+                ${folderMode ? "" : `<button type="button" class="page-database-toolbar-new-btn" data-db-action="add-row">New</button>`}
               </div>
             </div>
           </div>
@@ -5967,7 +8225,21 @@
       const database = getDatabaseForContext(context);
       const action = dbControl.dataset.dbAction;
 
+      if (action === "connect-folder") {
+        void connectFolderDatabaseContext(context);
+        return;
+      }
+
+      if (action === "refresh-folder") {
+        void refreshFolderDatabaseContext(context, { requestPermission: true });
+        return;
+      }
+
       if (action === "add-row") {
+        if (isFolderDatabase(database)) {
+          window.showAppToast?.("Folder-backed databases refresh rows from the connected folder. Use Refresh Folder instead.", "info");
+          return;
+        }
         const defaults = {};
         const dateProperty = getDateProperty(database);
         const statusProperty = getStatusProperty(database);
@@ -5985,6 +8257,7 @@
         }
 
         const row = addRowToDatabase(database, defaults);
+  syncDatabaseRowPageForRow(context, database, row.id);
         saveDatabaseForContext(context, database);
 
         pendingDatabaseFocus = {
@@ -6091,6 +8364,11 @@
         return;
       }
 
+      if (action === "open-row-peek") {
+        openDatabaseRowPeek(dbControl.dataset.dbRowPageId || dbControl.dataset.rowPageId || dbControl.closest('[data-db-row-page-id]')?.dataset.dbRowPageId || "");
+        return;
+      }
+
       if (action === "open-cell-value-menu") {
         openCellValueMenu(dbControl, context, database, dbControl.dataset.dbRowId || "", dbControl.dataset.dbPropId || "");
         return;
@@ -6102,6 +8380,16 @@
         const row = getRowById(database, rowId);
         const nextValue = String(row?.values?.[propertyId] || "") === "true" ? "" : "true";
         commitCellValue(context, database, rowId, propertyId, nextValue);
+        return;
+      }
+
+      if (action === "toggle-checklist-row") {
+        const rowId = dbControl.dataset.rowId || "";
+        const row = getRowById(database, rowId);
+        if (!row) return;
+        setRowChecklistChecked(database, rowId, !row.checklistChecked);
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
         return;
       }
 
@@ -6454,6 +8742,24 @@
         return;
       }
 
+      if (action === "open-folder-autofill-menu") {
+        const propertyId = dbControl.dataset.propId || dbControl.closest(`#${PROPERTY_PANEL_ID}`)?.dataset.propertyId || "";
+        const property = getPropertyById(database, propertyId);
+        if (!property || isFolderSystemProperty(property) || getSupportedFolderAutoFillOptions(property.type).length <= 1) return;
+        openPropertySubmenu(dbControl, "Folder autofill", (submenuEl) => {
+          getSupportedFolderAutoFillOptions(property.type).forEach((entry) => {
+            appendMenuButton(submenuEl, entry.label, () => {
+              setPropertyFolderAutoFill(database, propertyId, entry.value);
+              saveDatabaseForContext(context, database);
+              rerenderCalendarContext(context);
+              refreshPropertyPanel(context, database, propertyId);
+              document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+            }, { active: normalizeFolderAutoFill(getPropertyById(database, propertyId)?.folderAutoFill || "", property.type) === entry.value });
+          });
+        });
+        return;
+      }
+
       if (action === "open-page-icon") {
         if (typeof window.openPageIconPicker === "function") {
           window.openPageIconPicker(context.pageId || getCurrentPageId());
@@ -6472,6 +8778,13 @@
         openPropertyComposer(dbControl, context, database);
         return;
       }
+    }
+
+    const tableRowShell = event.target.closest('.page-database-row-shell[data-db-row-page-id]');
+    const rowShellInteractiveControl = event.target.closest('.page-database-row-action, .page-db-cell-input, .page-db-cell-trigger, .page-db-checkbox-trigger, [data-db-action], button, input, textarea');
+    if (tableRowShell && !rowShellInteractiveControl) {
+      openDatabaseRowPeek(tableRowShell.dataset.dbRowPageId || "");
+      return;
     }
 
     const control = event.target.closest("[data-calendar-action]");
@@ -6539,6 +8852,7 @@
 
       const database = getDatabaseForContext(context);
       updateRowValue(database, cellInput.dataset.dbRowId || "", cellInput.dataset.dbPropId || "", cellInput.value || "");
+  syncDatabaseRowPageForRow(context, database, cellInput.dataset.dbRowId || "");
       saveDatabaseForContext(context, database);
       syncInlineDatabaseBlockSize(context);
       return;
@@ -6594,6 +8908,7 @@
 
     const database = getDatabaseForContext(context);
     updateRowValue(database, cellInput.dataset.dbRowId || "", cellInput.dataset.dbPropId || "", cellInput.value || "");
+    syncDatabaseRowPageForRow(context, database, cellInput.dataset.dbRowId || "");
     saveDatabaseForContext(context, database);
     syncInlineDatabaseBlockSize(context);
   });
@@ -6791,6 +9106,11 @@
   window.syncInlineDatabaseBlockTone = syncInlineDatabaseBlockTone;
   window.applySelectedInlineDatabaseRowColor = applySelectedInlineDatabaseRowColor;
   window.getSelectedInlineDatabaseRowColor = getSelectedInlineDatabaseRowColor;
+  window.getDatabaseRowPeekData = getDatabaseRowPeekData;
+  window.openDatabaseRowPropertyComposer = openDatabaseRowPropertyComposer;
+  window.openDatabaseRowCoverMenu = openDatabaseRowCoverMenu;
+  window.getDatabaseCalloutSources = getDatabaseCalloutSources;
+  window.getDatabaseCalloutSourceData = getDatabaseCalloutSourceData;
   window.mountDatabaseEmbedBlock = function mountDatabaseEmbedBlock(hostEl, options = {}) {
     if (!hostEl) return null;
     if (!hostEl.querySelector(".page-database-block-shell")) return null;
@@ -6809,10 +9129,12 @@
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
+      runScheduledResetsForAllSources();
       renderPageCalendarDatabase(getCurrentPageId());
       renderVisibleDatabaseEmbeds();
     }, { once: true });
   } else {
+    runScheduledResetsForAllSources();
     renderPageCalendarDatabase(getCurrentPageId());
     renderVisibleDatabaseEmbeds();
   }

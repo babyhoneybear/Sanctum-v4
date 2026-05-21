@@ -1,0 +1,193 @@
+.page-board-surface {
+  display: block;
+}
+
+.infinite-canvas-toolbar[hidden] {
+  display: none !important;
+}
+
+.page-board-surface:not(.is-infinite-canvas) .infinite-canvas-toolbar {
+  display: none !important;
+}
+
+.page-board-surface:not(.is-infinite-canvas) .infinite-canvas-viewport {
+  overflow: visible;
+  max-height: none;
+  min-height: 0;
+}
+
+.page-board-surface:not(.is-infinite-canvas) .infinite-canvas-stage {
+  min-width: 0;
+  min-height: 0;
+}
+
+.page-board-surface:not(.is-infinite-canvas) .grid {
+  transform: none !important;
+  width: auto;
+  min-width: 0;
+}
+
+.page-board-surface.is-infinite-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: calc(100vh - 62px);
+}
+
+.infinite-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #2a2a2a;
+  border-radius: 2px;
+  background: rgba(20, 20, 20, 0.94);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  position: sticky;
+  top: 56px;
+  z-index: 24;
+  backdrop-filter: blur(10px);
+}
+
+.infinite-canvas-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.infinite-canvas-toolbar-spacer {
+  flex: 1;
+}
+
+.infinite-canvas-toolbar-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #2f2f2f;
+  border-radius: 2px;
+  background: #181818;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.infinite-canvas-toolbar-btn:hover {
+  background: #202020;
+  color: var(--text-main);
+  border-color: #404040;
+}
+
+.infinite-canvas-toolbar-zoom {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-main);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.infinite-canvas-toolbar-hint {
+  color: var(--muted3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.infinite-canvas-viewport {
+  position: relative;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport {
+  overflow: auto;
+  min-height: min(74vh, calc(100vh - 210px));
+  max-height: calc(100vh - 164px);
+  border: 1px solid #272727;
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at top left, rgba(255,255,255,0.045), transparent 28%),
+    linear-gradient(180deg, #141414 0%, #101010 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+  overscroll-behavior: contain;
+  scrollbar-color: #3a3a3a #121212;
+  scrollbar-width: thin;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-track {
+  background: #121212;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 999px;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport.is-pan-mode {
+  cursor: grab;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-stage {
+  position: relative;
+  min-width: var(--infinite-stage-width, 4800px);
+  min-height: var(--infinite-stage-height, 3200px);
+}
+
+.page-board-surface.is-infinite-canvas .grid {
+  width: var(--infinite-grid-width, 4800px);
+  min-width: var(--infinite-grid-width, 4800px);
+  min-height: var(--infinite-grid-height, 3200px);
+  padding-bottom: 0;
+  transform-origin: 0 0;
+  transform: scale(var(--infinite-canvas-scale, 1));
+}
+
+.page-board-surface.is-infinite-canvas .grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 24%);
+  background-size: 24px 24px, 100% 100%;
+  opacity: 0.35;
+}
+
+body.editing .page-board-surface.is-infinite-canvas .grid {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.14) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: -1px -1px;
+}
+
+body.editing .page-board-surface.is-infinite-canvas .grid::before {
+  opacity: 0.16;
+}
+
+@media (max-width: 860px) {
+  .infinite-canvas-toolbar {
+    flex-wrap: wrap;
+    top: 52px;
+  }
+
+  .infinite-canvas-toolbar-spacer {
+    display: none;
+  }
+
+  .infinite-canvas-toolbar-hint {
+    width: 100%;
+  }
+
+  .page-board-surface.is-infinite-canvas .infinite-canvas-viewport {
+    min-height: calc(100vh - 226px);
+    max-height: calc(100vh - 184px);
+  }
+}

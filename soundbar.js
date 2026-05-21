@@ -6,6 +6,9 @@ let loopTrack = false;
 const musicPlayer = new Audio();
 let soundbarExpanded = false;
 let activeSounds = {};
+const SOUNDBAR_LIBRARY_KEY = 'sanctum_soundbar_library_v1';
+const UPLOADED_TRACK_KEY_PREFIX = 'soundbar-track:';
+const DEFAULT_PLAYER_VOLUME = 1;
 
 const AMBIENT_SOUNDS = [
   { id: 'rain',        label: 'Rain',        icon: '🌧', src: 'sounds/rain.mp3' },
@@ -19,6 +22,228 @@ const AMBIENT_SOUNDS = [
   { id: 'cafe',        label: 'Café',        icon: '☕', src: 'sounds/cafe.mp3' },
   { id: 'thunder',     label: 'Thunder',     icon: '⚡', src: 'sounds/thunderstorm.mp3' },
 ];
+
+function getSoundbarStorage() {
+  return window.SanctumStorage || null;
+}
+
+function createUploadedTrackId() {
+  return `soundtrack-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getUploadedTrackBlobKey(trackId = '') {
+  return `${UPLOADED_TRACK_KEY_PREFIX}${trackId}`;
+}
+
+function getSafeTrackName(value = '') {
+  const safe = String(value || '').trim();
+  return safe || 'Untitled Track';
+}
+
+function revokeTrackObjectUrl(track) {
+  if (!track?.objectUrl || !track.url) return;
+  try {
+    URL.revokeObjectURL(track.url);
+  } catch (err) {
+    console.warn('Failed to revoke track URL', err);
+  }
+  track.objectUrl = false;
+  track.url = '';
+}
+
+function createUploadedTrackEntry(blob, metadata = {}) {
+  const id = metadata.id || createUploadedTrackId();
+  const blobKey = metadata.blobKey || getUploadedTrackBlobKey(id);
+  return {
+    id,
+    name: getSafeTrackName(metadata.name || metadata.fileName || ''),
+    fileName: String(metadata.fileName || ''),
+    mimeType: String(metadata.mimeType || blob?.type || ''),
+    size: Number.isFinite(Number(metadata.size)) ? Number(metadata.size) : Number(blob?.size || 0),
+    source: 'uploaded',
+    blobKey,
+    url: URL.createObjectURL(blob),
+    objectUrl: true,
+  };
+}
+
+function readSoundbarLibrary() {
+  const storage = getSoundbarStorage();
+  return storage?.readJSON
+    ? storage.readJSON(SOUNDBAR_LIBRARY_KEY, {
+        tracks: [],
+        currentTrackId: '',
+        loopTrack: false,
+        volume: DEFAULT_PLAYER_VOLUME,
+      })
+    : {
+        tracks: [],
+        currentTrackId: '',
+        loopTrack: false,
+        volume: DEFAULT_PLAYER_VOLUME,
+      };
+}
+
+function writeSoundbarLibrary() {
+  const storage = getSoundbarStorage();
+  if (!storage?.writeJSON) return false;
+  return storage.writeJSON(SOUNDBAR_LIBRARY_KEY, {
+    tracks: playlist
+      .filter((track) => track?.source === 'uploaded' && track.blobKey)
+      .map((track) => ({
+        id: track.id,
+        blobKey: track.blobKey,
+        name: track.name,
+        fileName: track.fileName || '',
+        mimeType: track.mimeType || '',
+        size: Number.isFinite(Number(track.size)) ? Number(track.size) : 0,
+      })),
+    currentTrackId: playlist[currentTrackIndex]?.id || '',
+    loopTrack,
+    volume: musicPlayer.volume,
+  });
+}
+
+async function flushSoundbarLibrary() {
+  const storage = getSoundbarStorage();
+  if (!storage?.flush) return;
+  try {
+    await storage.flush();
+  } catch (err) {
+    console.warn('Failed to flush soundbar library metadata', err);
+  }
+}
+
+function syncLoopButtonUI() {
+  const btn = document.getElementById('soundLoopBtn');
+  if (!btn) return;
+  btn.classList.toggle('active', loopTrack);
+  btn.title = loopTrack ? 'Loop (on)' : 'Loop';
+}
+
+function syncVolumeUI() {
+  const input = document.getElementById('soundbarVolume');
+  if (!input) return;
+  input.value = String(musicPlayer.volume);
+}
+
+async function restorePersistedPlaylist() {
+  const storage = getSoundbarStorage();
+  if (window.SanctumStorageReady) {
+    try {
+      await window.SanctumStorageReady;
+    } catch (err) {
+      console.warn('Soundbar restore waited on storage init failure', err);
+    }
+  }
+
+  const persisted = readSoundbarLibrary();
+  const persistedVolume = Number(persisted?.volume);
+  loopTrack = !!persisted?.loopTrack;
+  if (Number.isFinite(persistedVolume)) {
+    musicPlayer.volume = Math.max(0, Math.min(1, persistedVolume));
+  }
+  syncLoopButtonUI();
+  syncVolumeUI();
+
+  if (!storage?.getBlob) return;
+
+  const restored = [];
+  let didPruneMissingTracks = false;
+  for (const trackMeta of Array.isArray(persisted?.tracks) ? persisted.tracks : []) {
+    if (!trackMeta?.id) {
+      didPruneMissingTracks = true;
+      continue;
+    }
+
+    const blobKey = typeof trackMeta.blobKey === 'string' && trackMeta.blobKey
+      ? trackMeta.blobKey
+      : getUploadedTrackBlobKey(trackMeta.id);
+    const blob = await storage.getBlob(blobKey);
+    if (!(blob instanceof Blob)) {
+      didPruneMissingTracks = true;
+      continue;
+    }
+
+    restored.push(createUploadedTrackEntry(blob, {
+      ...trackMeta,
+      blobKey,
+    }));
+  }
+
+  playlist = restored;
+  if (!playlist.length) {
+    currentTrackIndex = -1;
+    const trackNameEl = document.getElementById('soundbarTrackName');
+    if (trackNameEl) trackNameEl.textContent = 'No track loaded';
+    return;
+  }
+
+  const restoredIndex = playlist.findIndex((track) => track.id === persisted.currentTrackId);
+  loadTrack(restoredIndex >= 0 ? restoredIndex : 0);
+
+  if (didPruneMissingTracks) {
+    writeSoundbarLibrary();
+    await flushSoundbarLibrary();
+  }
+}
+
+async function addUploadedTracks(files = []) {
+  const storage = getSoundbarStorage();
+  const pendingFiles = Array.from(files || []);
+  if (!pendingFiles.length) return;
+
+  if (!storage?.putBlob) {
+    showAppToast?.('Persistent audio storage is not available in this browser.', 'info');
+    return;
+  }
+
+  const firstNewIndex = playlist.length;
+  let addedCount = 0;
+  let failedCount = 0;
+
+  for (const file of pendingFiles) {
+    const trackId = createUploadedTrackId();
+    const blobKey = getUploadedTrackBlobKey(trackId);
+    const saved = await storage.putBlob(blobKey, file);
+    if (!saved) {
+      failedCount += 1;
+      continue;
+    }
+
+    playlist.push(createUploadedTrackEntry(file, {
+      id: trackId,
+      blobKey,
+      name: file.name.replace(/\.[^.]+$/, ''),
+      fileName: file.name,
+      mimeType: file.type,
+      size: file.size,
+    }));
+    addedCount += 1;
+  }
+
+  if (!addedCount) {
+    showAppToast?.('Those tracks could not be saved locally.', 'info');
+    return;
+  }
+
+  writeSoundbarLibrary();
+  await flushSoundbarLibrary();
+
+  if (currentTrackIndex < 0) {
+    loadTrack(firstNewIndex);
+  } else {
+    renderPlaylist();
+  }
+
+  if (failedCount) {
+    showAppToast?.(`Saved ${addedCount} track${addedCount === 1 ? '' : 's'}, ${failedCount} failed.`, 'info');
+  }
+}
+
+function cleanupPlaylistObjectUrls() {
+  playlist.forEach((track) => revokeTrackObjectUrl(track));
+}
 
 function getAudioContext() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -200,19 +425,54 @@ function renderPlaylist() {
       <span class="playlist-name">${track.name}</span>
       <button class="playlist-remove" data-idx="${i}">✕</button>
     `;
-    item.addEventListener('click', (e) => {
+    item.addEventListener('click', async (e) => {
       if (e.target.classList.contains('playlist-remove')) {
-        const idx = parseInt(e.target.dataset.idx);
-        URL.revokeObjectURL(playlist[idx].url);
+        const idx = parseInt(e.target.dataset.idx, 10);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= playlist.length) return;
+
+        const track = playlist[idx];
+        const isCurrentTrack = idx === currentTrackIndex;
+        const wasPlaying = isCurrentTrack && !musicPlayer.paused;
+
+        if (isCurrentTrack) {
+          musicPlayer.pause();
+          musicPlayer.removeAttribute('src');
+          musicPlayer.load();
+        }
+
+        revokeTrackObjectUrl(track);
+        if (track?.source === 'uploaded' && track.blobKey) {
+          await getSoundbarStorage()?.removeBlob?.(track.blobKey);
+        }
+
         playlist.splice(idx, 1);
-        if (currentTrackIndex >= idx) currentTrackIndex--;
-        if (currentTrackIndex < 0 && playlist.length) currentTrackIndex = 0;
-        renderPlaylist();
+
         if (!playlist.length) {
+          currentTrackIndex = -1;
           musicPlayer.src = '';
           document.getElementById('soundbarTrackName').textContent = 'No track loaded';
           document.getElementById('soundPlayBtn').textContent = '▶';
+          renderPlaylist();
+          writeSoundbarLibrary();
+          await flushSoundbarLibrary();
+          return;
         }
+
+        if (isCurrentTrack) {
+          const nextIndex = Math.min(idx, playlist.length - 1);
+          loadTrack(nextIndex);
+          if (wasPlaying) {
+            playMusic();
+          } else {
+            pauseMusic();
+          }
+        } else {
+          if (currentTrackIndex > idx) currentTrackIndex -= 1;
+          renderPlaylist();
+          writeSoundbarLibrary();
+        }
+
+        await flushSoundbarLibrary();
         return;
       }
       loadTrack(i);
@@ -228,6 +488,7 @@ function loadTrack(index) {
   musicPlayer.src = playlist[index].url;
   document.getElementById('soundbarTrackName').textContent = playlist[index].name;
   renderPlaylist();
+  writeSoundbarLibrary();
 }
 
 function playMusic() {
@@ -256,9 +517,8 @@ musicPlayer.addEventListener('ended', () => {
 
 document.getElementById('soundLoopBtn')?.addEventListener('click', () => {
   loopTrack = !loopTrack;
-  const btn = document.getElementById('soundLoopBtn');
-  btn.classList.toggle('active', loopTrack);
-  btn.title = loopTrack ? 'Loop (on)' : 'Loop';
+  syncLoopButtonUI();
+  writeSoundbarLibrary();
 });
 
 musicPlayer.addEventListener('timeupdate', () => {
@@ -286,6 +546,7 @@ document.getElementById('soundNextBtn')?.addEventListener('click', () => {
 
 document.getElementById('soundbarVolume')?.addEventListener('input', (e) => {
   musicPlayer.volume = parseFloat(e.target.value);
+  writeSoundbarLibrary();
 });
 
 document.getElementById('soundbarProgressWrap')?.addEventListener('click', (e) => {
@@ -299,13 +560,8 @@ document.getElementById('soundUploadBtn')?.addEventListener('click', () => {
   input.type = 'file';
   input.accept = 'audio/*';
   input.multiple = true;
-  input.onchange = () => {
-    Array.from(input.files).forEach(file => {
-      playlist.push({ name: file.name.replace(/\.[^.]+$/, ''), url: URL.createObjectURL(file) });
-    });
-    if (currentTrackIndex < 0 && playlist.length) currentTrackIndex = 0;
-    renderPlaylist();
-    if (playlist.length === 1) loadTrack(0);
+  input.onchange = async () => {
+    await addUploadedTracks(input.files);
   };
   input.click();
 });
@@ -351,5 +607,14 @@ document.querySelectorAll('.soundbar-tab').forEach(tab => {
   });
 });
 
-renderAmbientGrid();
-renderPlaylist();
+window.addEventListener('beforeunload', cleanupPlaylistObjectUrls);
+
+async function initSoundbar() {
+  renderAmbientGrid();
+  await restorePersistedPlaylist();
+  renderPlaylist();
+  syncLoopButtonUI();
+  syncVolumeUI();
+}
+
+initSoundbar();

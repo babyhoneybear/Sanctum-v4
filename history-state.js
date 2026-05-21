@@ -148,6 +148,7 @@ function buildBlockFromData(data) {
     if (data.dbProperties) b.dataset.dbProperties = data.dbProperties;
     if (data.dbRows) b.dataset.dbRows = data.dbRows;
     if (data.dbColumnWidths) b.dataset.dbColumnWidths = data.dbColumnWidths;
+    if (data.dbFolderState) b.dataset.dbFolderState = data.dbFolderState;
     if (data.dbSourceKind) b.dataset.dbSourceKind = data.dbSourceKind;
     if (data.dbSourcePageId) b.dataset.dbSourcePageId = data.dbSourcePageId;
     if (data.dbSourceBlockId) b.dataset.dbSourceBlockId = data.dbSourceBlockId;
@@ -157,6 +158,72 @@ function buildBlockFromData(data) {
     requestAnimationFrame(() => {
       window.mountDatabaseEmbedBlock?.(b);
     });
+  }
+
+  if (data.type === "data-callout") {
+    if (data.dataCalloutLabel) b.dataset.dataCalloutLabel = data.dataCalloutLabel;
+    if (data.dataCalloutSourceType) b.dataset.dataCalloutSourceType = data.dataCalloutSourceType;
+    if (data.dataCalloutSourceKind) b.dataset.dataCalloutSourceKind = data.dataCalloutSourceKind;
+    if (data.dataCalloutSourcePageId) b.dataset.dataCalloutSourcePageId = data.dataCalloutSourcePageId;
+    if (data.dataCalloutSourceBlockId) b.dataset.dataCalloutSourceBlockId = data.dataCalloutSourceBlockId;
+    if (data.dataCalloutPropertyId) b.dataset.dataCalloutPropertyId = data.dataCalloutPropertyId;
+    if (data.dataCalloutMode) b.dataset.dataCalloutMode = data.dataCalloutMode;
+    if (data.dataCalloutRowId) b.dataset.dataCalloutRowId = data.dataCalloutRowId;
+    if (data.dataCalloutSystemKey) b.dataset.dataCalloutSystemKey = data.dataCalloutSystemKey;
+    if (data.dataCalloutSystemTargetKind) b.dataset.dataCalloutSystemTargetKind = data.dataCalloutSystemTargetKind;
+    if (data.dataCalloutSystemTargetPageId) b.dataset.dataCalloutSystemTargetPageId = data.dataCalloutSystemTargetPageId;
+    if (data.dataCalloutSystemFormat) b.dataset.dataCalloutSystemFormat = data.dataCalloutSystemFormat;
+    if (data.dataCalloutAlign) b.dataset.dataCalloutAlign = data.dataCalloutAlign;
+    if (data.dataCalloutSize) b.dataset.dataCalloutSize = data.dataCalloutSize;
+    if (data.dataCalloutLabelPos) b.dataset.dataCalloutLabelPos = data.dataCalloutLabelPos;
+
+    requestAnimationFrame(() => {
+      window.mountDataCalloutBlock?.(b);
+    });
+  }
+
+  if (data.type === "progress") {
+    if (data.progressTitle) b.dataset.progressTitle = data.progressTitle;
+    if (data.progressSourceType) b.dataset.progressSourceType = data.progressSourceType;
+    if (data.progressSourceKind) b.dataset.progressSourceKind = data.progressSourceKind;
+    if (data.progressSourcePageId) b.dataset.progressSourcePageId = data.progressSourcePageId;
+    if (data.progressSourceBlockId) b.dataset.progressSourceBlockId = data.progressSourceBlockId;
+    if (data.progressPropertyId) b.dataset.progressPropertyId = data.progressPropertyId;
+    if (data.progressValueMode) b.dataset.progressValueMode = data.progressValueMode;
+    if (data.progressScope) b.dataset.progressScope = data.progressScope;
+    if (data.progressCurrentValue) b.dataset.progressCurrentValue = data.progressCurrentValue;
+    if (data.progressTargetValue) b.dataset.progressTargetValue = data.progressTargetValue;
+    if (data.progressUnitLabel) b.dataset.progressUnitLabel = data.progressUnitLabel;
+    if (data.progressDeadline) b.dataset.progressDeadline = data.progressDeadline;
+    if (data.progressStyle) b.dataset.progressStyle = data.progressStyle;
+    if (data.progressSize) b.dataset.progressSize = data.progressSize;
+    if (data.progressShowTitle) b.dataset.progressShowTitle = data.progressShowTitle;
+    if (data.progressShowValue) b.dataset.progressShowValue = data.progressShowValue;
+    if (data.progressShowPercent) b.dataset.progressShowPercent = data.progressShowPercent;
+    if (data.progressShowDeadline) b.dataset.progressShowDeadline = data.progressShowDeadline;
+    if (data.progressFillColor) b.dataset.progressFillColor = data.progressFillColor;
+    if (data.progressTrackColor) b.dataset.progressTrackColor = data.progressTrackColor;
+
+    requestAnimationFrame(() => {
+      window.mountProgressBlock?.(b);
+    });
+  }
+
+  if (data.type === "clock") {
+    b.dataset.clockStyle = data.clockStyle || "digital";
+    b.dataset.clockSize = data.clockSize || "md";
+    b.dataset.clockColor = data.clockColor || "#f5f5f5";
+    b.dataset.clockFormat = data.clockFormat || "12";
+    b.dataset.clockShowSeconds = data.clockShowSeconds || "0";
+    b.dataset.clockShowDate = data.clockShowDate || "0";
+
+    requestAnimationFrame(() => {
+      window.mountClockBlock?.(b);
+    });
+  }
+
+  if (data.type === "weblink") {
+    syncWebLinkCardTarget(b, { url: data.externalUrl || "" });
   }
 
   // restore styles if present
@@ -244,6 +311,27 @@ function getMinHeightForBlock(block) {
     const paddingBottom = parseFloat(window.getComputedStyle(block).paddingBottom) || 0;
     const bodyHeight = body ? Math.max(body.scrollHeight, body.getBoundingClientRect().height) : 0;
     return Math.max(GRID_SIZE, Math.ceil(paddingTop + bodyHeight + paddingBottom + 2));
+  }
+
+  if (block?.dataset?.type === "clock") {
+    const style = String(block.dataset.clockStyle || "digital").trim().toLowerCase();
+    const size = String(block.dataset.clockSize || "md").trim().toLowerCase();
+    const showDate = String(block.dataset.clockShowDate || "0") === "1" || String(block.dataset.clockShowDate || "").toLowerCase() === "true";
+    const baseHeights = {
+      digital: { sm: GRID_SIZE * 3, md: GRID_SIZE * 3, lg: GRID_SIZE * 4 },
+      capsule: { sm: GRID_SIZE * 3, md: GRID_SIZE * 3, lg: GRID_SIZE * 4 },
+      analog: { sm: GRID_SIZE * 4, md: GRID_SIZE * 5, lg: GRID_SIZE * 6 },
+      split: { sm: GRID_SIZE * 5, md: GRID_SIZE * 6, lg: GRID_SIZE * 7 },
+    };
+    const resolvedStyle = baseHeights[style] ? style : "digital";
+    const resolvedSize = baseHeights[resolvedStyle][size] ? size : "md";
+    let height = baseHeights[resolvedStyle][resolvedSize];
+
+    if (showDate) {
+      height += GRID_SIZE;
+    }
+
+    return height;
   }
 
   const title = block.querySelector(".block-title");

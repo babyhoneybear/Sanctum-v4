@@ -39,7 +39,63 @@ function snap(n) {
   return Math.round(n / GRID_SIZE) * GRID_SIZE;
 }
 
+function readCanvasLayoutMetrics() {
+  return typeof window.getCanvasLayoutMetrics === "function"
+    ? window.getCanvasLayoutMetrics()
+    : null;
+}
+
+function getCanvasInteractionScale() {
+  const metrics = readCanvasLayoutMetrics();
+  if (metrics?.isInfinite) {
+    const scale = Number(metrics.scale);
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+  }
+  return 1;
+}
+
+function getGridInteractionRect() {
+  const metrics = readCanvasLayoutMetrics();
+  if (metrics?.isInfinite && metrics.stageRect) {
+    return metrics.stageRect;
+  }
+  return document.getElementById("grid")?.getBoundingClientRect() || null;
+}
+
+function getPointerPositionOnGrid(clientX = 0, clientY = 0) {
+  const rect = getGridInteractionRect();
+  const scale = getCanvasInteractionScale();
+  if (!rect) {
+    return { x: 0, y: 0, rect: null, scale };
+  }
+
+  return {
+    x: (clientX - rect.left) / scale,
+    y: (clientY - rect.top) / scale,
+    rect,
+    scale
+  };
+}
+
+function getGridViewportHeight() {
+  const metrics = readCanvasLayoutMetrics();
+  if (metrics?.isInfinite) {
+    return Math.max(0, Math.floor(metrics.logicalHeight || 0));
+  }
+
+  const grid = document.getElementById("grid");
+  if (!grid) return 0;
+  const rectHeight = Math.floor(grid.getBoundingClientRect().height || 0);
+  const minHeight = parseInt(grid.style.minHeight || "0", 10);
+  return Math.max(0, rectHeight, Number.isFinite(minHeight) ? minHeight : 0);
+}
+
 function getGridViewportWidth() {
+  const metrics = readCanvasLayoutMetrics();
+  if (metrics?.isInfinite) {
+    return Math.max(0, Math.floor(metrics.logicalWidth || 0));
+  }
+
   const grid = document.getElementById("grid");
   if (!grid) return 0;
   const rectWidth = Math.floor(grid.getBoundingClientRect().width || 0);
@@ -920,24 +976,22 @@ document.addEventListener("mousedown", (e) => {
   activeBlock = block;
 
   const rect = block.getBoundingClientRect();
+  const scale = getCanvasInteractionScale();
   startX = e.clientX;
   startY = e.clientY;
 
   if (handle) {
     mode = "resize";
-    startW = rect.width;
-    startH = rect.height;
+    startW = rect.width / scale;
+    startH = rect.height / scale;
     return;
   }
 
   mode = "move";
 
-  const grid = document.getElementById("grid");
-  const gridRect = grid.getBoundingClientRect();
-
   // offset inside the block where you grabbed it
-  offsetX = e.clientX - rect.left;
-  offsetY = e.clientY - rect.top;
+  offsetX = (e.clientX - rect.left) / scale;
+  offsetY = (e.clientY - rect.top) / scale;
 
   // make sure left/top are relative to grid
   // (no action needed here—mousemove will set them)
@@ -1032,13 +1086,14 @@ document.addEventListener("mousemove", (e) => {
   }
 
   if (!activeBlock || !mode) return;
-
-  const grid = document.getElementById("grid");
-  const gridRect = grid.getBoundingClientRect();
+  const pointer = getPointerPositionOnGrid(e.clientX, e.clientY);
+  if (!pointer.rect) return;
+  const gridWidth = getGridViewportWidth();
+  const gridHeight = getGridViewportHeight();
 
   if (mode === "move") {
-    let x = e.clientX - gridRect.left - offsetX;
-    let y = e.clientY - gridRect.top - offsetY;
+    let x = pointer.x - offsetX;
+    let y = pointer.y - offsetY;
 
     x = snap(x);
     y = snap(y);
@@ -1046,8 +1101,8 @@ document.addEventListener("mousemove", (e) => {
     const blockW = parseInt(activeBlock.style.width || activeBlock.getBoundingClientRect().width, 10);
     const blockH = parseInt(activeBlock.style.height || activeBlock.getBoundingClientRect().height, 10);
 
-    x = Math.max(0, Math.min(x, gridRect.width - blockW));
-    y = Math.max(0, Math.min(y, gridRect.height - blockH));
+    x = Math.max(0, Math.min(x, gridWidth - blockW));
+    y = Math.max(0, Math.min(y, gridHeight - blockH));
 
     activeBlock.style.left = `${x}px`;
     activeBlock.style.top = `${y}px`;
@@ -1062,8 +1117,9 @@ document.addEventListener("mousemove", (e) => {
 
   if (mode === "resize") {
     clearFrameDropPreview();
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    const scale = getCanvasInteractionScale();
+    const dx = (e.clientX - startX) / scale;
+    const dy = (e.clientY - startY) / scale;
     const blockX = parseInt(activeBlock.style.left || "0", 10) || 0;
     const activeType = activeBlock.dataset.type || "";
 
@@ -1159,6 +1215,9 @@ const toolImage = document.getElementById("toolImage");
 const toolPage = document.getElementById("toolPage");
 const toolDomain = document.getElementById("toolDomain");
 const toolDivider = document.getElementById("toolDivider");
+const toolDataCallout = document.getElementById("toolDataCallout");
+const toolProgress = document.getElementById("toolProgress");
+const toolClock = document.getElementById("toolClock");
 
 
 function startPlacingPreset(preset) {
@@ -1173,8 +1232,18 @@ toolList.addEventListener("click", (e) => { e.preventDefault(); startPlacingPres
 toolImage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("image"); });
 toolPage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("page"); });
 toolDomain.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("domain"); });
+toolDataCallout?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("data-callout"); });
+toolProgress?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("progress"); });
+toolClock?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("clock"); });
 document.getElementById("toolContainer")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("container"); });
 document.getElementById("toolTable")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("table"); });
+document.getElementById("generateLayoutBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (typeof window.openAssistantWithQuery === "function") {
+    const pageTitle = document.getElementById("pageTitle")?.textContent?.trim() || "this page";
+    window.openAssistantWithQuery(`Generate a board layout for "${pageTitle}"`);
+  }
+});
 
 let placing = false;
 let ghostBlock = null;
@@ -1193,6 +1262,10 @@ function getDefaultBlockDimensions(type = "text") {
     return { width: snap(GRID_SIZE * 9), height: snap(GRID_SIZE * 1) };
   }
 
+  if (type === "weblink") {
+    return { width: snap(GRID_SIZE * 10), height: snap(GRID_SIZE * 2) };
+  }
+
   if (type === "container") {
     return { width: snap(GRID_SIZE * 14), height: snap(GRID_SIZE * 6) };
   }
@@ -1203,6 +1276,18 @@ function getDefaultBlockDimensions(type = "text") {
 
   if (type === "calendar") {
     return { width: snap(GRID_SIZE * 18), height: snap(GRID_SIZE * 7) };
+  }
+
+  if (type === "data-callout") {
+    return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 3) };
+  }
+
+  if (type === "progress") {
+    return { width: snap(GRID_SIZE * 12), height: snap(GRID_SIZE * 4) };
+  }
+
+  if (type === "clock") {
+    return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 4) };
   }
 
   if (isVerticalDividerType(type)) {
@@ -1295,13 +1380,10 @@ function getLinkedPageCardDimensions(titleText = "", blockOrOptions = null) {
     const minHeight = block
       ? getGalleryCardMinHeight(block, resolvedWidth)
       : Math.max(168, snap(GRID_SIZE * 7));
-    const legacyDefaultHeight = Math.max(216, snap(GRID_SIZE * 9));
 
     return {
       width: resolvedWidth,
-      height: currentHeight > legacyDefaultHeight
-        ? Math.max(currentHeight, minHeight)
-        : minHeight
+      height: Math.max(currentHeight || 0, minHeight)
     };
   }
 
@@ -1821,6 +1903,159 @@ function makeFrameLinkedCardHTML(type = "page") {
   `;
 }
 
+function normalizeExternalUrl(value = "") {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
+  return `https://${trimmed.replace(/^\/\/+/, "")}`;
+}
+
+function getWebLinkDetails(value = "") {
+  const normalized = normalizeExternalUrl(value);
+  if (!normalized) {
+    return {
+      normalized: "",
+      label: "",
+      iconLabel: "↗",
+      faviconSrc: "",
+      canOpen: false,
+    };
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const hostname = (parsed.hostname || "").replace(/^www\./i, "");
+    const label = hostname || normalized;
+    const iconLabel = (label.charAt(0) || "↗").toUpperCase();
+    const canUseFavicon = parsed.protocol === "http:" || parsed.protocol === "https:";
+
+    return {
+      normalized,
+      label,
+      iconLabel,
+      faviconSrc: canUseFavicon ? `${parsed.origin}/favicon.ico` : "",
+      canOpen: canUseFavicon || parsed.protocol === "mailto:" || parsed.protocol === "tel:",
+    };
+  } catch {
+    const label = normalized.replace(/^https?:\/\//i, "");
+    return {
+      normalized,
+      label,
+      iconLabel: (label.charAt(0) || "↗").toUpperCase(),
+      faviconSrc: "",
+      canOpen: false,
+    };
+  }
+}
+
+function makeWebLinkCardHTML() {
+  return `
+    <div class="block-weblink-card">
+      <div class="weblink-card-leading" aria-hidden="true">
+        <img class="weblink-card-favicon" alt="" draggable="false">
+        <div class="weblink-card-fallback">↗</div>
+      </div>
+      <div class="weblink-card-content">
+        <div class="block-title weblink-card-title" contenteditable="true" spellcheck="false" data-placeholder="Link title"></div>
+        <div class="weblink-card-url">No URL set</div>
+      </div>
+      <div class="weblink-card-actions">
+        <button type="button" class="weblink-set-url-btn" title="Edit URL">Edit</button>
+        <button type="button" class="weblink-open-btn" aria-label="Open link" title="Open link" disabled>↗</button>
+      </div>
+    </div>
+  `;
+}
+
+function getWebLinkHost(target) {
+  return target?.closest?.('.frame-item[data-frame-child-type="weblink"], .block[data-type="weblink"]') || null;
+}
+
+function syncWebLinkCardTarget(target, options = {}) {
+  if (!target) return target;
+
+  const incomingUrl = Object.prototype.hasOwnProperty.call(options, "url")
+    ? options.url
+    : (target.dataset.externalUrl || "");
+  const previousDetails = getWebLinkDetails(target.dataset.externalUrl || "");
+  const nextDetails = getWebLinkDetails(incomingUrl);
+
+  target.dataset.externalUrl = nextDetails.normalized;
+
+  const urlEl = target.querySelector(".weblink-card-url");
+  if (urlEl) {
+    urlEl.textContent = nextDetails.label || "No URL set";
+  }
+
+  const fallbackEl = target.querySelector(".weblink-card-fallback");
+  if (fallbackEl) {
+    fallbackEl.textContent = nextDetails.iconLabel;
+  }
+
+  const faviconEl = target.querySelector(".weblink-card-favicon");
+  if (faviconEl) {
+    faviconEl.onload = () => {
+      faviconEl.hidden = false;
+    };
+    faviconEl.onerror = () => {
+      faviconEl.onerror = null;
+      faviconEl.hidden = true;
+      faviconEl.removeAttribute("src");
+    };
+
+    if (nextDetails.faviconSrc) {
+      faviconEl.src = nextDetails.faviconSrc;
+      faviconEl.hidden = false;
+    } else {
+      faviconEl.removeAttribute("src");
+      faviconEl.hidden = true;
+    }
+  }
+
+  const openBtn = target.querySelector(".weblink-open-btn");
+  if (openBtn) {
+    openBtn.disabled = !nextDetails.canOpen;
+    openBtn.classList.toggle("is-disabled", !nextDetails.canOpen);
+  }
+
+  const titleEl = target.querySelector(".weblink-card-title");
+  const currentTitle = titleEl?.textContent?.trim() || "";
+  const previousLabels = [previousDetails.label, previousDetails.normalized].filter(Boolean);
+  const shouldAutofillTitle = !!nextDetails.label
+    && (!currentTitle || options.forceTitle === true || previousLabels.includes(currentTitle));
+
+  if (titleEl && shouldAutofillTitle) {
+    titleEl.textContent = nextDetails.label;
+  }
+
+  return target;
+}
+
+function openWebLinkTarget(target) {
+  const details = getWebLinkDetails(target?.dataset?.externalUrl || "");
+  if (!details.canOpen) {
+    showAppToast?.("No valid URL set for this link.", "info");
+    return false;
+  }
+
+  window.open(details.normalized, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+function promptForWebLinkUrl(target) {
+  if (!target) return null;
+
+  const current = target.dataset.externalUrl || "";
+  const nextValue = prompt("Enter URL:", current);
+  if (nextValue === null) return null;
+
+  syncWebLinkCardTarget(target, { url: nextValue });
+  if (typeof saveState === "function") saveState();
+  return target;
+}
+
+window.syncWebLinkCardTarget = syncWebLinkCardTarget;
+
 function getContainerItemsHost(containerBlock) {
   return containerBlock?.querySelector(".container-items") || null;
 }
@@ -1906,6 +2141,13 @@ function getLegacyContainerBodyHTMLFromItems(items = []) {
     if (type === "page" || type === "domain") {
       const title = escapeHTML(item.pageCardTitle || (type === "domain" ? "Domain" : "Page"));
       return `<div>${title}</div>`;
+    }
+
+    if (type === "weblink") {
+      const title = String(item.titleHTML || item.externalUrl || "Link")
+        .replace(/<[^>]*>/g, " ")
+        .trim();
+      return `<div>${escapeHTML(title || "Link")}</div>`;
     }
 
     if (isDividerType(type)) {
@@ -2039,6 +2281,20 @@ function buildFrameItemElement(data = {}) {
     return item;
   }
 
+  if (type === "weblink") {
+    item.dataset.type = "weblink";
+    item.innerHTML = `
+      <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
+      ${makeWebLinkCardHTML()}
+    `;
+
+    const titleEl = item.querySelector(".weblink-card-title");
+    if (titleEl) titleEl.innerHTML = data.titleHTML || data.title || "";
+    syncWebLinkCardTarget(item, { url: data.externalUrl || "" });
+    applyStoredFrameItemStyles(item, data);
+    return item;
+  }
+
   return item;
 }
 
@@ -2087,6 +2343,12 @@ function serializeFrameItemElement(item) {
     payload.pageCardView = getPageCardView(item);
     payload.pageCardHideIcon = isPageCardIconHidden(item) ? 1 : 0;
     payload.cardStyle = item.dataset.cardStyle || "";
+    return payload;
+  }
+
+  if (type === "weblink") {
+    payload.titleHTML = item.querySelector(".weblink-card-title")?.innerHTML || "";
+    payload.externalUrl = item.dataset.externalUrl || "";
     return payload;
   }
 
@@ -2310,19 +2572,20 @@ function placeFrameItemOnGrid(item, clientX, clientY, offsetX = 0, offsetY = 0) 
   const grid = document.getElementById("grid");
   if (!grid || !item) return null;
 
-  const gridRect = grid.getBoundingClientRect();
-  if (clientX < gridRect.left || clientX > gridRect.right || clientY < gridRect.top || clientY > gridRect.bottom) {
+  const gridRect = getGridInteractionRect();
+  const scale = getCanvasInteractionScale();
+  if (!gridRect || clientX < gridRect.left || clientX > gridRect.right || clientY < gridRect.top || clientY > gridRect.bottom) {
     return null;
   }
 
   const blockData = buildBlockDataFromFrameItem(item);
   if (!blockData) return null;
 
-  let x = snap(clientX - gridRect.left - offsetX);
-  let y = snap(clientY - gridRect.top - offsetY);
+  let x = snap(((clientX - gridRect.left) / scale) - (offsetX / scale));
+  let y = snap(((clientY - gridRect.top) / scale) - (offsetY / scale));
 
-  x = Math.max(0, Math.min(x, Math.max(0, gridRect.width - blockData.w)));
-  y = Math.max(0, Math.min(y, Math.max(0, gridRect.height - blockData.h)));
+  x = Math.max(0, Math.min(x, Math.max(0, getGridViewportWidth() - blockData.w)));
+  y = Math.max(0, Math.min(y, Math.max(0, getGridViewportHeight() - blockData.h)));
 
   blockData.x = x;
   blockData.y = y;
@@ -2547,11 +2810,48 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.linkedPageId;
   delete block.dataset.cardStyle;
   delete block.dataset.pageCardIcon;
+  delete block.dataset.externalUrl;
+  delete block.dataset.dataCalloutLabel;
+  delete block.dataset.dataCalloutSourceKind;
+  delete block.dataset.dataCalloutSourcePageId;
+  delete block.dataset.dataCalloutSourceBlockId;
+  delete block.dataset.dataCalloutPropertyId;
+  delete block.dataset.dataCalloutMode;
+  delete block.dataset.dataCalloutRowId;
+  delete block.dataset.dataCalloutAlign;
+  delete block.dataset.dataCalloutSize;
+  delete block.dataset.dataCalloutLabelPos;
+  delete block.dataset.progressTitle;
+  delete block.dataset.progressSourceType;
+  delete block.dataset.progressSourceKind;
+  delete block.dataset.progressSourcePageId;
+  delete block.dataset.progressSourceBlockId;
+  delete block.dataset.progressPropertyId;
+  delete block.dataset.progressValueMode;
+  delete block.dataset.progressScope;
+  delete block.dataset.progressCurrentValue;
+  delete block.dataset.progressTargetValue;
+  delete block.dataset.progressUnitLabel;
+  delete block.dataset.progressDeadline;
+  delete block.dataset.progressStyle;
+  delete block.dataset.progressSize;
+  delete block.dataset.progressShowTitle;
+  delete block.dataset.progressShowValue;
+  delete block.dataset.progressShowPercent;
+  delete block.dataset.progressShowDeadline;
+  delete block.dataset.progressFillColor;
+  delete block.dataset.progressTrackColor;
+  delete block.dataset.clockStyle;
+  delete block.dataset.clockSize;
+  delete block.dataset.clockColor;
+  delete block.dataset.clockFormat;
+  delete block.dataset.clockShowSeconds;
+  delete block.dataset.clockShowDate;
   block.innerHTML = makeBlockHTML(nextType);
 
   normalizeBlockAppearanceForType(block, nextType);
   applyDefaultBlockDimensions(block, nextType, {
-    allowGrow: !isDividerType(nextType),
+    allowGrow: !isDividerType(nextType) && nextType !== "weblink",
     preserveWidth: isDividerType(nextType)
   });
 
@@ -2591,6 +2891,14 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   }
   if (typeof expandGrid === "function") {
     expandGrid();
+  }
+
+  if (nextType === "clock") {
+    window.mountClockBlock?.(block, { openPicker: !!options.openClockPicker });
+  }
+
+  if (nextType === "progress") {
+    window.mountProgressBlock?.(block, { openPicker: !!options.openProgressPicker });
   }
 
   if (options.openImagePicker) {
@@ -2654,6 +2962,50 @@ function makeBlockHTML(type = "text") {
     `;
   }
 
+  if (type === "weblink") {
+    return `
+      ${makeWebLinkCardHTML()}
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "clock") {
+    return `
+      <div class="clock-widget-shell" data-style="digital" data-size="md" data-format="12" data-show-seconds="0" data-show-date="0">
+        <div class="clock-widget-main">
+          <span class="clock-widget-hours">08</span>
+          <span class="clock-widget-separator">:</span>
+          <span class="clock-widget-minutes">45</span>
+          <span class="clock-widget-seconds">09</span>
+          <span class="clock-widget-meridiem">PM</span>
+        </div>
+        <div class="clock-widget-analog" aria-hidden="true">
+          <div class="clock-widget-analog-face">
+            <span class="clock-widget-analog-tick" style="--tick-index:0"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:1"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:2"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:3"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:4"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:5"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:6"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:7"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:8"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:9"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:10"></span>
+            <span class="clock-widget-analog-tick" style="--tick-index:11"></span>
+            <span class="clock-widget-analog-hand clock-widget-analog-hour"></span>
+            <span class="clock-widget-analog-hand clock-widget-analog-minute"></span>
+            <span class="clock-widget-analog-hand clock-widget-analog-second"></span>
+            <span class="clock-widget-analog-center"></span>
+          </div>
+        </div>
+        <div class="clock-widget-date">Fri, May 9</div>
+        <button type="button" class="clock-config-btn" data-clock-action="configure" title="Configure clock">⚙</button>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
   if (type === "table") {
     return `
       <div class="table-move-handle" title="Drag table">⋮⋮</div>
@@ -2710,6 +3062,7 @@ function makeBlockHTML(type = "text") {
             <button type="button" class="page-database-toolbar-btn" data-db-action="open-filter-menu">Filter</button>
             <button type="button" class="page-database-toolbar-btn" data-db-action="open-sort-menu">Sort</button>
             <button type="button" class="page-database-toolbar-btn" data-db-action="open-group-menu">Group</button>
+            <button type="button" class="page-database-toolbar-btn page-database-folder-btn" data-db-action="connect-folder">Connect Folder</button>
             <button type="button" class="page-database-toolbar-btn" data-db-action="open-database-menu">More</button>
             <button type="button" class="page-database-toolbar-new-btn" data-db-action="add-row">New</button>
           </div>
@@ -2720,6 +3073,39 @@ function makeBlockHTML(type = "text") {
             <div class="page-database-block-content"></div>
           </div>
         </div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "data-callout") {
+    return `
+      <div class="data-callout-shell">
+        <span class="data-callout-value">—</span>
+        <span class="data-callout-label">Value</span>
+        <button type="button" class="data-callout-config-btn" data-data-callout-action="configure" title="Configure">⚙</button>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "progress") {
+    return `
+      <div class="progress-block-shell" data-style="bar" data-size="md">
+        <div class="progress-block-head">
+          <span class="progress-block-title">Goal</span>
+          <button type="button" class="progress-block-config-btn" data-progress-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="progress-block-visual">
+          <div class="progress-block-bar"><span class="progress-block-bar-fill"></span></div>
+          <div class="progress-block-pill"><span class="progress-block-pill-fill"></span></div>
+          <div class="progress-block-ring"><span class="progress-block-ring-label">0%</span></div>
+        </div>
+        <div class="progress-block-meta">
+          <span class="progress-block-value">0 / 100</span>
+          <span class="progress-block-percent">0%</span>
+        </div>
+        <div class="progress-block-deadline" hidden></div>
       </div>
       <div class="block-resize-handle" title="Resize"></div>
     `;
@@ -2748,6 +3134,2066 @@ if (type === "container") {
     <div class="block-body" contenteditable="true" spellcheck="false"></div>
     <div class="block-resize-handle" title="Resize"></div>
   `;
+}
+
+function escapeDataCalloutHTML(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const PAGE_ACTIVITY_STORAGE_KEY = (window.STORAGE_KEYS && window.STORAGE_KEYS.pageActivity) || "sanctum_page_activity_v1";
+const DATA_CALLOUT_LIVE_REFRESH_MS = 1000;
+const DATA_CALLOUT_ACTIVITY_FLUSH_MS = 15000;
+
+let trackedPageActivityId = "";
+let trackedPageActivityStartedAt = 0;
+
+function normalizeDataCalloutSourceType(value = "") {
+  return String(value || "").trim().toLowerCase() === "system" ? "system" : "database";
+}
+
+function normalizeDataCalloutSystemKey(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["current-date", "current-time", "page-activity"].includes(safe) ? safe : "current-date";
+}
+
+function normalizeDataCalloutSystemTargetKind(value = "") {
+  return String(value || "").trim().toLowerCase() === "page" ? "page" : "current";
+}
+
+function normalizeDataCalloutSystemFormat(value = "", systemKey = "current-date") {
+  const safe = String(value || "").trim().toLowerCase();
+
+  if (systemKey === "current-time") {
+    return ["12h", "24h"].includes(safe) ? safe : "12h";
+  }
+
+  if (systemKey === "page-activity") {
+    return ["compact", "clock"].includes(safe) ? safe : "compact";
+  }
+
+  return ["short", "long"].includes(safe) ? safe : "short";
+}
+
+function getDefaultDataCalloutLabel(config = {}) {
+  const sourceType = normalizeDataCalloutSourceType(config.sourceType || "database");
+  const systemKey = normalizeDataCalloutSystemKey(config.systemKey || "current-date");
+
+  if (sourceType !== "system") return "Value";
+  if (systemKey === "current-time") return "Current time";
+  if (systemKey === "page-activity") return "Time on page";
+  return "Today's date";
+}
+
+function readPageActivityData() {
+  if (typeof window.readStorageJSON === "function") {
+    return window.readStorageJSON(PAGE_ACTIVITY_STORAGE_KEY, {});
+  }
+  return {};
+}
+
+function writePageActivityData(value) {
+  if (typeof window.writeStorageJSON === "function") {
+    return window.writeStorageJSON(PAGE_ACTIVITY_STORAGE_KEY, value || {});
+  }
+  return false;
+}
+
+function normalizePageActivityEntry(raw = {}) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+
+  const normalized = {};
+  Object.entries(raw).forEach(([dayKey, value]) => {
+    const ms = Math.max(0, Math.round(Number(value) || 0));
+    if (!ms) return;
+    normalized[String(dayKey)] = ms;
+  });
+  return normalized;
+}
+
+function getPageActivityDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function writePageActivityDuration(pageId = "", startAt = 0, endAt = Date.now()) {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return false;
+
+  const startTime = Math.max(0, Math.floor(Number(startAt) || 0));
+  const endTime = Math.max(0, Math.floor(Number(endAt) || 0));
+  if (!startTime || endTime <= startTime) return false;
+
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+
+  let cursor = startTime;
+  while (cursor < endTime) {
+    const cursorDate = new Date(cursor);
+    const dayKey = getPageActivityDayKey(cursorDate);
+    const nextBoundary = new Date(
+      cursorDate.getFullYear(),
+      cursorDate.getMonth(),
+      cursorDate.getDate() + 1,
+      0,
+      0,
+      0,
+      0
+    ).getTime();
+    const nextCursor = Math.min(endTime, nextBoundary);
+    entry[dayKey] = Math.max(0, Math.round(Number(entry[dayKey]) || 0) + (nextCursor - cursor));
+    cursor = nextCursor;
+  }
+
+  all[safePageId] = entry;
+  return writePageActivityData(all);
+}
+
+function getStoredPageActivityMs(pageId = "", dayKey = getPageActivityDayKey()) {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return 0;
+
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+  return Math.max(0, Math.round(Number(entry[dayKey]) || 0));
+}
+
+function flushTrackedPageActivity(options = {}) {
+  const now = Math.max(0, Math.floor(Number(options.now) || Date.now()));
+  const keepRunning = !!options.keepRunning;
+  const minDeltaMs = Math.max(0, Math.floor(Number(options.minDeltaMs) || 0));
+
+  if (!trackedPageActivityId || !trackedPageActivityStartedAt) return false;
+
+  const deltaMs = now - trackedPageActivityStartedAt;
+  if (deltaMs < minDeltaMs) return false;
+
+  const saved = writePageActivityDuration(trackedPageActivityId, trackedPageActivityStartedAt, now);
+  trackedPageActivityStartedAt = keepRunning && !document.hidden ? now : 0;
+  return saved;
+}
+
+function setTrackedPageActivityPage(pageId = "") {
+  flushTrackedPageActivity({ now: Date.now() });
+  trackedPageActivityId = String(pageId || "").trim();
+  trackedPageActivityStartedAt = trackedPageActivityId && !document.hidden ? Date.now() : 0;
+}
+
+function resumeTrackedPageActivity() {
+  if (!trackedPageActivityId || trackedPageActivityStartedAt || document.hidden) return;
+  trackedPageActivityStartedAt = Date.now();
+}
+
+function getLivePageActivityMs(pageId = "", dayKey = getPageActivityDayKey()) {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return 0;
+
+  let total = getStoredPageActivityMs(safePageId, dayKey);
+  if (safePageId === trackedPageActivityId && trackedPageActivityStartedAt && !document.hidden) {
+    total += Math.max(0, Date.now() - trackedPageActivityStartedAt);
+  }
+
+  return Math.max(0, total);
+}
+
+function normalizeDataCalloutMode(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["row", "count", "sum"].includes(safe) ? safe : "row";
+}
+
+function normalizeDataCalloutAlign(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["left", "center", "right"].includes(safe) ? safe : "left";
+}
+
+function normalizeDataCalloutSize(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["sm", "md", "lg"].includes(safe) ? safe : "md";
+}
+
+function normalizeDataCalloutLabelPos(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["above", "below", "hidden"].includes(safe) ? safe : "below";
+}
+
+function normalizeProgressBlockSourceType(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["manual", "database", "system"].includes(safe) ? safe : "manual";
+}
+
+function normalizeProgressBlockValueMode(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["count", "sum", "activity"].includes(safe) ? safe : "count";
+}
+
+function normalizeProgressBlockScope(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["all", "attached"].includes(safe) ? safe : "all";
+}
+
+function normalizeProgressBlockStyle(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["bar", "pill", "ring"].includes(safe) ? safe : "bar";
+}
+
+function normalizeProgressBlockSize(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["sm", "md", "lg"].includes(safe) ? safe : "md";
+}
+
+function normalizeProgressBlockToggle(value = "", fallback = true) {
+  const safe = String(value || "").trim().toLowerCase();
+  if (safe === "0" || safe === "false" || safe === "off") return "0";
+  if (safe === "1" || safe === "true" || safe === "on") return "1";
+  return fallback ? "1" : "0";
+}
+
+function normalizeProgressBlockColor(value = "", fallback = "#9fe870") {
+  const safe = String(value || "").trim();
+  return /^#(?:[0-9a-fA-F]{3}){1,2}$/.test(safe) ? safe.toLowerCase() : fallback;
+}
+
+function normalizeProgressBlockDeadline(value = "") {
+  const safe = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(safe) ? safe : "";
+}
+
+function normalizeProgressBlockConfig(raw = {}) {
+  return {
+    title: String(raw?.title || "").trim() || "Goal",
+    sourceType: normalizeProgressBlockSourceType(raw?.sourceType || "manual"),
+    sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(raw?.sourcePageId || "").trim(),
+    sourceBlockId: String(raw?.sourceBlockId || "").trim(),
+    propertyId: String(raw?.propertyId || "").trim(),
+    valueMode: normalizeProgressBlockValueMode(raw?.valueMode || "count"),
+    scope: normalizeProgressBlockScope(raw?.scope || "all"),
+    currentValue: String(raw?.currentValue ?? "0").trim() || "0",
+    targetValue: String(raw?.targetValue ?? "100").trim() || "100",
+    unitLabel: String(raw?.unitLabel || "").trim(),
+    deadline: normalizeProgressBlockDeadline(raw?.deadline || ""),
+    style: normalizeProgressBlockStyle(raw?.style || "bar"),
+    size: normalizeProgressBlockSize(raw?.size || "md"),
+    showTitle: normalizeProgressBlockToggle(raw?.showTitle, true),
+    showValue: normalizeProgressBlockToggle(raw?.showValue, true),
+    showPercent: normalizeProgressBlockToggle(raw?.showPercent, true),
+    showDeadline: normalizeProgressBlockToggle(raw?.showDeadline, true),
+    fillColor: normalizeProgressBlockColor(raw?.fillColor || "", "#9fe870"),
+    trackColor: normalizeProgressBlockColor(raw?.trackColor || "", "#2a2f24")
+  };
+}
+
+function readProgressBlockConfig(block) {
+  if (!block) return normalizeProgressBlockConfig({});
+  return normalizeProgressBlockConfig({
+    title: block.dataset.progressTitle || "",
+    sourceType: block.dataset.progressSourceType || "manual",
+    sourceKind: block.dataset.progressSourceKind || "page",
+    sourcePageId: block.dataset.progressSourcePageId || "",
+    sourceBlockId: block.dataset.progressSourceBlockId || "",
+    propertyId: block.dataset.progressPropertyId || "",
+    valueMode: block.dataset.progressValueMode || "count",
+    scope: block.dataset.progressScope || "all",
+    currentValue: block.dataset.progressCurrentValue || "0",
+    targetValue: block.dataset.progressTargetValue || "100",
+    unitLabel: block.dataset.progressUnitLabel || "",
+    deadline: block.dataset.progressDeadline || "",
+    style: block.dataset.progressStyle || "bar",
+    size: block.dataset.progressSize || "md",
+    showTitle: block.dataset.progressShowTitle || "1",
+    showValue: block.dataset.progressShowValue || "1",
+    showPercent: block.dataset.progressShowPercent || "1",
+    showDeadline: block.dataset.progressShowDeadline || "1",
+    fillColor: block.dataset.progressFillColor || "#9fe870",
+    trackColor: block.dataset.progressTrackColor || "#2a2f24"
+  });
+}
+
+function writeProgressBlockConfig(block, config) {
+  if (!block) return;
+  const normalized = normalizeProgressBlockConfig(config);
+  block.dataset.progressTitle = normalized.title;
+  block.dataset.progressSourceType = normalized.sourceType;
+  block.dataset.progressSourceKind = normalized.sourceKind;
+  block.dataset.progressSourcePageId = normalized.sourcePageId;
+  block.dataset.progressSourceBlockId = normalized.sourceBlockId;
+  block.dataset.progressPropertyId = normalized.propertyId;
+  block.dataset.progressValueMode = normalized.valueMode;
+  block.dataset.progressScope = normalized.scope;
+  block.dataset.progressCurrentValue = normalized.currentValue;
+  block.dataset.progressTargetValue = normalized.targetValue;
+  block.dataset.progressUnitLabel = normalized.unitLabel;
+  block.dataset.progressDeadline = normalized.deadline;
+  block.dataset.progressStyle = normalized.style;
+  block.dataset.progressSize = normalized.size;
+  block.dataset.progressShowTitle = normalized.showTitle;
+  block.dataset.progressShowValue = normalized.showValue;
+  block.dataset.progressShowPercent = normalized.showPercent;
+  block.dataset.progressShowDeadline = normalized.showDeadline;
+  block.dataset.progressFillColor = normalized.fillColor;
+  block.dataset.progressTrackColor = normalized.trackColor;
+}
+
+function getProgressBlockDeadlineMeta(deadline = "") {
+  const safe = normalizeProgressBlockDeadline(deadline);
+  if (!safe) return { text: "", overdue: false };
+
+  const date = new Date(`${safe}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return { text: "", overdue: false };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  const days = Math.round((date.getTime() - today.getTime()) / 86400000);
+  const formatted = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+  if (days < 0) {
+    return { text: `Overdue ${Math.abs(days)}d • ${formatted}`, overdue: true };
+  }
+  if (days === 0) {
+    return { text: `Due today • ${formatted}`, overdue: false };
+  }
+  if (days === 1) {
+    return { text: `Due tomorrow • ${formatted}`, overdue: false };
+  }
+
+  return { text: `Due in ${days}d • ${formatted}`, overdue: false };
+}
+
+function getProgressBlockSourcePayload(config) {
+  if (config.sourceType !== "database") return null;
+  if (!config.sourcePageId) return null;
+  return getDataCalloutSourcePayload({
+    sourceKind: config.sourceKind,
+    sourcePageId: config.sourcePageId,
+    sourceBlockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  });
+}
+
+function getProgressBlockScopePageIds(rootId = "") {
+  const safeRootId = String(rootId || "").trim();
+  const ids = new Set();
+  if (!safeRootId) return ids;
+
+  ids.add(safeRootId);
+  let changed = true;
+  const pages = Array.isArray(window.userPages) ? window.userPages : [];
+
+  while (changed) {
+    changed = false;
+    pages.forEach((page) => {
+      const pageId = String(page?.id || "").trim();
+      const parentId = String(page?.parent || "").trim();
+      if (!pageId || !parentId) return;
+      if (!ids.has(parentId) || ids.has(pageId)) return;
+      ids.add(pageId);
+      changed = true;
+    });
+  }
+
+  return ids;
+}
+
+function isProgressBlockSourceAttachedToCurrentPage(config) {
+  const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "";
+  if (!currentPageId || !config.sourcePageId) return false;
+  return getProgressBlockScopePageIds(currentPageId).has(config.sourcePageId);
+}
+
+function computeProgressBlockState(config) {
+  const target = Math.max(0, parseDataCalloutNumericValue(config.targetValue));
+  let current = parseDataCalloutNumericValue(config.currentValue);
+  let configured = target > 0 || current > 0 || !!String(config.unitLabel || "").trim();
+
+  if (config.sourceType === "database") {
+    const payload = getProgressBlockSourcePayload(config);
+    const database = payload?.database || null;
+    const properties = Array.isArray(database?.properties) ? database.properties : [];
+    let rows = Array.isArray(database?.rows) ? database.rows : [];
+
+    configured = !!database;
+
+    if (config.scope === "attached" && !isProgressBlockSourceAttachedToCurrentPage(config)) {
+      rows = [];
+    }
+
+    if (config.valueMode === "sum") {
+      const property = properties.find((entry) => entry.id === config.propertyId) || null;
+      configured = !!property;
+      current = property
+        ? rows.reduce((sum, row) => sum + parseDataCalloutNumericValue(row?.values?.[property.id] || ""), 0)
+        : 0;
+    } else {
+      current = rows.length;
+    }
+  }
+
+  const rawPercent = target > 0 ? (current / target) * 100 : 0;
+  const clampedPercent = Math.max(0, Math.min(rawPercent, 100));
+  return {
+    current,
+    target,
+    rawPercent,
+    clampedPercent,
+    configured
+  };
+}
+
+function formatProgressBlockValueText(state, config) {
+  const currentText = formatDataCalloutNumber(state.current);
+  const targetText = state.target > 0 ? formatDataCalloutNumber(state.target) : "—";
+  const unit = config.unitLabel ? ` ${config.unitLabel}` : "";
+  return state.target > 0 ? `${currentText} / ${targetText}${unit}` : `${currentText}${unit}`;
+}
+
+function renderProgressBlock(block) {
+  if (!block || block.dataset.type !== "progress") return;
+
+  const shellEl = block.querySelector(".progress-block-shell");
+  const titleEl = block.querySelector(".progress-block-title");
+  const valueEl = block.querySelector(".progress-block-value");
+  const percentEl = block.querySelector(".progress-block-percent");
+  const metaEl = block.querySelector(".progress-block-meta");
+  const ringLabelEl = block.querySelector(".progress-block-ring-label");
+  const deadlineEl = block.querySelector(".progress-block-deadline");
+  const barFillEl = block.querySelector(".progress-block-bar-fill");
+  const pillFillEl = block.querySelector(".progress-block-pill-fill");
+  if (!shellEl || !titleEl || !valueEl || !percentEl || !metaEl || !ringLabelEl || !deadlineEl || !barFillEl || !pillFillEl) return;
+
+  const config = readProgressBlockConfig(block);
+  const state = computeProgressBlockState(config);
+  const percentText = `${Math.round(state.rawPercent)}%`;
+  const deadlineMeta = getProgressBlockDeadlineMeta(config.deadline);
+
+  titleEl.textContent = config.title || "Goal";
+  valueEl.textContent = formatProgressBlockValueText(state, config);
+  percentEl.textContent = percentText;
+  ringLabelEl.textContent = config.showPercent === "1" ? percentText : formatDataCalloutNumber(state.current);
+  deadlineEl.textContent = deadlineMeta.text;
+
+  titleEl.hidden = config.showTitle !== "1";
+  valueEl.hidden = config.showValue !== "1";
+  percentEl.hidden = config.showPercent !== "1";
+  metaEl.hidden = config.showValue !== "1" && config.showPercent !== "1";
+  ringLabelEl.hidden = config.showValue !== "1" && config.showPercent !== "1";
+  deadlineEl.hidden = config.showDeadline !== "1" || !deadlineMeta.text;
+
+  shellEl.dataset.style = config.style;
+  shellEl.dataset.size = config.size;
+  shellEl.dataset.sourceType = config.sourceType;
+  shellEl.classList.toggle("is-configured", !!state.configured);
+  shellEl.classList.toggle("is-overdue", !!deadlineMeta.overdue);
+  shellEl.style.setProperty("--progress-fill", config.fillColor);
+  shellEl.style.setProperty("--progress-track", config.trackColor);
+  shellEl.style.setProperty("--progress-ratio", `${state.clampedPercent}%`);
+
+  block.dataset.progressStyle = config.style;
+  block.dataset.progressSize = config.size;
+
+  barFillEl.style.width = `${state.clampedPercent}%`;
+  pillFillEl.style.width = `${state.clampedPercent}%`;
+}
+
+function renderVisibleProgressBlocks() {
+  document.querySelectorAll('.block[data-type="progress"]').forEach((block) => {
+    renderProgressBlock(block);
+  });
+}
+
+function closeProgressBlockPicker() {
+  const picker = document.querySelector('.topbar-dropdown.progress-block-picker');
+  if (picker) picker.remove();
+  if (typeof setUIState === "function") {
+    setUIState({ openOverlay: null });
+  }
+}
+
+function openProgressBlockPicker(block, anchorEl = null) {
+  if (!block) return;
+
+  closeProgressBlockPicker();
+
+  const config = readProgressBlockConfig(block);
+  const sources = typeof window.getDatabaseCalloutSources === "function"
+    ? window.getDatabaseCalloutSources()
+    : [];
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown progress-block-picker";
+  picker.dataset.uiId = "progressBlockPicker";
+  picker.innerHTML = `
+    <div class="topbar-dropdown-label">Progress bar</div>
+    <label class="progress-block-picker-field">
+      <span>Goal title</span>
+      <input type="text" data-progress-input="title" />
+    </label>
+    <label class="progress-block-picker-field">
+      <span>Current source</span>
+      <select data-progress-input="sourceType">
+        <option value="manual">Manual value</option>
+        <option value="database">Database aggregate</option>
+      </select>
+    </label>
+    <div class="progress-block-picker-stack" data-progress-manual-wrap>
+      <label class="progress-block-picker-field">
+        <span>Current value</span>
+        <input type="text" inputmode="decimal" data-progress-input="currentValue" />
+      </label>
+    </div>
+    <div class="progress-block-picker-stack" data-progress-database-wrap hidden>
+      <label class="progress-block-picker-field">
+        <span>Database table</span>
+        <select data-progress-input="source"></select>
+      </label>
+      <div class="progress-block-picker-grid">
+        <label class="progress-block-picker-field">
+          <span>Current mode</span>
+          <select data-progress-input="valueMode">
+            <option value="count">Count rows</option>
+            <option value="sum">Sum field</option>
+          </select>
+        </label>
+        <label class="progress-block-picker-field">
+          <span>Scope</span>
+          <select data-progress-input="scope">
+            <option value="all">All records</option>
+            <option value="attached">Current page/domain tree</option>
+          </select>
+        </label>
+      </div>
+      <label class="progress-block-picker-field" data-progress-property-wrap hidden>
+        <span>Field</span>
+        <select data-progress-input="property"></select>
+      </label>
+    </div>
+    <div class="progress-block-picker-grid">
+      <label class="progress-block-picker-field">
+        <span>Target value</span>
+        <input type="text" inputmode="decimal" data-progress-input="targetValue" />
+      </label>
+      <label class="progress-block-picker-field">
+        <span>Unit label</span>
+        <input type="text" data-progress-input="unitLabel" placeholder="words, hours, tasks" />
+      </label>
+    </div>
+    <label class="progress-block-picker-field">
+      <span>Deadline</span>
+      <input type="date" data-progress-input="deadline" />
+    </label>
+    <div class="progress-block-picker-divider"></div>
+    <div class="topbar-dropdown-label">Design</div>
+    <div class="progress-block-picker-grid">
+      <label class="progress-block-picker-field">
+        <span>Style</span>
+        <select data-progress-input="style">
+          <option value="bar">Bar</option>
+          <option value="pill">Pill</option>
+          <option value="ring">Ring</option>
+        </select>
+      </label>
+      <label class="progress-block-picker-field">
+        <span>Size</span>
+        <select data-progress-input="size">
+          <option value="sm">Small</option>
+          <option value="md">Medium</option>
+          <option value="lg">Large</option>
+        </select>
+      </label>
+    </div>
+    <div class="progress-block-picker-color-row">
+      <label class="progress-block-picker-field">
+        <span>Fill color</span>
+        <input type="color" data-progress-input="fillColor" />
+      </label>
+      <label class="progress-block-picker-field">
+        <span>Track color</span>
+        <input type="color" data-progress-input="trackColor" />
+      </label>
+    </div>
+    <div class="progress-block-picker-divider"></div>
+    <div class="topbar-dropdown-label">Visible info</div>
+    <div class="progress-block-picker-toggles">
+      <label class="progress-block-picker-toggle"><input type="checkbox" data-progress-input="showTitle" /> Title</label>
+      <label class="progress-block-picker-toggle"><input type="checkbox" data-progress-input="showValue" /> Values</label>
+      <label class="progress-block-picker-toggle"><input type="checkbox" data-progress-input="showPercent" /> Percent</label>
+      <label class="progress-block-picker-toggle"><input type="checkbox" data-progress-input="showDeadline" /> Deadline</label>
+    </div>
+    <div class="progress-block-picker-actions">
+      <button type="button" class="topbar-dropdown-btn" data-progress-action="save">Save</button>
+      <button type="button" class="topbar-dropdown-btn" data-progress-action="clear">Clear</button>
+    </div>
+  `;
+
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  document.body.appendChild(picker);
+
+  const anchorTarget = anchorEl || block.querySelector('.progress-block-config-btn') || block;
+  const rect = anchorTarget.getBoundingClientRect();
+  const width = picker.offsetWidth || 320;
+  const height = picker.offsetHeight || 360;
+  const viewportPadding = 12;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+
+  if (left + width > window.innerWidth - viewportPadding) {
+    left = window.innerWidth - width - viewportPadding;
+  }
+  if (top + height > window.innerHeight - viewportPadding) {
+    top = Math.max(viewportPadding, rect.top - height - 6);
+  }
+
+  picker.style.left = `${Math.max(viewportPadding, left)}px`;
+  picker.style.top = `${Math.max(viewportPadding, top)}px`;
+
+  if (typeof openOverlay === "function") {
+    openOverlay("progressBlockPicker", picker);
+  }
+
+  const titleInput = picker.querySelector('[data-progress-input="title"]');
+  const sourceTypeSelect = picker.querySelector('[data-progress-input="sourceType"]');
+  const manualWrap = picker.querySelector('[data-progress-manual-wrap]');
+  const databaseWrap = picker.querySelector('[data-progress-database-wrap]');
+  const currentInput = picker.querySelector('[data-progress-input="currentValue"]');
+  const sourceSelect = picker.querySelector('[data-progress-input="source"]');
+  const valueModeSelect = picker.querySelector('[data-progress-input="valueMode"]');
+  const scopeSelect = picker.querySelector('[data-progress-input="scope"]');
+  const propertyWrap = picker.querySelector('[data-progress-property-wrap]');
+  const propertySelect = picker.querySelector('[data-progress-input="property"]');
+  const targetInput = picker.querySelector('[data-progress-input="targetValue"]');
+  const unitInput = picker.querySelector('[data-progress-input="unitLabel"]');
+  const deadlineInput = picker.querySelector('[data-progress-input="deadline"]');
+  const styleSelect = picker.querySelector('[data-progress-input="style"]');
+  const sizeSelect = picker.querySelector('[data-progress-input="size"]');
+  const fillColorInput = picker.querySelector('[data-progress-input="fillColor"]');
+  const trackColorInput = picker.querySelector('[data-progress-input="trackColor"]');
+  const showTitleInput = picker.querySelector('[data-progress-input="showTitle"]');
+  const showValueInput = picker.querySelector('[data-progress-input="showValue"]');
+  const showPercentInput = picker.querySelector('[data-progress-input="showPercent"]');
+  const showDeadlineInput = picker.querySelector('[data-progress-input="showDeadline"]');
+  const saveBtn = picker.querySelector('[data-progress-action="save"]');
+  const clearBtn = picker.querySelector('[data-progress-action="clear"]');
+
+  if (!titleInput || !sourceTypeSelect || !manualWrap || !databaseWrap || !currentInput || !sourceSelect || !valueModeSelect || !scopeSelect || !propertyWrap || !propertySelect || !targetInput || !unitInput || !deadlineInput || !styleSelect || !sizeSelect || !fillColorInput || !trackColorInput || !showTitleInput || !showValueInput || !showPercentInput || !showDeadlineInput || !saveBtn || !clearBtn) {
+    closeProgressBlockPicker();
+    return;
+  }
+
+  sourceTypeSelect.value = normalizeProgressBlockSourceType(config.sourceType || "manual");
+  titleInput.value = config.title || "Goal";
+  currentInput.value = config.currentValue || "0";
+  targetInput.value = config.targetValue || "100";
+  unitInput.value = config.unitLabel || "";
+  deadlineInput.value = config.deadline || "";
+  valueModeSelect.value = normalizeProgressBlockValueMode(config.valueMode || "count");
+  scopeSelect.value = normalizeProgressBlockScope(config.scope || "all");
+  styleSelect.value = normalizeProgressBlockStyle(config.style || "bar");
+  sizeSelect.value = normalizeProgressBlockSize(config.size || "md");
+  fillColorInput.value = normalizeProgressBlockColor(config.fillColor || "", "#9fe870");
+  trackColorInput.value = normalizeProgressBlockColor(config.trackColor || "", "#2a2f24");
+  showTitleInput.checked = config.showTitle === "1";
+  showValueInput.checked = config.showValue === "1";
+  showPercentInput.checked = config.showPercent === "1";
+  showDeadlineInput.checked = config.showDeadline === "1";
+
+  sourceSelect.innerHTML = '<option value="">Choose a table...</option>' + sources.map((source) => {
+    const key = source.kind === "block"
+      ? `block|${source.pageId}|${source.blockId}`
+      : `page|${source.pageId}|`;
+    return `<option value="${escapeDataCalloutHTML(key)}">${escapeDataCalloutHTML(source.label || source.title || "Database")}</option>`;
+  }).join("");
+
+  const parseSourceValue = (raw) => {
+    const [kind = "page", pageId = "", blockId = ""] = String(raw || "").split("|");
+    return {
+      kind: kind === "block" ? "block" : "page",
+      pageId,
+      blockId: kind === "block" ? blockId : ""
+    };
+  };
+
+  const selectedSourceKey = config.sourcePageId
+    ? `${config.sourceKind}|${config.sourcePageId}|${config.sourceKind === "block" ? config.sourceBlockId : ""}`
+    : "";
+  sourceSelect.value = selectedSourceKey;
+
+  const fillPropertyOptions = (database, selectedPropertyId = "") => {
+    const properties = Array.isArray(database?.properties) ? database.properties : [];
+    propertySelect.innerHTML = '<option value="">Choose a field...</option>' + properties.map((property) => (
+      `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name)}</option>`
+    )).join("");
+    if (selectedPropertyId) propertySelect.value = selectedPropertyId;
+  };
+
+  const refreshDatabaseOptions = () => {
+    const sourceInfo = parseSourceValue(sourceSelect.value);
+    const payload = sourceInfo.pageId ? getProgressBlockSourcePayload({
+      sourceType: "database",
+      sourceKind: sourceInfo.kind,
+      sourcePageId: sourceInfo.pageId,
+      sourceBlockId: sourceInfo.blockId
+    }) : null;
+    fillPropertyOptions(payload?.database || null, propertySelect.value || config.propertyId);
+
+    const mode = normalizeProgressBlockValueMode(valueModeSelect.value || "count");
+    propertyWrap.hidden = mode !== "sum";
+    propertySelect.disabled = mode !== "sum";
+  };
+
+  const syncSourceSections = () => {
+    const sourceType = normalizeProgressBlockSourceType(sourceTypeSelect.value || "manual");
+    manualWrap.hidden = sourceType !== "manual";
+    databaseWrap.hidden = sourceType !== "database";
+    if (sourceType === "database") {
+      refreshDatabaseOptions();
+    }
+  };
+
+  sourceTypeSelect.addEventListener("change", syncSourceSections);
+  sourceSelect.addEventListener("change", refreshDatabaseOptions);
+  valueModeSelect.addEventListener("change", refreshDatabaseOptions);
+
+  refreshDatabaseOptions();
+  syncSourceSections();
+
+  saveBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const sourceType = normalizeProgressBlockSourceType(sourceTypeSelect.value || "manual");
+    const nextConfig = {
+      ...config,
+      title: titleInput.value || "Goal",
+      currentValue: currentInput.value || "0",
+      targetValue: targetInput.value || "100",
+      unitLabel: unitInput.value || "",
+      deadline: deadlineInput.value || "",
+      style: styleSelect.value || "bar",
+      size: sizeSelect.value || "md",
+      fillColor: fillColorInput.value || "#9fe870",
+      trackColor: trackColorInput.value || "#2a2f24",
+      showTitle: showTitleInput.checked ? "1" : "0",
+      showValue: showValueInput.checked ? "1" : "0",
+      showPercent: showPercentInput.checked ? "1" : "0",
+      showDeadline: showDeadlineInput.checked ? "1" : "0"
+    };
+
+    if (sourceType === "database") {
+      const sourceInfo = parseSourceValue(sourceSelect.value);
+      const valueMode = normalizeProgressBlockValueMode(valueModeSelect.value || "count");
+
+      if (!sourceInfo.pageId) {
+        showAppToast?.("Choose a database table first.", "info");
+        return;
+      }
+
+      if (valueMode === "sum" && !propertySelect.value) {
+        showAppToast?.("Choose a field to sum.", "info");
+        return;
+      }
+
+      writeProgressBlockConfig(block, {
+        ...nextConfig,
+        sourceType,
+        sourceKind: sourceInfo.kind,
+        sourcePageId: sourceInfo.pageId,
+        sourceBlockId: sourceInfo.blockId,
+        propertyId: propertySelect.value || "",
+        valueMode,
+        scope: scopeSelect.value || "all"
+      });
+    } else {
+      writeProgressBlockConfig(block, {
+        ...nextConfig,
+        sourceType: "manual",
+        sourceKind: "page",
+        sourcePageId: "",
+        sourceBlockId: "",
+        propertyId: "",
+        valueMode: valueModeSelect.value || "count",
+        scope: scopeSelect.value || "all"
+      });
+    }
+
+    renderProgressBlock(block);
+    if (typeof saveState === "function") saveState();
+    closeProgressBlockPicker();
+  });
+
+  clearBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    writeProgressBlockConfig(block, {
+      title: "Goal",
+      sourceType: "manual",
+      sourceKind: "page",
+      sourcePageId: "",
+      sourceBlockId: "",
+      propertyId: "",
+      valueMode: "count",
+      scope: "all",
+      currentValue: "0",
+      targetValue: "100",
+      unitLabel: "",
+      deadline: "",
+      style: "bar",
+      size: "md",
+      showTitle: "1",
+      showValue: "1",
+      showPercent: "1",
+      showDeadline: "1",
+      fillColor: "#9fe870",
+      trackColor: "#2a2f24"
+    });
+    renderProgressBlock(block);
+    if (typeof saveState === "function") saveState();
+    closeProgressBlockPicker();
+  });
+
+  requestAnimationFrame(() => {
+    titleInput.focus();
+    titleInput.select();
+  });
+}
+
+window.mountProgressBlock = function mountProgressBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "progress") return null;
+  renderProgressBlock(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector('.progress-block-config-btn') || block;
+    openProgressBlockPicker(block, anchor);
+  }
+  return block;
+};
+
+function normalizeDataCalloutConfig(raw = {}) {
+  const sourceType = normalizeDataCalloutSourceType(raw?.sourceType || "database");
+  const systemKey = normalizeDataCalloutSystemKey(raw?.systemKey || "current-date");
+  return {
+    label: String(raw?.label || "").trim() || getDefaultDataCalloutLabel({ sourceType, systemKey }),
+    sourceType,
+    sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(raw?.sourcePageId || "").trim(),
+    sourceBlockId: String(raw?.sourceBlockId || "").trim(),
+    propertyId: String(raw?.propertyId || "").trim(),
+    mode: normalizeDataCalloutMode(raw?.mode || "row"),
+    rowId: String(raw?.rowId || "").trim(),
+    systemKey,
+    systemTargetKind: normalizeDataCalloutSystemTargetKind(raw?.systemTargetKind || "current"),
+    systemTargetPageId: String(raw?.systemTargetPageId || "").trim(),
+    systemFormat: normalizeDataCalloutSystemFormat(raw?.systemFormat || "", systemKey),
+    align: normalizeDataCalloutAlign(raw?.align || "left"),
+    size: normalizeDataCalloutSize(raw?.size || "md"),
+    labelPos: normalizeDataCalloutLabelPos(raw?.labelPos || "below")
+  };
+}
+
+function readDataCalloutConfig(block) {
+  if (!block) return normalizeDataCalloutConfig({});
+  return normalizeDataCalloutConfig({
+    label: block.dataset.dataCalloutLabel || "",
+    sourceType: block.dataset.dataCalloutSourceType || "database",
+    sourceKind: block.dataset.dataCalloutSourceKind || "page",
+    sourcePageId: block.dataset.dataCalloutSourcePageId || "",
+    sourceBlockId: block.dataset.dataCalloutSourceBlockId || "",
+    propertyId: block.dataset.dataCalloutPropertyId || "",
+    mode: block.dataset.dataCalloutMode || "row",
+    rowId: block.dataset.dataCalloutRowId || "",
+    systemKey: block.dataset.dataCalloutSystemKey || "current-date",
+    systemTargetKind: block.dataset.dataCalloutSystemTargetKind || "current",
+    systemTargetPageId: block.dataset.dataCalloutSystemTargetPageId || "",
+    systemFormat: block.dataset.dataCalloutSystemFormat || "",
+    align: block.dataset.dataCalloutAlign || "left",
+    size: block.dataset.dataCalloutSize || "md",
+    labelPos: block.dataset.dataCalloutLabelPos || "below"
+  });
+}
+
+function writeDataCalloutConfig(block, config) {
+  if (!block) return;
+  const normalized = normalizeDataCalloutConfig(config);
+  block.dataset.dataCalloutLabel = normalized.label;
+  block.dataset.dataCalloutSourceType = normalized.sourceType;
+  block.dataset.dataCalloutSourceKind = normalized.sourceKind;
+  block.dataset.dataCalloutSourcePageId = normalized.sourcePageId;
+  block.dataset.dataCalloutSourceBlockId = normalized.sourceBlockId;
+  block.dataset.dataCalloutPropertyId = normalized.propertyId;
+  block.dataset.dataCalloutMode = normalized.mode;
+  block.dataset.dataCalloutRowId = normalized.rowId;
+  block.dataset.dataCalloutSystemKey = normalized.systemKey;
+  block.dataset.dataCalloutSystemTargetKind = normalized.systemTargetKind;
+  block.dataset.dataCalloutSystemTargetPageId = normalized.systemTargetPageId;
+  block.dataset.dataCalloutSystemFormat = normalized.systemFormat;
+  block.dataset.dataCalloutAlign = normalized.align;
+  block.dataset.dataCalloutSize = normalized.size;
+  block.dataset.dataCalloutLabelPos = normalized.labelPos;
+}
+
+function formatDataCalloutNumber(value = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(number);
+}
+
+function parseDataCalloutNumericValue(value = "") {
+  const safe = String(value || "").trim();
+  if (!safe) return 0;
+  const normalized = safe.replace(/,/g, "").replace(/[^\d.-]/g, "");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatDataCalloutFieldValue(property, rawValue = "") {
+  const safeType = String(property?.type || "text").trim();
+  const safeValue = rawValue == null ? "" : String(rawValue).trim();
+  if (!safeValue) return "—";
+
+  if (safeType === "number" || safeType === "formula" || safeType === "summary") {
+    return formatDataCalloutNumber(parseDataCalloutNumericValue(safeValue));
+  }
+
+  if (safeType === "checkbox") {
+    return safeValue === "true" ? "Checked" : "Unchecked";
+  }
+
+  if (safeType === "date") {
+    const dateMatch = safeValue.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+      const date = new Date(`${dateMatch[1]}T00:00:00`);
+      if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+    }
+  }
+
+  return safeValue;
+}
+
+function getDataCalloutSourcePayload(config) {
+  if (typeof window.getDatabaseCalloutSourceData !== "function") return null;
+  if (!config.sourcePageId) return null;
+
+  return window.getDatabaseCalloutSourceData({
+    kind: config.sourceKind,
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  });
+}
+
+function getDataCalloutPageRecord(pageId = "") {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return null;
+
+  if (safePageId === "home") {
+    return { id: "home", title: "Home", type: "domain", icon: "⌂" };
+  }
+
+  const domain = (Array.isArray(window.userDomains) ? window.userDomains : []).find((entry) => entry?.id === safePageId);
+  if (domain) return { ...domain, type: "domain" };
+
+  const page = (Array.isArray(window.userPages) ? window.userPages : []).find((entry) => entry?.id === safePageId);
+  if (page) return { ...page, type: entryTypeOrDefault(page, "page") };
+
+  return null;
+}
+
+function entryTypeOrDefault(entry, fallback = "page") {
+  return String(entry?.type || fallback).trim() || fallback;
+}
+
+function getDataCalloutPageTitle(pageId = "", fallback = "Untitled") {
+  const record = getDataCalloutPageRecord(pageId);
+  if (record?.title) return record.title;
+
+  const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "";
+  if (pageId && pageId === currentPageId) {
+    return document.getElementById("pageTitle")?.textContent?.trim() || fallback;
+  }
+
+  return fallback;
+}
+
+function getDataCalloutCurrentPageLabel() {
+  const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "";
+  const title = getDataCalloutPageTitle(currentPageId, "Current page");
+  return `Current page (${title})`;
+}
+
+function getDataCalloutPageTargetOptions() {
+  const options = [];
+  const seen = new Set();
+
+  const pushOption = (value, label) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    options.push({ value, label });
+  };
+
+  pushOption("current|", getDataCalloutCurrentPageLabel());
+  pushOption("page|home", "⌂ Home");
+
+  (Array.isArray(window.userDomains) ? window.userDomains : []).forEach((domain) => {
+    if (!domain?.id) return;
+    pushOption(`page|${domain.id}`, `⌂ ${domain.title || "Untitled"}`);
+  });
+
+  (Array.isArray(window.userPages) ? window.userPages : []).forEach((page) => {
+    if (!page?.id) return;
+    pushOption(`page|${page.id}`, `📄 ${page.title || "Untitled"}`);
+  });
+
+  return options;
+}
+
+function parseDataCalloutTargetValue(raw = "") {
+  const [kind = "current", pageId = ""] = String(raw || "").split("|");
+  return {
+    targetKind: kind === "page" && pageId ? "page" : "current",
+    pageId: kind === "page" ? String(pageId || "").trim() : ""
+  };
+}
+
+function getDataCalloutSystemFormatOptions(systemKey = "current-date") {
+  if (systemKey === "current-time") {
+    return [
+      { value: "12h", label: "12-hour" },
+      { value: "24h", label: "24-hour" }
+    ];
+  }
+
+  if (systemKey === "page-activity") {
+    return [
+      { value: "compact", label: "Compact" },
+      { value: "clock", label: "Clock" }
+    ];
+  }
+
+  return [
+    { value: "short", label: "Short date" },
+    { value: "long", label: "Long date" }
+  ];
+}
+
+function resolveDataCalloutTargetPageId(config) {
+  if (normalizeDataCalloutSystemTargetKind(config.systemTargetKind) === "page") {
+    return String(config.systemTargetPageId || "").trim();
+  }
+  return typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "";
+}
+
+function formatDataCalloutDate(format = "short") {
+  const now = new Date();
+  const options = format === "long"
+    ? { weekday: "long", month: "long", day: "numeric", year: "numeric" }
+    : { month: "short", day: "numeric", year: "numeric" };
+  return now.toLocaleDateString(undefined, options);
+}
+
+function formatDataCalloutTime(format = "12h") {
+  const now = new Date();
+  const options = format === "24h"
+    ? { hour: "2-digit", minute: "2-digit", hour12: false }
+    : { hour: "numeric", minute: "2-digit" };
+  return now.toLocaleTimeString(undefined, options);
+}
+
+function formatDataCalloutDuration(ms = 0, format = "compact") {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (format === "clock") {
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function computeSystemDataCalloutValue(config) {
+  if (config.systemKey === "current-time") {
+    return {
+      valueText: formatDataCalloutTime(config.systemFormat),
+      configured: true
+    };
+  }
+
+  if (config.systemKey === "page-activity") {
+    const targetPageId = resolveDataCalloutTargetPageId(config);
+    if (!targetPageId) {
+      return {
+        valueText: "—",
+        configured: false
+      };
+    }
+
+    return {
+      valueText: formatDataCalloutDuration(getLivePageActivityMs(targetPageId), config.systemFormat),
+      configured: true
+    };
+  }
+
+  return {
+    valueText: formatDataCalloutDate(config.systemFormat),
+    configured: true
+  };
+}
+
+function computeDataCalloutValue(sourcePayload, config) {
+  const database = sourcePayload?.database;
+  if (!database) {
+    return {
+      valueText: "—",
+      subline: "Pick a database table to start.",
+      configured: false
+    };
+  }
+
+  const properties = Array.isArray(database.properties) ? database.properties : [];
+  const rows = Array.isArray(database.rows) ? database.rows : [];
+  const property = properties.find((entry) => entry.id === config.propertyId) || null;
+
+  if (!property) {
+    return {
+      valueText: "—",
+      subline: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+      configured: false
+    };
+  }
+
+  if (config.mode === "count") {
+    return {
+      valueText: formatDataCalloutNumber(rows.length),
+      subline: `Count of rows in ${database.title}`,
+      configured: true
+    };
+  }
+
+  if (config.mode === "sum") {
+    const total = rows.reduce((sum, row) => {
+      const value = row?.values?.[property.id] || "";
+      return sum + parseDataCalloutNumericValue(value);
+    }, 0);
+    return {
+      valueText: formatDataCalloutNumber(total),
+      subline: `Sum of ${property.name}`,
+      configured: true
+    };
+  }
+
+  const row = rows.find((entry) => entry.id === config.rowId) || null;
+  if (!row) {
+    return {
+      valueText: "—",
+      subline: "Pick a row for this field.",
+      configured: false
+    };
+  }
+
+  return {
+    valueText: formatDataCalloutFieldValue(property, row?.values?.[property.id] || ""),
+    subline: `${property.name} from ${row.title || "row"}`,
+    configured: true
+  };
+}
+
+function renderDataCalloutBlock(block) {
+  if (!block || block.dataset.type !== "data-callout") return;
+
+  const labelEl = block.querySelector(".data-callout-label");
+  const valueEl = block.querySelector(".data-callout-value");
+  const shellEl = block.querySelector(".data-callout-shell");
+  if (!labelEl || !valueEl || !shellEl) return;
+
+  const config = readDataCalloutConfig(block);
+  const result = config.sourceType === "system"
+    ? computeSystemDataCalloutValue(config)
+    : computeDataCalloutValue(getDataCalloutSourcePayload(config), config);
+
+  labelEl.textContent = config.label || getDefaultDataCalloutLabel(config);
+  valueEl.textContent = result.configured ? result.valueText : "—";
+  shellEl.classList.toggle("is-configured", !!result.configured);
+  shellEl.dataset.sourceType = config.sourceType;
+  shellEl.dataset.align = config.align;
+  shellEl.dataset.size = config.size;
+  shellEl.dataset.labelPos = config.labelPos;
+}
+
+function renderVisibleDataCalloutBlocks() {
+  document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
+    renderDataCalloutBlock(block);
+  });
+}
+
+function closeDataCalloutPicker() {
+  const picker = document.querySelector('.topbar-dropdown.data-callout-picker');
+  if (picker) picker.remove();
+  if (typeof setUIState === "function") {
+    setUIState({ openOverlay: null });
+  }
+}
+
+function openDataCalloutPicker(block, anchorEl = null) {
+  if (!block) return;
+
+  closeDataCalloutPicker();
+
+  const config = readDataCalloutConfig(block);
+  const sources = typeof window.getDatabaseCalloutSources === "function"
+    ? window.getDatabaseCalloutSources()
+    : [];
+
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown data-callout-picker";
+  picker.dataset.uiId = "dataCalloutPicker";
+  picker.innerHTML = `
+    <div class="topbar-dropdown-label">Info card</div>
+    <label class="data-callout-picker-field">
+      <span>Label</span>
+      <input type="text" data-callout-input="label" />
+    </label>
+    <label class="data-callout-picker-field">
+      <span>Source</span>
+      <select data-callout-input="sourceType">
+        <option value="database">Database field</option>
+        <option value="system">System info</option>
+      </select>
+    </label>
+    <div data-callout-database-wrap>
+      <label class="data-callout-picker-field">
+        <span>Database table</span>
+        <select data-callout-input="source"></select>
+      </label>
+      <label class="data-callout-picker-field">
+        <span>Field</span>
+        <select data-callout-input="property"></select>
+      </label>
+      <label class="data-callout-picker-field">
+        <span>Value mode</span>
+        <select data-callout-input="mode">
+          <option value="row">Specific row value</option>
+          <option value="count">Count rows</option>
+          <option value="sum">Sum field</option>
+        </select>
+      </label>
+      <label class="data-callout-picker-field" data-callout-row-wrap>
+        <span>Row</span>
+        <select data-callout-input="row"></select>
+      </label>
+    </div>
+    <div data-callout-system-wrap hidden>
+      <label class="data-callout-picker-field">
+        <span>Info</span>
+        <select data-callout-input="systemKey">
+          <option value="current-date">Today's date</option>
+          <option value="current-time">Current time</option>
+          <option value="page-activity">Time spent on page today</option>
+        </select>
+      </label>
+      <label class="data-callout-picker-field" data-callout-system-target-wrap hidden>
+        <span>Page target</span>
+        <select data-callout-input="systemTarget"></select>
+      </label>
+      <label class="data-callout-picker-field">
+        <span>Format</span>
+        <select data-callout-input="systemFormat"></select>
+      </label>
+    </div>
+    <div class="data-callout-picker-divider"></div>
+    <div class="topbar-dropdown-label">Layout</div>
+    <label class="data-callout-picker-field">
+      <span>Alignment</span>
+      <select data-callout-input="align">
+        <option value="left">Left</option>
+        <option value="center">Center</option>
+        <option value="right">Right</option>
+      </select>
+    </label>
+    <label class="data-callout-picker-field">
+      <span>Value size</span>
+      <select data-callout-input="size">
+        <option value="sm">Small</option>
+        <option value="md">Medium</option>
+        <option value="lg">Large</option>
+      </select>
+    </label>
+    <label class="data-callout-picker-field">
+      <span>Label position</span>
+      <select data-callout-input="labelPos">
+        <option value="above">Above value</option>
+        <option value="below">Below value</option>
+        <option value="hidden">Hidden</option>
+      </select>
+    </label>
+    <div class="data-callout-picker-actions">
+      <button type="button" class="topbar-dropdown-btn" data-callout-action="save">Save</button>
+      <button type="button" class="topbar-dropdown-btn" data-callout-action="clear">Clear</button>
+    </div>
+  `;
+
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  document.body.appendChild(picker);
+
+  const anchorTarget = anchorEl || block.querySelector('.data-callout-config-btn') || block;
+  const rect = anchorTarget.getBoundingClientRect();
+  const width = picker.offsetWidth || 280;
+  const height = picker.offsetHeight || 320;
+  const viewportPadding = 12;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+
+  if (left + width > window.innerWidth - viewportPadding) {
+    left = window.innerWidth - width - viewportPadding;
+  }
+  if (top + height > window.innerHeight - viewportPadding) {
+    top = Math.max(viewportPadding, rect.top - height - 6);
+  }
+
+  picker.style.left = `${Math.max(viewportPadding, left)}px`;
+  picker.style.top = `${Math.max(viewportPadding, top)}px`;
+
+  if (typeof openOverlay === "function") {
+    openOverlay("dataCalloutPicker", picker);
+  }
+
+  const labelInput = picker.querySelector('[data-callout-input="label"]');
+  const sourceTypeSelect = picker.querySelector('[data-callout-input="sourceType"]');
+  const databaseWrap = picker.querySelector('[data-callout-database-wrap]');
+  const sourceSelect = picker.querySelector('[data-callout-input="source"]');
+  const propertySelect = picker.querySelector('[data-callout-input="property"]');
+  const modeSelect = picker.querySelector('[data-callout-input="mode"]');
+  const rowWrap = picker.querySelector('[data-callout-row-wrap]');
+  const rowSelect = picker.querySelector('[data-callout-input="row"]');
+  const systemWrap = picker.querySelector('[data-callout-system-wrap]');
+  const systemKeySelect = picker.querySelector('[data-callout-input="systemKey"]');
+  const systemTargetWrap = picker.querySelector('[data-callout-system-target-wrap]');
+  const systemTargetSelect = picker.querySelector('[data-callout-input="systemTarget"]');
+  const systemFormatSelect = picker.querySelector('[data-callout-input="systemFormat"]');
+  const alignSelect = picker.querySelector('[data-callout-input="align"]');
+  const sizeSelect = picker.querySelector('[data-callout-input="size"]');
+  const labelPosSelect = picker.querySelector('[data-callout-input="labelPos"]');
+  const saveBtn = picker.querySelector('[data-callout-action="save"]');
+  const clearBtn = picker.querySelector('[data-callout-action="clear"]');
+
+  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !saveBtn || !clearBtn) {
+    closeDataCalloutPicker();
+    return;
+  }
+
+  labelInput.value = config.label || "";
+  sourceTypeSelect.value = normalizeDataCalloutSourceType(config.sourceType || "database");
+  modeSelect.value = normalizeDataCalloutMode(config.mode || "row");
+  systemKeySelect.value = normalizeDataCalloutSystemKey(config.systemKey || "current-date");
+  if (alignSelect) alignSelect.value = normalizeDataCalloutAlign(config.align || "left");
+  if (sizeSelect) sizeSelect.value = normalizeDataCalloutSize(config.size || "md");
+  if (labelPosSelect) labelPosSelect.value = normalizeDataCalloutLabelPos(config.labelPos || "below");
+
+  sourceSelect.innerHTML = '<option value="">Choose a table...</option>' + sources.map((source) => {
+    const key = source.kind === "block"
+      ? `block|${source.pageId}|${source.blockId}`
+      : `page|${source.pageId}|`;
+    return `<option value="${escapeDataCalloutHTML(key)}">${escapeDataCalloutHTML(source.label || source.title || "Database")}</option>`;
+  }).join("");
+
+  const selectedSourceKey = config.sourcePageId
+    ? `${config.sourceKind}|${config.sourcePageId}|${config.sourceKind === "block" ? config.sourceBlockId : ""}`
+    : "";
+  sourceSelect.value = selectedSourceKey;
+
+  const parseSourceValue = (raw) => {
+    const [kind = "page", pageId = "", blockId = ""] = String(raw || "").split("|");
+    return {
+      kind: kind === "block" ? "block" : "page",
+      pageId,
+      blockId: kind === "block" ? blockId : ""
+    };
+  };
+
+  const fillPropertyOptions = (database, selectedPropertyId = "") => {
+    const properties = Array.isArray(database?.properties) ? database.properties : [];
+    propertySelect.innerHTML = '<option value="">Choose a field...</option>' + properties.map((property) => (
+      `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name)}</option>`
+    )).join("");
+    if (selectedPropertyId) propertySelect.value = selectedPropertyId;
+  };
+
+  const fillRowOptions = (database, selectedRowId = "") => {
+    const rows = Array.isArray(database?.rows) ? database.rows : [];
+    rowSelect.innerHTML = '<option value="">Choose a row...</option>' + rows.map((row) => (
+      `<option value="${escapeDataCalloutHTML(row.id)}">${escapeDataCalloutHTML(row.title || "Untitled")}</option>`
+    )).join("");
+    if (selectedRowId) rowSelect.value = selectedRowId;
+  };
+
+  const fillSystemTargetOptions = (selectedValue = "") => {
+    const options = getDataCalloutPageTargetOptions();
+    systemTargetSelect.innerHTML = options.map((option) => (
+      `<option value="${escapeDataCalloutHTML(option.value)}">${escapeDataCalloutHTML(option.label)}</option>`
+    )).join("");
+
+    const nextValue = selectedValue || (config.systemTargetKind === "page" && config.systemTargetPageId
+      ? `page|${config.systemTargetPageId}`
+      : "current|");
+
+    systemTargetSelect.value = nextValue;
+    if (!systemTargetSelect.value && options.length) {
+      systemTargetSelect.value = options[0].value;
+    }
+  };
+
+  const fillSystemFormatOptions = (systemKey, selectedValue = "") => {
+    const options = getDataCalloutSystemFormatOptions(systemKey);
+    systemFormatSelect.innerHTML = options.map((option) => (
+      `<option value="${escapeDataCalloutHTML(option.value)}">${escapeDataCalloutHTML(option.label)}</option>`
+    )).join("");
+
+    const normalized = normalizeDataCalloutSystemFormat(selectedValue || config.systemFormat || "", systemKey);
+    systemFormatSelect.value = normalized;
+    if (!systemFormatSelect.value && options.length) {
+      systemFormatSelect.value = options[0].value;
+    }
+  };
+
+  let autoLabel = getDefaultDataCalloutLabel(config);
+
+  const maybeSyncAutoLabel = () => {
+    const currentValue = String(labelInput.value || "").trim();
+    const nextDefault = getDefaultDataCalloutLabel({
+      sourceType: sourceTypeSelect.value,
+      systemKey: systemKeySelect.value
+    });
+
+    if (!currentValue || currentValue === autoLabel) {
+      labelInput.value = nextDefault;
+    }
+
+    autoLabel = nextDefault;
+  };
+
+  const refreshDependentOptions = () => {
+    const sourceInfo = parseSourceValue(sourceSelect.value);
+    const payload = sourceInfo.pageId ? getDataCalloutSourcePayload({
+      sourceKind: sourceInfo.kind,
+      sourcePageId: sourceInfo.pageId,
+      sourceBlockId: sourceInfo.blockId
+    }) : null;
+
+    fillPropertyOptions(payload?.database || null, propertySelect.value || config.propertyId);
+    fillRowOptions(payload?.database || null, rowSelect.value || config.rowId);
+
+    const mode = normalizeDataCalloutMode(modeSelect.value || "row");
+    rowWrap.hidden = mode !== "row";
+    propertySelect.disabled = mode === "count";
+    rowSelect.disabled = mode !== "row";
+  };
+
+  const refreshSystemOptions = () => {
+    const systemKey = normalizeDataCalloutSystemKey(systemKeySelect.value || "current-date");
+    fillSystemFormatOptions(systemKey, systemFormatSelect.value || config.systemFormat || "");
+    const shouldShowTarget = systemKey === "page-activity";
+    systemTargetWrap.hidden = !shouldShowTarget;
+    systemTargetSelect.disabled = !shouldShowTarget;
+    if (shouldShowTarget) {
+      fillSystemTargetOptions(systemTargetSelect.value || "");
+    }
+  };
+
+  const syncPickerSections = () => {
+    const sourceType = normalizeDataCalloutSourceType(sourceTypeSelect.value || "database");
+    databaseWrap.hidden = sourceType !== "database";
+    systemWrap.hidden = sourceType !== "system";
+
+    if (sourceType === "database") {
+      refreshDependentOptions();
+    } else {
+      refreshSystemOptions();
+    }
+  };
+
+  sourceSelect.addEventListener("change", () => {
+    propertySelect.value = "";
+    rowSelect.value = "";
+    refreshDependentOptions();
+  });
+
+  modeSelect.addEventListener("change", refreshDependentOptions);
+  sourceTypeSelect.addEventListener("change", () => {
+    maybeSyncAutoLabel();
+    syncPickerSections();
+  });
+  systemKeySelect.addEventListener("change", () => {
+    maybeSyncAutoLabel();
+    refreshSystemOptions();
+  });
+
+  refreshDependentOptions();
+  fillSystemTargetOptions(config.systemTargetKind === "page" && config.systemTargetPageId
+    ? `page|${config.systemTargetPageId}`
+    : "current|");
+  fillSystemFormatOptions(systemKeySelect.value, config.systemFormat || "");
+  syncPickerSections();
+
+  saveBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+
+    const sourceType = normalizeDataCalloutSourceType(sourceTypeSelect.value || "database");
+
+    if (sourceType === "system") {
+      const systemKey = normalizeDataCalloutSystemKey(systemKeySelect.value || "current-date");
+      const targetInfo = parseDataCalloutTargetValue(systemTargetSelect.value || "current|");
+
+      writeDataCalloutConfig(block, {
+        label: labelInput.value || getDefaultDataCalloutLabel({ sourceType, systemKey }),
+        sourceType,
+        sourceKind: "page",
+        sourcePageId: "",
+        sourceBlockId: "",
+        propertyId: "",
+        mode: "row",
+        rowId: "",
+        systemKey,
+        systemTargetKind: systemKey === "page-activity" ? targetInfo.targetKind : "current",
+        systemTargetPageId: systemKey === "page-activity" && targetInfo.targetKind === "page" ? targetInfo.pageId : "",
+        systemFormat: systemFormatSelect.value || "",
+        align: alignSelect?.value || "left",
+        size: sizeSelect?.value || "md",
+        labelPos: labelPosSelect?.value || "below"
+      });
+
+      renderDataCalloutBlock(block);
+      if (typeof saveState === "function") saveState();
+      closeDataCalloutPicker();
+      return;
+    }
+
+    const sourceInfo = parseSourceValue(sourceSelect.value);
+    const mode = normalizeDataCalloutMode(modeSelect.value || "row");
+    if (!sourceInfo.pageId) {
+      showAppToast?.("Choose a database table first.", "info");
+      return;
+    }
+
+    if (mode !== "count" && !propertySelect.value) {
+      showAppToast?.("Choose a field to display.", "info");
+      return;
+    }
+
+    if (mode === "row" && !rowSelect.value) {
+      showAppToast?.("Choose a row for this callout.", "info");
+      return;
+    }
+
+    writeDataCalloutConfig(block, {
+      label: labelInput.value || "Value",
+      sourceType,
+      sourceKind: sourceInfo.kind,
+      sourcePageId: sourceInfo.pageId,
+      sourceBlockId: sourceInfo.blockId,
+      propertyId: propertySelect.value || "",
+      mode,
+      rowId: rowSelect.value || "",
+      systemKey: systemKeySelect.value || "current-date",
+      systemTargetKind: "current",
+      systemTargetPageId: "",
+      systemFormat: systemFormatSelect.value || "",
+      align: alignSelect?.value || "left",
+      size: sizeSelect?.value || "md",
+      labelPos: labelPosSelect?.value || "below"
+    });
+
+    renderDataCalloutBlock(block);
+    if (typeof saveState === "function") saveState();
+    closeDataCalloutPicker();
+  });
+
+  clearBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    writeDataCalloutConfig(block, {
+      label: "Value",
+      sourceType: "database",
+      sourceKind: "page",
+      sourcePageId: "",
+      sourceBlockId: "",
+      propertyId: "",
+      mode: "row",
+      rowId: "",
+      systemKey: "current-date",
+      systemTargetKind: "current",
+      systemTargetPageId: "",
+      systemFormat: "short",
+      align: alignSelect?.value || "left",
+      size: sizeSelect?.value || "md",
+      labelPos: labelPosSelect?.value || "below"
+    });
+    renderDataCalloutBlock(block);
+    if (typeof saveState === "function") saveState();
+    closeDataCalloutPicker();
+  });
+}
+
+window.mountDataCalloutBlock = function mountDataCalloutBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "data-callout") return null;
+  renderDataCalloutBlock(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector('.data-callout-config-btn') || block;
+    openDataCalloutPicker(block, anchor);
+  }
+  return block;
+};
+
+window.addEventListener("sanctum:database-updated", () => {
+  window.requestAnimationFrame(() => {
+    renderVisibleDataCalloutBlocks();
+  });
+});
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    setTrackedPageActivityPage(typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home");
+    renderVisibleDataCalloutBlocks();
+  }, { once: true });
+} else {
+  setTrackedPageActivityPage(typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home");
+  renderVisibleDataCalloutBlocks();
+}
+
+function renderLiveDataCalloutBlocks() {
+  document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
+    const config = readDataCalloutConfig(block);
+    if (config.sourceType !== "system") return;
+    renderDataCalloutBlock(block);
+  });
+}
+
+const previousDataCalloutPageOpenHook = typeof window.onSanctumPageOpen === "function" ? window.onSanctumPageOpen : null;
+window.onSanctumPageOpen = function onDataCalloutPageOpen(pageId) {
+  previousDataCalloutPageOpenHook?.(pageId);
+  setTrackedPageActivityPage(pageId);
+  renderLiveDataCalloutBlocks();
+};
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    flushTrackedPageActivity({ now: Date.now() });
+  } else {
+    resumeTrackedPageActivity();
+  }
+  renderLiveDataCalloutBlocks();
+});
+
+window.addEventListener("pagehide", () => {
+  flushTrackedPageActivity({ now: Date.now() });
+});
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    renderVisibleProgressBlocks();
+  }, { once: true });
+} else {
+  renderVisibleProgressBlocks();
+}
+
+window.addEventListener("beforeunload", () => {
+  flushTrackedPageActivity({ now: Date.now() });
+});
+
+window.setInterval(() => {
+  if (document.hidden) return;
+  renderLiveDataCalloutBlocks();
+}, DATA_CALLOUT_LIVE_REFRESH_MS);
+
+window.setInterval(() => {
+  if (document.hidden) return;
+  flushTrackedPageActivity({
+    now: Date.now(),
+    keepRunning: true,
+    minDeltaMs: DATA_CALLOUT_ACTIVITY_FLUSH_MS
+  });
+}, DATA_CALLOUT_ACTIVITY_FLUSH_MS);
+
+function normalizeClockStyle(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "split" || raw === "capsule" || raw === "analog") return raw;
+  return "digital";
+}
+
+function normalizeClockSize(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "sm" || raw === "lg") return raw;
+  return "md";
+}
+
+function normalizeClockFormat(value = "") {
+  return String(value || "").trim() === "24" ? "24" : "12";
+}
+
+function normalizeClockShowSeconds(value) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function normalizeClockShowDate(value) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function normalizeClockColor(value = "") {
+  const raw = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) {
+    return raw.toLowerCase();
+  }
+  if (/^#[0-9a-f]{3}$/i.test(raw)) {
+    const short = raw.slice(1).toLowerCase();
+    return `#${short[0]}${short[0]}${short[1]}${short[1]}${short[2]}${short[2]}`;
+  }
+  return "#f5f5f5";
+}
+
+function readClockConfig(block) {
+  if (!block) {
+    return {
+      style: "digital",
+      size: "md",
+      color: "#f5f5f5",
+      format: "12",
+      showSeconds: false,
+      showDate: false,
+    };
+  }
+
+  return {
+    style: normalizeClockStyle(block.dataset.clockStyle || "digital"),
+    size: normalizeClockSize(block.dataset.clockSize || "md"),
+    color: normalizeClockColor(block.dataset.clockColor || "#f5f5f5"),
+    format: normalizeClockFormat(block.dataset.clockFormat || "12"),
+    showSeconds: normalizeClockShowSeconds(block.dataset.clockShowSeconds || "0"),
+    showDate: normalizeClockShowDate(block.dataset.clockShowDate || "0"),
+  };
+}
+
+function writeClockConfig(block, config = {}) {
+  if (!block) return;
+  const next = {
+    ...readClockConfig(block),
+    ...config,
+  };
+
+  block.dataset.clockStyle = normalizeClockStyle(next.style);
+  block.dataset.clockSize = normalizeClockSize(next.size);
+  block.dataset.clockColor = normalizeClockColor(next.color);
+  block.dataset.clockFormat = normalizeClockFormat(next.format);
+  block.dataset.clockShowSeconds = normalizeClockShowSeconds(next.showSeconds) ? "1" : "0";
+  block.dataset.clockShowDate = normalizeClockShowDate(next.showDate) ? "1" : "0";
+}
+
+function readClockTimeParts(now, config = {}) {
+  const formatter = new Intl.DateTimeFormat([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: normalizeClockFormat(config.format || "12") === "12",
+  });
+
+  const parts = formatter.formatToParts(now);
+  const getPart = (type) => parts.find((part) => part.type === type)?.value || "";
+
+  return {
+    hour: getPart("hour") || "00",
+    minute: getPart("minute") || "00",
+    second: getPart("second") || "00",
+    dayPeriod: getPart("dayPeriod") || "",
+  };
+}
+
+function renderClockBlock(block, now = new Date()) {
+  if (!block || block.dataset.type !== "clock") return;
+
+  const shell = block.querySelector(".clock-widget-shell");
+  const hoursEl = block.querySelector(".clock-widget-hours");
+  const minutesEl = block.querySelector(".clock-widget-minutes");
+  const secondsEl = block.querySelector(".clock-widget-seconds");
+  const meridiemEl = block.querySelector(".clock-widget-meridiem");
+  const dateEl = block.querySelector(".clock-widget-date");
+  const analogHourEl = block.querySelector(".clock-widget-analog-hour");
+  const analogMinuteEl = block.querySelector(".clock-widget-analog-minute");
+  const analogSecondEl = block.querySelector(".clock-widget-analog-second");
+  if (!shell || !hoursEl || !minutesEl || !secondsEl || !meridiemEl || !dateEl) return;
+
+  const config = readClockConfig(block);
+  const parts = readClockTimeParts(now, config);
+
+  shell.dataset.style = config.style;
+  shell.dataset.size = config.size;
+  shell.dataset.format = config.format;
+  shell.dataset.showSeconds = config.showSeconds ? "1" : "0";
+  shell.dataset.showDate = config.showDate ? "1" : "0";
+  shell.style.setProperty("--clock-accent", config.color);
+
+  hoursEl.textContent = parts.hour;
+  minutesEl.textContent = parts.minute;
+  secondsEl.textContent = parts.second;
+  secondsEl.hidden = !config.showSeconds;
+
+  meridiemEl.textContent = parts.dayPeriod || "";
+  meridiemEl.hidden = config.format === "24" || !parts.dayPeriod;
+  dateEl.textContent = new Intl.DateTimeFormat([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(now);
+  dateEl.hidden = !config.showDate;
+
+  const hourValue = now.getHours();
+  const minuteValue = now.getMinutes();
+  const secondValue = now.getSeconds();
+  const hourRotation = (((hourValue % 12) + (minuteValue / 60) + (secondValue / 3600)) * 30);
+  const minuteRotation = ((minuteValue + (secondValue / 60)) * 6);
+  const secondRotation = secondValue * 6;
+
+  if (analogHourEl) {
+    analogHourEl.style.transform = `translateX(-50%) rotate(${hourRotation}deg)`;
+  }
+  if (analogMinuteEl) {
+    analogMinuteEl.style.transform = `translateX(-50%) rotate(${minuteRotation}deg)`;
+  }
+  if (analogSecondEl) {
+    analogSecondEl.style.transform = `translateX(-50%) rotate(${secondRotation}deg)`;
+    analogSecondEl.hidden = !config.showSeconds;
+  }
+}
+
+function renderVisibleClockBlocks(now = new Date()) {
+  document.querySelectorAll('.block[data-type="clock"]').forEach((block) => {
+    renderClockBlock(block, now);
+  });
+}
+
+function closeClockPicker() {
+  const picker = document.querySelector('.topbar-dropdown.clock-picker');
+  if (picker) picker.remove();
+  if (typeof setUIState === "function") {
+    setUIState({ openOverlay: null });
+  }
+}
+
+function openClockPicker(block, anchorEl = null) {
+  if (!block) return;
+
+  closeClockPicker();
+
+  const config = readClockConfig(block);
+  const presetColors = ["#f5f5f5", "#cfd4da", "#e7d6b5", "#b7d6c4", "#b7cde1", "#dbbcc8"];
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown clock-picker";
+  picker.dataset.uiId = "clockPicker";
+  picker.innerHTML = `
+    <div class="topbar-dropdown-label">Clock</div>
+    <label class="clock-picker-field">
+      <span>Style</span>
+      <select data-clock-input="style">
+        <option value="digital">Plain</option>
+        <option value="split">Flip</option>
+        <option value="analog">Analog</option>
+        <option value="capsule">Capsule</option>
+      </select>
+    </label>
+    <label class="clock-picker-field">
+      <span>Size</span>
+      <select data-clock-input="size">
+        <option value="sm">Small</option>
+        <option value="md">Medium</option>
+        <option value="lg">Large</option>
+      </select>
+    </label>
+    <label class="clock-picker-field">
+      <span>Time format</span>
+      <select data-clock-input="format">
+        <option value="12">12-hour</option>
+        <option value="24">24-hour</option>
+      </select>
+    </label>
+    <label class="clock-picker-field">
+      <span>Seconds</span>
+      <select data-clock-input="seconds">
+        <option value="1">Show</option>
+        <option value="0">Hide</option>
+      </select>
+    </label>
+    <label class="clock-picker-field">
+      <span>Date</span>
+      <select data-clock-input="date">
+        <option value="0">Hide</option>
+        <option value="1">Show</option>
+      </select>
+    </label>
+    <label class="clock-picker-field">
+      <span>Time color</span>
+      <div class="clock-picker-color-row">
+        <button type="button" class="clock-picker-color-trigger" data-clock-action="pick-color">
+          <span class="clock-picker-color-chip"></span>
+          <span class="clock-picker-color-value">#F5F5F5</span>
+        </button>
+        <input type="color" class="clock-picker-color-native" data-clock-input="color" value="#f5f5f5" />
+      </div>
+    </label>
+    <div class="clock-picker-swatches">
+      ${presetColors.map((color) => (`<button type="button" class="clock-picker-swatch" data-clock-preset="${color}" style="--clock-swatch:${color};"></button>`)).join("")}
+    </div>
+    <div class="clock-picker-actions">
+      <button type="button" class="topbar-dropdown-btn" data-clock-action="save">Save</button>
+      <button type="button" class="topbar-dropdown-btn" data-clock-action="reset">Reset</button>
+    </div>
+  `;
+
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  document.body.appendChild(picker);
+
+  const anchorTarget = anchorEl || block.querySelector('.clock-config-btn') || block;
+  const rect = anchorTarget.getBoundingClientRect();
+  const width = picker.offsetWidth || 280;
+  const height = picker.offsetHeight || 260;
+  const viewportPadding = 12;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+
+  if (left + width > window.innerWidth - viewportPadding) {
+    left = window.innerWidth - width - viewportPadding;
+  }
+  if (top + height > window.innerHeight - viewportPadding) {
+    top = Math.max(viewportPadding, rect.top - height - 6);
+  }
+
+  picker.style.left = `${Math.max(viewportPadding, left)}px`;
+  picker.style.top = `${Math.max(viewportPadding, top)}px`;
+
+  if (typeof openOverlay === "function") {
+    openOverlay("clockPicker", picker);
+  }
+
+  const styleSelect = picker.querySelector('[data-clock-input="style"]');
+  const sizeSelect = picker.querySelector('[data-clock-input="size"]');
+  const formatSelect = picker.querySelector('[data-clock-input="format"]');
+  const secondsSelect = picker.querySelector('[data-clock-input="seconds"]');
+  const dateSelect = picker.querySelector('[data-clock-input="date"]');
+  const colorInput = picker.querySelector('[data-clock-input="color"]');
+  const colorTrigger = picker.querySelector('[data-clock-action="pick-color"]');
+  const colorValue = picker.querySelector('.clock-picker-color-value');
+  const saveBtn = picker.querySelector('[data-clock-action="save"]');
+  const resetBtn = picker.querySelector('[data-clock-action="reset"]');
+
+  if (!styleSelect || !sizeSelect || !formatSelect || !secondsSelect || !dateSelect || !colorInput || !colorTrigger || !colorValue || !saveBtn || !resetBtn) {
+    closeClockPicker();
+    return;
+  }
+
+  const syncPickerColor = (value) => {
+    const nextColor = normalizeClockColor(value || config.color);
+    colorInput.value = nextColor;
+    colorValue.textContent = nextColor.toUpperCase();
+    colorTrigger.style.setProperty('--clock-picker-color', nextColor);
+    picker.querySelectorAll('[data-clock-preset]').forEach((button) => {
+      button.dataset.active = normalizeClockColor(button.dataset.clockPreset || "") === nextColor ? "1" : "0";
+    });
+  };
+
+  const openColorPicker = (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    if (typeof colorInput.showPicker === "function") {
+      colorInput.showPicker();
+      return;
+    }
+
+    colorInput.click();
+  };
+
+  styleSelect.value = config.style;
+  sizeSelect.value = config.size;
+  formatSelect.value = config.format;
+  secondsSelect.value = config.showSeconds ? "1" : "0";
+  dateSelect.value = config.showDate ? "1" : "0";
+  syncPickerColor(config.color);
+
+  colorTrigger.addEventListener('click', openColorPicker);
+  colorInput.addEventListener('click', (event) => event.stopPropagation());
+  colorInput.addEventListener('input', (event) => {
+    event.stopPropagation();
+    syncPickerColor(colorInput.value);
+  });
+  colorInput.addEventListener('change', (event) => {
+    event.stopPropagation();
+    syncPickerColor(colorInput.value);
+  });
+
+  picker.querySelectorAll('[data-clock-preset]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      syncPickerColor(button.dataset.clockPreset || config.color);
+    });
+  });
+
+  saveBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    writeClockConfig(block, {
+      style: styleSelect.value,
+      size: sizeSelect.value,
+      format: formatSelect.value,
+      showSeconds: secondsSelect.value === "1",
+      showDate: dateSelect.value === "1",
+      color: colorInput.value,
+    });
+    renderClockBlock(block);
+    if (typeof enforceMinHeight === "function") enforceMinHeight(block);
+    if (typeof saveState === "function") saveState();
+    closeClockPicker();
+  });
+
+  resetBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    writeClockConfig(block, {
+      style: "digital",
+      size: "md",
+      format: "12",
+      showSeconds: false,
+      showDate: false,
+      color: "#f5f5f5",
+    });
+    renderClockBlock(block);
+    if (typeof enforceMinHeight === "function") enforceMinHeight(block);
+    if (typeof saveState === "function") saveState();
+    closeClockPicker();
+  });
+}
+
+window.mountClockBlock = function mountClockBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "clock") return null;
+  renderClockBlock(block);
+  if (typeof enforceMinHeight === "function") enforceMinHeight(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector('.clock-config-btn') || block;
+    openClockPicker(block, anchor);
+  }
+  return block;
+};
+
+window.setInterval(() => {
+  if (document.visibilityState === "hidden") return;
+  renderVisibleClockBlocks();
+}, 1000);
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    renderVisibleClockBlocks();
+  }, { once: true });
+} else {
+  renderVisibleClockBlocks();
 }
 
 function buildLinkedPageCardPayload(target, options = {}) {
@@ -2955,17 +5401,100 @@ function serializeBlockElement(b) {
     dbProperties: blockType === "calendar" ? (b.dataset.dbProperties || "[]") : "[]",
     dbRows: blockType === "calendar" ? (b.dataset.dbRows || "[]") : "[]",
     dbColumnWidths: blockType === "calendar" ? (b.dataset.dbColumnWidths || "{}") : "{}",
+    dbFolderState: blockType === "calendar" ? (b.dataset.dbFolderState || "{}") : "{}",
+    dbResetConfig: blockType === "calendar" ? (b.dataset.dbResetConfig || "{}") : "{}",
     dbSourceKind: blockType === "calendar" ? (b.dataset.dbSourceKind || "") : "",
     dbSourcePageId: blockType === "calendar" ? (b.dataset.dbSourcePageId || "") : "",
     dbSourceBlockId: blockType === "calendar" ? (b.dataset.dbSourceBlockId || "") : "",
     calendarCollapsed: blockType === "calendar" ? (b.dataset.calendarCollapsed || "") : "",
     calendarExpandedWidth: blockType === "calendar" ? (b.dataset.calendarExpandedWidth || "") : "",
+    dataCalloutLabel: blockType === "data-callout" ? (b.dataset.dataCalloutLabel || "") : "",
+    dataCalloutSourceType: blockType === "data-callout" ? (b.dataset.dataCalloutSourceType || "") : "",
+    dataCalloutSourceKind: blockType === "data-callout" ? (b.dataset.dataCalloutSourceKind || "") : "",
+    dataCalloutSourcePageId: blockType === "data-callout" ? (b.dataset.dataCalloutSourcePageId || "") : "",
+    dataCalloutSourceBlockId: blockType === "data-callout" ? (b.dataset.dataCalloutSourceBlockId || "") : "",
+    dataCalloutPropertyId: blockType === "data-callout" ? (b.dataset.dataCalloutPropertyId || "") : "",
+    dataCalloutMode: blockType === "data-callout" ? (b.dataset.dataCalloutMode || "") : "",
+    dataCalloutRowId: blockType === "data-callout" ? (b.dataset.dataCalloutRowId || "") : "",
+    dataCalloutSystemKey: blockType === "data-callout" ? (b.dataset.dataCalloutSystemKey || "") : "",
+    dataCalloutSystemTargetKind: blockType === "data-callout" ? (b.dataset.dataCalloutSystemTargetKind || "") : "",
+    dataCalloutSystemTargetPageId: blockType === "data-callout" ? (b.dataset.dataCalloutSystemTargetPageId || "") : "",
+    dataCalloutSystemFormat: blockType === "data-callout" ? (b.dataset.dataCalloutSystemFormat || "") : "",
+    dataCalloutAlign: blockType === "data-callout" ? (b.dataset.dataCalloutAlign || "") : "",
+    dataCalloutSize: blockType === "data-callout" ? (b.dataset.dataCalloutSize || "") : "",
+    dataCalloutLabelPos: blockType === "data-callout" ? (b.dataset.dataCalloutLabelPos || "") : "",
+    progressTitle: blockType === "progress" ? (b.dataset.progressTitle || "") : "",
+    progressSourceType: blockType === "progress" ? (b.dataset.progressSourceType || "") : "",
+    progressSourceKind: blockType === "progress" ? (b.dataset.progressSourceKind || "") : "",
+    progressSourcePageId: blockType === "progress" ? (b.dataset.progressSourcePageId || "") : "",
+    progressSourceBlockId: blockType === "progress" ? (b.dataset.progressSourceBlockId || "") : "",
+    progressPropertyId: blockType === "progress" ? (b.dataset.progressPropertyId || "") : "",
+    progressValueMode: blockType === "progress" ? (b.dataset.progressValueMode || "") : "",
+    progressScope: blockType === "progress" ? (b.dataset.progressScope || "") : "",
+    progressCurrentValue: blockType === "progress" ? (b.dataset.progressCurrentValue || "") : "",
+    progressTargetValue: blockType === "progress" ? (b.dataset.progressTargetValue || "") : "",
+    progressUnitLabel: blockType === "progress" ? (b.dataset.progressUnitLabel || "") : "",
+    progressDeadline: blockType === "progress" ? (b.dataset.progressDeadline || "") : "",
+    progressStyle: blockType === "progress" ? (b.dataset.progressStyle || "") : "",
+    progressSize: blockType === "progress" ? (b.dataset.progressSize || "") : "",
+    progressShowTitle: blockType === "progress" ? (b.dataset.progressShowTitle || "") : "",
+    progressShowValue: blockType === "progress" ? (b.dataset.progressShowValue || "") : "",
+    progressShowPercent: blockType === "progress" ? (b.dataset.progressShowPercent || "") : "",
+    progressShowDeadline: blockType === "progress" ? (b.dataset.progressShowDeadline || "") : "",
+    progressFillColor: blockType === "progress" ? (b.dataset.progressFillColor || "") : "",
+    progressTrackColor: blockType === "progress" ? (b.dataset.progressTrackColor || "") : "",
+    clockStyle: blockType === "clock" ? (b.dataset.clockStyle || "digital") : "digital",
+    clockSize: blockType === "clock" ? (b.dataset.clockSize || "md") : "md",
+    clockColor: blockType === "clock" ? (b.dataset.clockColor || "#f5f5f5") : "#f5f5f5",
+    clockFormat: blockType === "clock" ? (b.dataset.clockFormat || "12") : "12",
+    clockShowSeconds: blockType === "clock" ? (b.dataset.clockShowSeconds || "0") : "0",
+    clockShowDate: blockType === "clock" ? (b.dataset.clockShowDate || "0") : "0",
+    externalUrl: blockType === "weblink" ? (b.dataset.externalUrl || "") : "",
   };
 }
 
 window.serializeCanvasBlockForModal = serializeBlockElement;
 
 
+
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+  const configButton = e.target.closest('[data-data-callout-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="data-callout"]');
+  if (!block) return;
+  openDataCalloutPicker(block, configButton);
+});
+
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+  const configButton = e.target.closest('[data-progress-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="progress"]');
+  if (!block) return;
+  openProgressBlockPicker(block, configButton);
+});
+
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+  const configButton = e.target.closest('[data-clock-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="clock"]');
+  if (!block) return;
+  openClockPicker(block, configButton);
+});
 
 // inline link click → peek
 gridEl.addEventListener("click", (e) => {
@@ -2994,6 +5523,9 @@ gridEl.addEventListener("click", (e) => {
 
   const block = getPageCardHost(card);
   if (!block) return;
+
+  // weblink blocks have their own handler
+  if (block.dataset.type === "weblink") return;
 
   const linkedPageId = block.dataset.linkedPageId;
   if (!linkedPageId) {
@@ -3031,6 +5563,47 @@ gridEl.addEventListener("click", (e) => {
   } else {
     openPage(linkedRecord.id);
   }
+});
+
+
+gridEl.addEventListener("click", (e) => {
+  const openBtn = e.target.closest(".weblink-open-btn");
+  if (!openBtn) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const target = getWebLinkHost(openBtn);
+  if (!target) return;
+  openWebLinkTarget(target);
+});
+
+
+// == Web link card click (outside edit mode) → open URL in new tab ==
+gridEl.addEventListener("click", (e) => {
+  if (document.body.classList.contains("editing")) return;
+
+  const card = e.target.closest(".block-weblink-card");
+  if (!card) return;
+
+  const target = getWebLinkHost(card);
+  if (!target) return;
+  openWebLinkTarget(target);
+});
+
+
+// == Web link: set URL button (edit mode) ==
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+
+  const btn = e.target.closest(".weblink-set-url-btn");
+  if (!btn) return;
+
+  const target = getWebLinkHost(btn);
+  if (!target) return;
+
+  selectBlock(target);
+  promptForWebLinkUrl(target);
 });
 
 
@@ -3136,9 +5709,11 @@ function makeGhostBlock(preset) {
   const b = document.createElement("div");
   b.className = "block ghost";
   b.id = `ghost-${Date.now()}`;
+  b.dataset.type = preset;
   b.innerHTML = makeBlockHTML(preset);
   b.style.left = "0px";
   b.style.top = "0px";
+  applyDefaultBlockDimensions(b, preset);
   return b;
 }
 
@@ -3194,16 +5769,17 @@ addBlockBtn.addEventListener("click", (e) => {
 gridEl.addEventListener("mousemove", (e) => {
   if (!placing || !ghostBlock) return;
 
-  const rect = gridEl.getBoundingClientRect();
+  const pointer = getPointerPositionOnGrid(e.clientX, e.clientY);
+  if (!pointer.rect) return;
+  const defaultDims = getDefaultBlockDimensions(placePreset);
+  const ghostW = parseInt(ghostBlock.style.width || `${defaultDims.width}`, 10) || defaultDims.width;
+  const ghostH = parseInt(ghostBlock.style.height || `${defaultDims.height}`, 10) || defaultDims.height;
 
-  const ghostW = parseInt(ghostBlock.style.width || ghostBlock.getBoundingClientRect().width || 432, 10);
-  const ghostH = parseInt(ghostBlock.style.height || ghostBlock.getBoundingClientRect().height || 48, 10);
+  let x = pointer.x;
+  let y = pointer.y;
 
-  let x = e.clientX - rect.left - 20;
-  let y = e.clientY - rect.top - 20;
-
-  x = snap(Math.max(0, Math.min(x, rect.width - ghostW)));
-  y = snap(Math.max(0, Math.min(y, rect.height - ghostH)));
+  x = snap(Math.max(0, Math.min(x, getGridViewportWidth() - ghostW)));
+  y = snap(Math.max(0, Math.min(y, getGridViewportHeight() - ghostH)));
 
   ghostBlock.style.left = `${x}px`;
   ghostBlock.style.top = `${y}px`;
@@ -3214,9 +5790,9 @@ gridEl.addEventListener("mousedown", (e) => {
   if (!placing || !ghostBlock) return;
   if (!document.body.classList.contains("editing")) return;
 
-  // Don't place if clicking an existing block (optional rule)
-  const block = e.target.closest(".block");
-  if (block && !block.classList.contains("ghost")) return;
+  // While placing, the ghost position is the source of truth.
+  // Allow dropping over existing blocks so larger presets still place reliably.
+  e.stopPropagation();
 
   const real = makeRealBlockFromGhost(ghostBlock, placePreset);
   gridEl.appendChild(real);
@@ -3248,11 +5824,28 @@ gridEl.addEventListener("mousedown", (e) => {
     sel.removeAllRanges();
     sel.addRange(r);
   }
+
+  if (placePreset === "data-callout") {
+    window.mountDataCalloutBlock?.(real, { openPicker: true });
+  }
+
+  if (placePreset === "progress") {
+    window.mountProgressBlock?.(real, { openPicker: true });
+  }
+
+  const shouldOpenClockPicker = placePreset === "clock";
+
   if (typeof autoGrowBlock === "function") autoGrowBlock(real);
   if (typeof expandGrid === "function") expandGrid();
   if (typeof saveState === "function") saveState();
 
   stopPlacing(false);
+
+  if (shouldOpenClockPicker) {
+    setTimeout(() => {
+      window.mountClockBlock?.(real, { openPicker: true });
+    }, 80);
+  }
 });
 
 // Escape cancels place mode
@@ -3321,7 +5914,7 @@ function selectBlock(block) {
     if (type !== "table" && tableSelectionMode) {
       setTableSelectionMode(false);
     }
-    if (type === "text" || isDividerType(type)) document.body.classList.add("block-type-text");
+    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || isDividerType(type)) document.body.classList.add("block-type-text");
     if (type === "list") document.body.classList.add("block-type-list");
     if (type === "image") document.body.classList.add("block-type-image");
     if (type === "container") document.body.classList.add("block-type-container");
@@ -3418,6 +6011,21 @@ const CANVAS_TEXT_DEFAULT_COLORS = [
   "#B8B8B8"
 ];
 
+const CANVAS_BORDER_DEFAULT_COLORS = Array.from(new Set([
+  "#BCB9B4",
+  ...CANVAS_TEXT_DEFAULT_COLORS,
+  ...CANVAS_BG_DEFAULT_COLORS
+]));
+
+const CANVAS_COLOR_TRIGGER_SELECTOR = [
+  "#blockBgBtn",
+  "#blockTextColorBtn",
+  "#blockBorderBtn",
+  "#listBorderBtn",
+  "#imageBorderBtn",
+  "#containerBorderBtn"
+].join(", ");
+
 let activeCanvasColorMode = "";
 let activeCanvasColorTrigger = null;
 
@@ -3499,15 +6107,43 @@ function setDockToolTint(button, color = "") {
   button.style.removeProperty("--tool-color");
 }
 
+function getCanvasColorTriggerButtons(mode = "") {
+  const idsByMode = {
+    bg: ["blockBgBtn"],
+    text: ["blockTextColorBtn"],
+    border: ["blockBorderBtn", "listBorderBtn", "imageBorderBtn", "containerBorderBtn"]
+  };
+
+  return (idsByMode[mode] || [])
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+}
+
+function getSelectedCanvasColorValue(mode = "") {
+  if (!selectedBlock) return "";
+
+  if (mode === "bg") {
+    return getCanvasTargetType(selectedBlock) === "calendar"
+      ? (window.getSelectedInlineDatabaseRowColor?.(selectedBlock) || selectedBlock.style.backgroundColor || "")
+      : (selectedBlock.style.backgroundColor || "");
+  }
+
+  if (mode === "border") {
+    return selectedBlock.style.borderColor || "";
+  }
+
+  return selectedBlock.style.color || "";
+}
+
 function refreshCanvasDockToolState() {
-  const bgColor = getCanvasTargetType(selectedBlock) === "calendar"
-    ? (window.getSelectedInlineDatabaseRowColor?.(selectedBlock) || selectedBlock?.style?.backgroundColor || "")
-    : (selectedBlock?.style?.backgroundColor || "");
-  const textColor = selectedBlock?.style?.color || "";
+  const bgColor = getSelectedCanvasColorValue("bg");
+  const textColor = getSelectedCanvasColorValue("text");
+  const borderColor = getSelectedCanvasColorValue("border");
   const ui = typeof getUIState === "function" ? getUIState() : { openOverlay: null };
 
   setDockToolTint(blockBgBtn, bgColor);
   setDockToolTint(blockTextColorBtn, textColor);
+  getCanvasColorTriggerButtons("border").forEach((button) => setDockToolTint(button, borderColor));
   toolDivider?.classList.toggle("active", ui.openOverlay === "dividerDockMenu");
   refreshTableDockToolState();
 }
@@ -3561,6 +6197,9 @@ function applyCanvasSelectedColor(mode, color, options = {}) {
     if (mode === "bg") {
       applyBlockBackgroundTone(block, nextColor);
       block.dataset.bgState = nextColor ? "custom" : "default";
+    } else if (mode === "border") {
+      applyBlockBorderTone(block, nextColor);
+      block.dataset.borderState = nextColor ? "custom" : "default";
     } else {
       applyBlockTextTone(block, nextColor);
       block.dataset.textState = nextColor ? "custom" : "default";
@@ -3577,7 +6216,11 @@ function buildCanvasColorPopover(mode) {
 
   canvasColorPopover.innerHTML = "";
 
-  const defaultColors = mode === "bg" ? CANVAS_BG_DEFAULT_COLORS : CANVAS_TEXT_DEFAULT_COLORS;
+  const defaultColors = mode === "bg"
+    ? CANVAS_BG_DEFAULT_COLORS
+    : mode === "border"
+      ? CANVAS_BORDER_DEFAULT_COLORS
+      : CANVAS_TEXT_DEFAULT_COLORS;
   const recentColors = getCanvasRecentColors().slice(0, 6);
   const customColors = getCanvasPaletteColors()
     .filter((color) => !defaultColors.includes(color))
@@ -3586,7 +6229,7 @@ function buildCanvasColorPopover(mode) {
   const recentSection = makeCanvasColorSection("Recent");
   recentSection.row.appendChild(makeCanvasColorSwatch({
     className: "canvas-color-swatch-clear",
-    title: mode === "bg" ? "Clear fill" : "Reset text color",
+    title: mode === "bg" ? "Clear fill" : mode === "border" ? "Clear border color" : "Reset text color",
     onPick: () => applyCanvasSelectedColor(mode, "")
   }));
 
@@ -3631,11 +6274,7 @@ function buildCanvasColorPopover(mode) {
   const colorInput = document.createElement("input");
   colorInput.type = "color";
   colorInput.className = "canvas-color-picker-input";
-  colorInput.value = colorStringToHex(mode === "bg"
-    ? (getCanvasTargetType(selectedBlock) === "calendar"
-      ? (window.getSelectedInlineDatabaseRowColor?.(selectedBlock) || selectedBlock?.style?.backgroundColor)
-      : selectedBlock?.style?.backgroundColor)
-    : selectedBlock?.style?.color) || defaultColors[0];
+  colorInput.value = colorStringToHex(getSelectedCanvasColorValue(mode)) || defaultColors[0];
 
   addCustomBtn.addEventListener("click", (event) => {
     event.preventDefault();
@@ -3677,29 +6316,27 @@ function positionCanvasColorPopover(trigger) {
 function closeCanvasColorPopover() {
   if (!canvasColorPopover) return;
 
+  activeCanvasColorTrigger?.classList.remove("active");
   canvasColorPopover.hidden = true;
   canvasColorPopover.innerHTML = "";
   activeCanvasColorMode = "";
   activeCanvasColorTrigger = null;
-  blockBgBtn?.classList.remove("active");
-  blockTextColorBtn?.classList.remove("active");
 }
 
 function toggleCanvasColorPopover(mode, trigger) {
   if (!canvasColorPopover || !selectedBlock || !trigger) return;
 
-  if (!canvasColorPopover.hidden && activeCanvasColorMode === mode) {
+  if (!canvasColorPopover.hidden && activeCanvasColorMode === mode && activeCanvasColorTrigger === trigger) {
     closeCanvasColorPopover();
     return;
   }
 
+  activeCanvasColorTrigger?.classList.remove("active");
   buildCanvasColorPopover(mode);
   canvasColorPopover.hidden = false;
   activeCanvasColorMode = mode;
   activeCanvasColorTrigger = trigger;
-
-  blockBgBtn?.classList.toggle("active", mode === "bg");
-  blockTextColorBtn?.classList.toggle("active", mode === "text");
+  trigger.classList.add("active");
 
   positionCanvasColorPopover(trigger);
 }
@@ -3711,7 +6348,7 @@ canvasColorPopover?.addEventListener("mousedown", (event) => {
 });
 
 document.addEventListener("mousedown", (event) => {
-  if (event.target.closest("#canvasColorPopover, #blockBgBtn, #blockTextColorBtn")) return;
+  if (event.target.closest(`#canvasColorPopover, ${CANVAS_COLOR_TRIGGER_SELECTOR}`)) return;
   closeCanvasColorPopover();
 });
 
@@ -3769,7 +6406,34 @@ function applyBlockBackgroundTone(block, value = "") {
 function applyBlockBorderTone(block, value = "") {
   if (!block) return;
 
-  block.style.borderColor = value;
+  if (value) {
+    block.style.borderWidth = "1px";
+    block.style.borderStyle = "solid";
+    block.style.borderColor = value;
+  } else {
+    block.style.removeProperty("border-width");
+    block.style.removeProperty("border-style");
+    block.style.removeProperty("border-color");
+  }
+
+  if (getCanvasTargetType(block) === "calendar") {
+    const shell = block.querySelector(".page-database-block-shell");
+    if (shell) {
+      if (value) {
+        shell.style.borderWidth = "1px";
+        shell.style.borderStyle = "solid";
+        shell.style.borderColor = value;
+        shell.style.borderRadius = "inherit";
+        shell.style.overflow = "hidden";
+      } else {
+        shell.style.removeProperty("border-width");
+        shell.style.removeProperty("border-style");
+        shell.style.removeProperty("border-color");
+        shell.style.removeProperty("border-radius");
+        shell.style.removeProperty("overflow");
+      }
+    }
+  }
 
   if (getCanvasTargetType(block) === "table") {
     block.querySelectorAll(".table-cell").forEach((cell) => {
@@ -3885,17 +6549,9 @@ if (blockBgBtn) {
 
 // Border color toggle
 if (blockBorderBtn) {
-  blockBorderBtn.addEventListener("click", () => {
-    withSelectedBlock((b) => {
-      const state = b.dataset.borderState || "default";
-      if (state === "default") {
-        applyBlockBorderTone(b, "#bcb9b4");
-        b.dataset.borderState = "alt";
-      } else {
-        applyBlockBorderTone(b, "");
-        b.dataset.borderState = "default";
-      }
-    });
+  blockBorderBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover("border", blockBorderBtn);
   });
 }
 
@@ -3972,11 +6628,10 @@ if (listBgBtn)      listBgBtn.addEventListener("click", () => withSelectedBlock(
   if (state === "default") { b.style.backgroundColor = "#23201c"; b.dataset.bgState = "alt"; }
   else { b.style.backgroundColor = ""; b.dataset.bgState = "default"; }
 }));
-if (listBorderBtn)  listBorderBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  const state = b.dataset.borderState || "default";
-  if (state === "default") { b.style.borderColor = "#bcb9b4"; b.dataset.borderState = "alt"; }
-  else { b.style.borderColor = ""; b.dataset.borderState = "default"; }
-}));
+if (listBorderBtn)  listBorderBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleCanvasColorPopover("border", listBorderBtn);
+});
 if (listRadiusBtn)  listRadiusBtn.addEventListener("click", () => withSelectedBlock((b) => {
   const state = b.dataset.radiusState || "rounded";
   if (state === "rounded") { b.style.borderRadius = "2px"; b.dataset.radiusState = "square"; }
@@ -3999,11 +6654,10 @@ if (imageBgBtn)      imageBgBtn.addEventListener("click", () => withSelectedBloc
   if (state === "default") { b.style.backgroundColor = "#23201c"; b.dataset.bgState = "alt"; }
   else { b.style.backgroundColor = ""; b.dataset.bgState = "default"; }
 }));
-if (imageBorderBtn)  imageBorderBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  const state = b.dataset.borderState || "default";
-  if (state === "default") { b.style.borderColor = "#bcb9b4"; b.dataset.borderState = "alt"; }
-  else { b.style.borderColor = ""; b.dataset.borderState = "default"; }
-}));
+if (imageBorderBtn)  imageBorderBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleCanvasColorPopover("border", imageBorderBtn);
+});
 if (imageRadiusBtn)  imageRadiusBtn.addEventListener("click", () => withSelectedBlock((b) => {
   const state = b.dataset.radiusState || "rounded";
   if (state === "rounded") { b.style.borderRadius = "2px"; b.dataset.radiusState = "square"; }
@@ -4025,11 +6679,10 @@ if (containerBgBtn) containerBgBtn.addEventListener("click", () => withSelectedB
   if (state === "default") { b.style.backgroundColor = "#23201c"; b.dataset.bgState = "alt"; }
   else { b.style.backgroundColor = ""; b.dataset.bgState = "default"; }
 }));
-if (containerBorderBtn) containerBorderBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  const state = b.dataset.borderState || "default";
-  if (state === "default") { b.style.borderColor = "#bcb9b4"; b.dataset.borderState = "alt"; }
-  else { b.style.borderColor = ""; b.dataset.borderState = "default"; }
-}));
+if (containerBorderBtn) containerBorderBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleCanvasColorPopover("border", containerBorderBtn);
+});
 if (containerRadiusBtn) containerRadiusBtn.addEventListener("click", () => withSelectedBlock((b) => {
   const state = b.dataset.radiusState || "rounded";
   if (state === "rounded") { b.style.borderRadius = "2px"; b.dataset.radiusState = "square"; }
@@ -4478,7 +7131,7 @@ document.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
 
   const frameItem = e.target.closest(".frame-item");
-  if (frameItem && !e.target.closest(".frame-item-delete, .frame-item-image-action, .container-insert-prompt")) {
+  if (frameItem && !e.target.closest(".frame-item-delete, .frame-item-image-action, .weblink-set-url-btn, .weblink-open-btn, .container-insert-prompt")) {
     selectBlock(frameItem);
     return;
   }
@@ -4525,6 +7178,14 @@ document.addEventListener("keydown", (e) => {
 function expandGrid(options = {}) {
   const grid = document.getElementById("grid");
   if (!grid) return;
+
+  const metrics = readCanvasLayoutMetrics();
+  if (metrics?.isInfinite) {
+    grid.style.removeProperty("minWidth");
+    grid.style.removeProperty("minHeight");
+    window.syncInfiniteCanvasGridBounds?.();
+    return;
+  }
 
   grid.style.removeProperty("minWidth");
   clampAllBlocksWithinGrid();
@@ -4771,7 +7432,7 @@ document.addEventListener("blur", (e) => {
 }, true);
 
 document.addEventListener("mousedown", (e) => {
-  if (!e.target.closest(".container-insert-prompt, .frame-item-delete, .frame-item-image-action")) return;
+  if (!e.target.closest(".container-insert-prompt, .frame-item-delete, .frame-item-image-action, .weblink-set-url-btn, .weblink-open-btn")) return;
   e.preventDefault();
   e.stopPropagation();
 }, true);

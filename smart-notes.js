@@ -235,6 +235,10 @@
       confidence: Number.isFinite(Number(action?.confidence)) ? Number(action.confidence) : 0,
       status: ['pending', 'done'].includes(action?.status) ? action.status : 'pending',
       resultText: typeof action?.resultText === 'string' ? action.resultText : '',
+      // create-layout fields
+      targetPage: typeof action?.targetPage === 'string' ? action.targetPage : 'current',
+      newPageTitle: typeof action?.newPageTitle === 'string' ? action.newPageTitle : '',
+      blocks: Array.isArray(action?.blocks) ? action.blocks : [],
     };
   }
 
@@ -404,6 +408,51 @@
     return stripHTML(chunks.join(' '));
   }
 
+  function getNearbyLinkedPages(pageId) {
+    if (!pageId || ['home', 'search', 'inbox', 'notes', 'settings'].includes(pageId)) return [];
+
+    const seen = new Set();
+    const nearby = [];
+    const addPage = (candidateId, source = '') => {
+      if (!candidateId || seen.has(candidateId)) return;
+      const page = getPageById(candidateId);
+      if (!page || ['home', 'search', 'inbox', 'notes', 'settings'].includes(page.id)) return;
+      seen.add(candidateId);
+      nearby.push({
+        id: page.id,
+        title: page.title || 'Untitled page',
+        source,
+        breadcrumb: getBreadcrumb(page.id).map((item) => item.title || ''),
+        layout: page.layout || 'board-canvas',
+        category: page.category || 'none',
+        summary: getPageDescriptorText(page.id).slice(0, 260),
+      });
+    };
+
+    const page = getPageById(pageId);
+    if (page?.parent) addPage(page.parent, 'parent');
+
+    Object.values(getPagesMap()).forEach((candidate) => {
+      if (candidate?.parent === pageId) addPage(candidate.id, 'child');
+    });
+
+    try {
+      if (typeof window.readAllPageBlocks === 'function') {
+        const allBlocks = window.readAllPageBlocks();
+        const blocks = Array.isArray(allBlocks?.[pageId]) ? allBlocks[pageId] : [];
+        blocks.forEach((block) => {
+          if (typeof block?.linkedPageId === 'string' && block.linkedPageId) {
+            addPage(block.linkedPageId, 'linked card');
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Could not collect nearby linked pages', err);
+    }
+
+    return nearby.slice(0, 8);
+  }
+
   function getPageUnderstanding(pageId) {
     const page = getPageById(pageId) || getPageById('home');
     const breadcrumb = getBreadcrumb(page.id);
@@ -415,6 +464,7 @@
       breadcrumbIds: breadcrumb.map((item) => item.id),
       breadcrumbTitles: breadcrumb.map((item) => item.title || ''),
       descriptor: getPageDescriptorText(page.id),
+      nearbyLinkedPages: getNearbyLinkedPages(page.id),
     };
   }
 
@@ -481,6 +531,28 @@
 
   function getNoteById(noteId) {
     return notes.find((note) => note.id === noteId) || null;
+  }
+
+
+  function getLiveEditorNoteDraft() {
+    const editor = document.getElementById('noteEditor');
+    const titleInput = document.getElementById('noteTitleInput');
+    const renderedNoteId = document.querySelector('[data-note-editor]')?.dataset.noteEditor || activeNoteId;
+    if (!editor || !renderedNoteId) return null;
+
+    const note = getNoteById(renderedNoteId);
+    if (!note) return null;
+
+    const bodyHTML = editor.innerHTML || note.bodyHTML || '';
+    const bodyText = stripHTML(bodyHTML || note.bodyText || '');
+    return {
+      ...note,
+      id: renderedNoteId,
+      title: typeof titleInput?.value === 'string' ? titleInput.value : note.title,
+      bodyHTML,
+      bodyText,
+      preview: buildPreview(bodyText),
+    };
   }
 
   function openPageSafe(pageId) {
@@ -1641,17 +1713,54 @@
     const actions = Array.isArray(message.actions) ? message.actions.filter(Boolean) : [];
     if (!actions.length) return '';
 
-    const buttons = actions.map((action) => `
-      <div class="assistant-action-item">
-        <button
-          class="assistant-action-btn ${action.status === 'done' ? 'done' : ''}"
-          data-assistant-action-message="${escapeHTML(message.id)}"
-          data-assistant-action-id="${escapeHTML(action.id)}"
-          ${action.status === 'done' ? 'disabled' : ''}
-        >${escapeHTML(action.status === 'done' ? (action.resultText || action.label) : action.label)}</button>
-        ${formatAssistantActionDetail(action)}
-      </div>
-    `).join('');
+    const buttons = actions.map((action) => {
+      if (action.type === 'create-layout') {
+        if (action.status === 'done') {
+          return `
+            <div class="assistant-action-item assistant-layout-proposal done">
+              <div class="assistant-layout-result">${escapeHTML(action.resultText || action.label)}</div>
+            </div>
+          `;
+        }
+        const blockCount = Array.isArray(action.blocks) ? action.blocks.length : 0;
+        const targetDesc = action.targetPage === 'new' && action.newPageTitle
+          ? `New page: "${escapeHTML(action.newPageTitle)}"`
+          : 'Current page';
+        const typeCounts = {};
+        (action.blocks || []).forEach((b) => { typeCounts[b.type] = (typeCounts[b.type] || 0) + 1; });
+        const summary = Object.entries(typeCounts).map(([t, n]) => `${n} ${t}`).join(', ') || `${blockCount} block${blockCount !== 1 ? 's' : ''}`;
+        return `
+          <div class="assistant-action-item assistant-layout-proposal">
+            <div class="assistant-layout-header">Board Layout Proposal</div>
+            <div class="assistant-layout-meta">${targetDesc} &middot; ${escapeHTML(summary)}</div>
+            <div class="assistant-layout-btns">
+              <button
+                class="assistant-action-btn"
+                data-assistant-action-message="${escapeHTML(message.id)}"
+                data-assistant-action-id="${escapeHTML(action.id)}"
+              >Apply Layout</button>
+              <button
+                class="assistant-action-btn assistant-action-discard"
+                data-layout-discard-message="${escapeHTML(message.id)}"
+                data-layout-discard-id="${escapeHTML(action.id)}"
+              >Discard</button>
+            </div>
+            ${formatAssistantActionDetail(action)}
+          </div>
+        `;
+      }
+      return `
+        <div class="assistant-action-item">
+          <button
+            class="assistant-action-btn ${action.status === 'done' ? 'done' : ''}"
+            data-assistant-action-message="${escapeHTML(message.id)}"
+            data-assistant-action-id="${escapeHTML(action.id)}"
+            ${action.status === 'done' ? 'disabled' : ''}
+          >${escapeHTML(action.status === 'done' ? (action.resultText || action.label) : action.label)}</button>
+          ${formatAssistantActionDetail(action)}
+        </div>
+      `;
+    }).join('');
 
     return `<div class="assistant-action-list">${buttons}</div>`;
   }
@@ -1752,7 +1861,7 @@
   function buildAssistantRequestContext(query) {
     const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home";
     const currentPage = getPageUnderstanding(currentPageId || "home");
-    const activeNote = getNoteById(activeNoteId);
+    const activeNote = getLiveEditorNoteDraft() || getNoteById(activeNoteId);
     const relatedNotes = getRelatedNotesForPage(currentPage.pageId).slice(0, 8).map((note) => ({
       id: note.id,
       title: note.title || "Untitled note",
@@ -1793,10 +1902,12 @@
           body: (activeNote.bodyText || "").slice(0, 2400),
           shelfNames: (activeNote.shelfIds || []).map((id) => getShelfById(id)?.name).filter(Boolean),
           linkedPages: (activeNote.directPageIds || []).map((id) => getPageById(id)?.title).filter(Boolean),
+          contextBreadcrumbTitles: activeNote.contextBreadcrumbTitles || [],
           sortState: activeNote.sortState || "unsorted",
           needsReview: !!activeNote.needsReview,
         } : null,
         relatedNotes,
+        nearbyLinkedPages: currentPage.nearbyLinkedPages || [],
         searchMatches: {
           notes: noteMatches,
           pages: pageMatches,
@@ -1914,6 +2025,7 @@
       const recentNotes = getNotesSorted(notes.filter((note) => !note.archived)).slice(0, 3);
       if (recentNotes.length) {
         pushChat("assistant", `Recent notes\n${recentNotes.map((note) => `• ${note.title || "Untitled note"} — ${note.preview}`).join("\n")}`);
+      } else {
         pushChat("assistant", "You do not have recent notes yet.");
       }
       return;
@@ -1923,6 +2035,7 @@
       const related = getRelatedNotesForPage(currentPageId).slice(0, 4);
       if (related.length) {
         pushChat("assistant", `Related notes here\n${related.map((note) => `• ${note.title || "Untitled note"} — ${note.preview}`).join("\n")}`);
+      } else {
         pushChat("assistant", "There are no related notes on this page yet.");
       }
       return;
@@ -2033,6 +2146,23 @@
           changed = true;
         }
         break;
+      case 'create-layout': {
+        const aiBlocks = Array.isArray(action.blocks) ? action.blocks : [];
+        if (!aiBlocks.length) { resultText = 'No blocks provided'; changed = true; break; }
+        let targetPageId;
+        if (action.targetPage === 'new' && action.newPageTitle) {
+          const newPage = typeof window.createPage === 'function'
+            ? window.createPage(action.newPageTitle, typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home', 'board-canvas', 'none', 'page')
+            : null;
+          targetPageId = newPage ? newPage.id : (typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home');
+        } else {
+          targetPageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+        }
+        applyLayoutBlocks(targetPageId, aiBlocks);
+        resultText = 'Layout applied!';
+        changed = true;
+        break;
+      }
       default:
         break;
     }
@@ -2042,6 +2172,69 @@
     if (action.noteId) renderEverything();
   }
 
+  function applyLayoutBlocks(pageId, aiBlocks) {
+    if (!pageId || !Array.isArray(aiBlocks) || !aiBlocks.length) return;
+    const now = Date.now();
+    const newBlocks = aiBlocks.map((spec, i) => ({
+      id: `block-${now + i}`,
+      type: spec.type || 'text',
+      x: typeof spec.x === 'number' ? spec.x : 0,
+      y: typeof spec.y === 'number' ? spec.y : 0,
+      w: typeof spec.w === 'number' && spec.w > 0 ? spec.w : 288,
+      h: typeof spec.h === 'number' && spec.h > 0 ? spec.h : 48,
+      z: 0,
+      titleHTML: spec.titleHTML || '',
+      bodyHTML: spec.bodyHTML || '',
+      containerTitle: '',
+      containerBody: '',
+      containerItems: [],
+      tableHTML: '',
+      bg: spec.bg || '',
+      borderColor: spec.borderColor || '',
+      textColor: spec.textColor || '',
+      padding: '',
+      radius: spec.radius || '',
+      hasNote: 0,
+      linkedPageId: spec.linkedPageId || '',
+      pageCardTitle: spec.pageCardTitle || '',
+      pageCardMeta: '',
+      pageCardIcon: spec.pageCardIcon || '',
+      pageCardSummary: spec.pageCardSummary || '',
+      pageCardTypeLabel: '',
+      pageCardImageSrc: '',
+      pageCardImageMode: 'none',
+      pageCardImagePos: 50,
+      pageCardView: 'default',
+      pageCardHideIcon: 0,
+      cardStyle: '',
+    }));
+
+    const currentPageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : null;
+
+    if (pageId === currentPageId) {
+      // Append directly to the DOM — avoids openPage overwriting our blocks via saveCurrentPageBlocks
+      const grid = document.getElementById('grid');
+      if (grid) {
+        newBlocks.forEach((data) => {
+          if (typeof buildBlockFromData === 'function') {
+            const el = buildBlockFromData(data);
+            grid.appendChild(el);
+          }
+        });
+        if (typeof expandGrid === 'function') expandGrid();
+      }
+      // Persist the full merged state (existing DOM blocks + new ones)
+      if (typeof window.saveCurrentPageBlocks === 'function') {
+        window.saveCurrentPageBlocks();
+      }
+    } else {
+      // Different/new page — store first, then navigate (saveCurrentPageBlocks in openPage saves old page correctly)
+      const existing = typeof window.getPageBlocks === 'function' ? window.getPageBlocks(pageId) : [];
+      if (typeof window.setPageBlocks === 'function') window.setPageBlocks(pageId, [...existing, ...newBlocks]);
+      openPageSafe(pageId);
+    }
+  }
+
   function setAssistantOpen(open) {
     activeAssistantOpen = !!open;
     document.getElementById('assistantDrawer')?.classList.toggle('open', activeAssistantOpen);
@@ -2049,6 +2242,17 @@
     document.body.classList.toggle('assistant-open', activeAssistantOpen);
     if (activeAssistantOpen) renderAssistantMessages();
   }
+
+  window.openAssistantWithQuery = function (query) {
+    ensureAssistantUI();
+    setAssistantOpen(true);
+    const input = document.getElementById('assistantComposerInput');
+    if (input) {
+      input.value = String(query || '');
+      input.dispatchEvent(new Event('input'));
+    }
+    handleAssistantQuery(String(query || ''));
+  };
 
   function renderEverything() {
     clearSystemSurfaceIfNeeded();
@@ -2061,6 +2265,12 @@
     const assistantAction = target.closest('[data-assistant-action-message][data-assistant-action-id]');
     if (assistantAction) {
       performAssistantAction(assistantAction.dataset.assistantActionMessage, assistantAction.dataset.assistantActionId);
+      return;
+    }
+
+    const discardBtn = target.closest('[data-layout-discard-message][data-layout-discard-id]');
+    if (discardBtn) {
+      markAssistantActionDone(discardBtn.dataset.layoutDiscardMessage, discardBtn.dataset.layoutDiscardId, 'Discarded');
       return;
     }
 
@@ -2414,6 +2624,7 @@
       const input = document.getElementById('assistantComposerInput');
       const query = (input?.value || '').trim();
       if (!query || activeAssistantBusy) return;
+      flushPendingNoteSave();
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setAssistantOpen(true);
       await handleAssistantQuery(query);

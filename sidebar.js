@@ -283,6 +283,10 @@ function loadSanctumRegistry() {
   window.userPages = userPages;
 }
 
+function isSidebarVisiblePage(page) {
+  return !!page && page.hiddenInSidebar !== true && page.containerType !== "database-row";
+}
+
 function renderSidebarPins() {
   const list = document.getElementById("pinsList");
   if (!list) return;
@@ -295,7 +299,7 @@ function renderSidebarPins() {
 
   pinnedPages.forEach(pin => {
     const page = allPages[pin.id];
-    if (!page) return;
+    if (!page || !isSidebarVisiblePage(page)) return;
 
     const item = document.createElement("div");
     item.className = "item";
@@ -322,7 +326,7 @@ function renderSidebarBookmarks() {
 
   bookmarks.forEach(id => {
     const page = allPages[id];
-    if (!page) return;
+    if (!page || !isSidebarVisiblePage(page)) return;
 
     const item = document.createElement("div");
     item.className = "item";
@@ -422,7 +426,7 @@ function renderSidebarDomains() {
   };
 
   const buildProjectItem = (project) => {
-    const projectPages = userPages.filter(p => p.parent === project.id);
+    const projectPages = userPages.filter(p => p.parent === project.id && isSidebarVisiblePage(p));
     const projectChildren = document.createElement("div");
     projectChildren.className = `item-children${shouldSidebarExpand(project.id, activePathIds) ? "" : " collapsed"}`;
 
@@ -446,16 +450,16 @@ function renderSidebarDomains() {
   };
 
   userDomains.forEach((domain) => {
-    const hubs = userPages.filter(p => p.parent === domain.id && p.containerType === "hub");
-    const directProjects = userPages.filter(p => p.parent === domain.id && p.containerType === "project");
-    const directPages = userPages.filter(p => p.parent === domain.id && !["hub", "project"].includes(p.containerType || "page"));
+    const hubs = userPages.filter(p => p.parent === domain.id && p.containerType === "hub" && isSidebarVisiblePage(p));
+    const directProjects = userPages.filter(p => p.parent === domain.id && p.containerType === "project" && isSidebarVisiblePage(p));
+    const directPages = userPages.filter(p => p.parent === domain.id && !["hub", "project"].includes(p.containerType || "page") && isSidebarVisiblePage(p));
 
     const children = document.createElement("div");
     children.className = `item-children${shouldSidebarExpand(domain.id, activePathIds) ? "" : " collapsed"}`;
 
     hubs.forEach(hub => {
-      const projects = userPages.filter(p => p.parent === hub.id && p.containerType === "project");
-      const loosePages = userPages.filter(p => p.parent === hub.id && (p.containerType || "page") !== "project");
+      const projects = userPages.filter(p => p.parent === hub.id && p.containerType === "project" && isSidebarVisiblePage(p));
+      const loosePages = userPages.filter(p => p.parent === hub.id && (p.containerType || "page") !== "project" && isSidebarVisiblePage(p));
       const hubChildren = document.createElement("div");
       hubChildren.className = `item-children${shouldSidebarExpand(hub.id, activePathIds) ? "" : " collapsed"}`;
 
@@ -633,6 +637,7 @@ function openPage(pageId, options = {}) {
   }
 
   if (hasOpenedPage) {
+    window.persistInfiniteCanvasView?.(currentPageId, { immediate: true });
     saveCurrentPageBlocks();
   }
 
@@ -650,6 +655,7 @@ function openPage(pageId, options = {}) {
   const page = allPages[pageId];
   if (page && pageTitle) pageTitle.textContent = page.title;
   document.body.classList.toggle("sheet-page", page?.layout === "sheet");
+  document.body.classList.toggle("infinite-canvas-page", page?.layout === "infinite-canvas");
 
   // clear grid and load this page's blocks
   clearGrid();
@@ -700,6 +706,7 @@ function openPage(pageId, options = {}) {
   }
 
   applyPageFontPreset(pageId);
+  window.syncInfiniteCanvasPage?.(pageId);
 
   hasOpenedPage = true;
 
@@ -833,6 +840,9 @@ function updateTopbarContext(pageId) {
 function saveCurrentPageBlocks() {
   setPageBlocks(currentPageId, serializeBlocks());
 }
+
+window.saveCurrentPageBlocks = saveCurrentPageBlocks;
+window.createPage = createPage;
 
 function loadPageBlocks(pageId) {
   const blocks = getPageBlocks(pageId);

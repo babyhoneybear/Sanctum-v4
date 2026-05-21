@@ -23,6 +23,7 @@ const STORAGE_KEYS = {
   pagesRegistry: "sanctum_pages_registry",
   pageBlocks: "sanctum_page_blocks",
   pageSettings: "sanctum_page_settings",
+  pageActivity: "sanctum_page_activity_v1",
   documents: "sanctum_documents",
   docSettings: "sanctum_doc_settings",
   chronicles: "sanctum_chronicles",
@@ -32,7 +33,14 @@ const STORAGE_KEYS = {
   stickers: "sanctum_stickers",
   customStickers: "sanctum_custom_stickers",
   recentColors: "sanctum_recent_colors",
-  colorPalette: "sanctum_color_palette"
+  colorPalette: "sanctum_color_palette",
+  notesVault: "sanctum_notes_vault_v1",
+  noteShelves: "sanctum_note_shelves_v1",
+  helperInbox: "sanctum_helper_inbox_v1",
+  helperActionLog: "sanctum_helper_action_log_v1",
+  helperChatLog: "sanctum_helper_chat_log_v1",
+  helperUserProfile: "sanctum_helper_user_profile_v1",
+  helperMemoryProfile: "sanctum_helper_memory_profile_v1"
 };
 
 function readStorageJSON(key, fallback) {
@@ -302,6 +310,18 @@ function normalizeHeaderPos(value = 50) {
   return 50;
 }
 
+function normalizeCanvasZoom(value = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.45, Math.min(1.85, numeric));
+}
+
+function normalizeCanvasOffset(value = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, numeric);
+}
+
 function normalizePageSettings(settings = {}) {
   return {
     showHeader: !!settings.showHeader,
@@ -310,7 +330,11 @@ function normalizePageSettings(settings = {}) {
     headerSrc: typeof settings.headerSrc === "string" ? settings.headerSrc : "",
     headerSize: ["sm", "md", "lg"].includes(settings.headerSize) ? settings.headerSize : "md",
     headerPos: normalizeHeaderPos(settings.headerPos),
-    fontPreset: normalizePageFontPreset(settings.fontPreset)
+    fontPreset: normalizePageFontPreset(settings.fontPreset),
+    canvasZoom: normalizeCanvasZoom(settings.canvasZoom),
+    canvasScrollLeft: normalizeCanvasOffset(settings.canvasScrollLeft),
+    canvasScrollTop: normalizeCanvasOffset(settings.canvasScrollTop),
+    canvasHasView: settings.canvasHasView === true
   };
 }
 
@@ -323,9 +347,33 @@ const PAGE_FONT_PRESETS = {
     label: "Arial",
     family: "Arial, Helvetica, sans-serif"
   },
+  manrope: {
+    label: "Manrope",
+    family: "'Manrope', 'Segoe UI', sans-serif"
+  },
+  notoSansJp: {
+    label: "Noto Sans JP",
+    family: "'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
+  },
+  notoSerifJp: {
+    label: "Noto Serif JP",
+    family: "'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', serif"
+  },
   times: {
     label: "Times New Roman",
     family: "'Times New Roman', Times, serif"
+  },
+  playfair: {
+    label: "Playfair Display",
+    family: "'Playfair Display', Georgia, serif"
+  },
+  cormorant: {
+    label: "Cormorant Garamond",
+    family: "'Cormorant Garamond', Garamond, serif"
+  },
+  marcellus: {
+    label: "Marcellus",
+    family: "'Marcellus', 'Times New Roman', serif"
   },
   sunrise: {
     label: "Waiting for the Sunrise",
@@ -340,6 +388,10 @@ const PAGE_FONT_PRESETS = {
 function normalizePageFontPreset(value) {
   const preset = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (preset === "garamond") return "times";
+  if (preset === "cormorant garamond") return "cormorant";
+  if (preset === "playfair display") return "playfair";
+  if (preset === "noto sans jp") return "notoSansJp";
+  if (preset === "noto serif jp") return "notoSerifJp";
   return Object.prototype.hasOwnProperty.call(PAGE_FONT_PRESETS, preset) ? preset : "";
 }
 

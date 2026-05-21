@@ -13,7 +13,7 @@
 4. Run:
    - `npm install`
    - `npm start`
-5. Open `http://localhost:3000`
+5. Open `http://127.0.0.1:3005`
 
 ## Important
 - Do not paste your real key into front-end files
@@ -34,3 +34,8 @@
 - Silently rewrite page content
 - Move or delete large things on its own
 - Full multi-user vault separation
+
+
+## Notes
+- The local server now binds to `127.0.0.1` by default so it only listens on your own machine.
+- Keep your real key in `.env`, not in front-end files.

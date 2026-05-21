@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Great+Vibes&family=Manrope:wght@400;500;600;700;800&family=Marcellus&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="document.css">
   <link rel="stylesheet" href="canvas-rich-text.css">
+  <link rel="stylesheet" href="infinite-canvas.css">
   <title>Sanctum v3</title>
 </head>
 
@@ -132,7 +133,12 @@
                 <button class="dock-btn" id="toolDivider" aria-label="Divider tools" data-label="Dividers">┆</button>
                 <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame">▤</button>
                 <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table">⊞</button>
+                <button class="dock-btn" id="toolDataCallout" aria-label="Data callout" data-label="Data callout">≈</button>
+                <button class="dock-btn" id="toolProgress" aria-label="Progress bar" data-label="Progress">▰</button>
+                <button class="dock-btn" id="toolClock" aria-label="Clock widget" data-label="Clock">◴</button>
                 <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker">✦</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" id="generateLayoutBtn" aria-label="Generate layout with AI" data-label="AI Layout">✦ AI</button>
               </div>
 
               <div class="dock-mode dock-mode-text">
@@ -610,32 +616,52 @@
   </div>
 </div>
 
-    <section class="page-canvas" id="pageCanvas">
-    <div class="page-hero" id="pageHero">
-        <div class="page-hero-img-wrap" id="pageHeroImgWrap">
+<div class="page-board-surface" id="pageBoardSurface">
+  <div class="infinite-canvas-toolbar" id="infiniteCanvasToolbar" hidden>
+    <div class="infinite-canvas-toolbar-group">
+      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
+      <span class="infinite-canvas-toolbar-zoom" id="infiniteCanvasZoomLabel">100%</span>
+      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
+    </div>
+    <div class="infinite-canvas-toolbar-group">
+      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="fit">Fit</button>
+      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="center">Center</button>
+      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="reset">Reset</button>
+    </div>
+    <div class="infinite-canvas-toolbar-spacer"></div>
+    <div class="infinite-canvas-toolbar-hint">Ctrl + wheel to zoom. Hold Space to pan.</div>
+  </div>
+  <div class="infinite-canvas-viewport" id="infiniteCanvasViewport">
+    <div class="infinite-canvas-stage" id="infiniteCanvasStage">
+      <section class="page-canvas" id="pageCanvas">
+        <div class="page-hero" id="pageHero">
+          <div class="page-hero-img-wrap" id="pageHeroImgWrap">
             <img class="page-hero-img" id="pageHeroImg" src="" alt="" />
             <button class="page-hero-change-btn" id="pageHeroChangeBtn">+ Add Header</button>
-        <div class="page-hero-controls" id="pageHeroControls" aria-label="Header controls">
-          <div class="page-hero-controls-row" role="group" aria-label="Header size">
-            <button class="page-hero-ctrl-btn" data-hero-size="sm" title="Compact header">S</button>
-            <button class="page-hero-ctrl-btn" data-hero-size="md" title="Medium header">M</button>
-            <button class="page-hero-ctrl-btn" data-hero-size="lg" title="Large header">L</button>
+            <div class="page-hero-controls" id="pageHeroControls" aria-label="Header controls">
+              <div class="page-hero-controls-row" role="group" aria-label="Header size">
+                <button class="page-hero-ctrl-btn" data-hero-size="sm" title="Compact header">S</button>
+                <button class="page-hero-ctrl-btn" data-hero-size="md" title="Medium header">M</button>
+                <button class="page-hero-ctrl-btn" data-hero-size="lg" title="Large header">L</button>
+              </div>
+              <div class="page-hero-controls-row page-hero-position-row" role="group" aria-label="Header position">
+                <span class="page-hero-control-label">Focus</span>
+                <input class="page-hero-pos-slider" id="pageHeroPosSlider" type="range" min="0" max="100" step="1" value="50" title="Adjust header image position" />
+                <span class="page-hero-pos-value" id="pageHeroPosValue">50%</span>
+              </div>
+            </div>
           </div>
-          <div class="page-hero-controls-row page-hero-position-row" role="group" aria-label="Header position">
-            <span class="page-hero-control-label">Focus</span>
-            <input class="page-hero-pos-slider" id="pageHeroPosSlider" type="range" min="0" max="100" step="1" value="50" title="Adjust header image position" />
-            <span class="page-hero-pos-value" id="pageHeroPosValue">50%</span>
-          </div>
-        </div>
-        </div>
-        <div class="page-hero-below" id="pageHeroBelow">
+          <div class="page-hero-below" id="pageHeroBelow">
             <div class="page-hero-icon" id="pageHeroIcon"></div>
             <div class="page-hero-title" id="pageHeroTitle" contenteditable="false" spellcheck="false"></div>
+          </div>
         </div>
+        <div id="pageContent" class="hint"></div>
+        <div class="grid" id="grid"></div>
+      </section>
     </div>
-    <div id="pageContent" class="hint"></div>
-    <div class="grid" id="grid"></div>
-</section>
+  </div>
+</div>
 
 <!-- Search View -->
 <section class="search-view" id="searchView">
@@ -786,10 +812,10 @@
     <div class="page-create-section-label">Layout</div>
     <div class="page-create-types" id="pageCreateLayouts">
       <button class="page-type-btn active" data-layout="board-canvas">Board Canvas</button>
+      <button class="page-type-btn" data-layout="infinite-canvas">Infinite Board</button>
       <button class="page-type-btn" data-layout="document">Document</button>
       <button class="page-type-btn" data-layout="sheet">Database</button>
       <button class="page-type-btn page-type-future" data-layout="map" disabled>Map</button>
-      <button class="page-type-btn page-type-future" data-layout="infinite-canvas" disabled>Infinite Canvas</button>
     </div>
 
     <div class="page-create-section-label">Category</div>
@@ -829,10 +855,10 @@
       <label>Layout</label>
       <select class="page-details-select" id="pageDetailsLayout">
         <option value="board-canvas">Board Canvas</option>
+        <option value="infinite-canvas">Infinite Board</option>
         <option value="document">Document</option>
         <option value="sheet">Database</option>
         <option value="map">Map</option>
-        <option value="infinite-canvas">Infinite Canvas</option>
       </select>
     </div>
     <div class="page-details-row">
@@ -865,7 +891,6 @@
     <div class="page-icon-head">
       <div>
         <div class="page-icon-title">Page Icon</div>
-        <div class="page-icon-subtitle">Use an emoji, a pasted image/GIF URL, or upload a file.</div>
       </div>
       <button class="page-icon-close" id="pageIconClose" aria-label="Close icon picker">✕</button>
     </div>
@@ -904,6 +929,7 @@
       "document.js",
       "ui-core.js",
       "sidebar.js",
+      "infinite-canvas.js",
       "canvas.js",
       "history-state.js",
       "app-core.js",

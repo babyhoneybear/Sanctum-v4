@@ -466,6 +466,37 @@
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
         ? insertFrameSlashItem(editable, block, "divider-dashed")
         : window.convertCanvasBlockType?.(block, "divider-dashed")
+    },
+    {
+      label: "Web Link",
+      icon: "🔗",
+      keywords: ["link", "url", "web", "external", "youtube", "website", "href", "http"],
+      when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
+      run: (editable, block) => {
+        const url = prompt("Enter URL (e.g. https://youtube.com/...):");
+        if (!url) return null;
+        if (isFrameCanvasTextContext({ editable, block })) {
+          const frameItem = insertFrameSlashItem(editable, block, "weblink", {
+            data: { externalUrl: url }
+          });
+          if (frameItem) {
+            window.syncWebLinkCardTarget?.(frameItem, { url });
+          }
+          return frameItem;
+        }
+
+        const webBlock = window.convertCanvasBlockType?.(block, "weblink");
+        if (!webBlock) return null;
+        window.syncWebLinkCardTarget?.(webBlock, { url });
+        return webBlock;
+      }
+    },
+    {
+      label: "Clock Widget",
+      icon: "◴",
+      keywords: ["clock", "time", "widget", "digital", "watch"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "clock", { openClockPicker: true })
     }
   ];
 
