@@ -69,6 +69,26 @@
     { value: "compare", label: "Compare" },
     { value: "auto-complete", label: "Auto-complete" }
   ];
+  const NUMBER_FORMAT_OPTIONS = [
+    { value: "number", label: "Number" },
+    { value: "currency", label: "Currency" },
+    { value: "percent", label: "Percent" },
+    { value: "duration-minutes", label: "Duration (minutes)" },
+    { value: "duration-hours", label: "Duration (hours)" },
+    { value: "rating", label: "Rating" },
+    { value: "unit", label: "Custom unit" }
+  ];
+  const NUMBER_CURRENCY_OPTIONS = [
+    { value: "USD", label: "USD ($)" },
+    { value: "EUR", label: "EUR (€)" },
+    { value: "GBP", label: "GBP (£)" },
+    { value: "CAD", label: "CAD (CA$)" },
+    { value: "AUD", label: "AUD (A$)" },
+    { value: "JPY", label: "JPY (¥)" }
+  ];
+  const DEFAULT_NUMBER_CURRENCY = "USD";
+  const DEFAULT_NUMBER_RATING_SCALE = 5;
+  const DEFAULT_NUMBER_UNIT_LABEL = "units";
   const PROPERTY_TYPES = [
     { value: "text", label: "Text" },
     { value: "number", label: "Number" },
@@ -1222,6 +1242,110 @@
     };
   }
 
+  function normalizeNumberFormat(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return NUMBER_FORMAT_OPTIONS.some((entry) => entry.value === safe) ? safe : "number";
+  }
+
+  function normalizeNumberCurrencyCode(value = "") {
+    const safe = String(value || "").trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(safe) ? safe : DEFAULT_NUMBER_CURRENCY;
+  }
+
+  function normalizeNumberUnitLabel(value = "") {
+    return String(value || "").trim();
+  }
+
+  function normalizeNumberRatingScale(value = DEFAULT_NUMBER_RATING_SCALE) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return DEFAULT_NUMBER_RATING_SCALE;
+    return Math.max(3, Math.min(10, Math.round(numeric)));
+  }
+
+  function normalizeNumberConfig(raw = {}) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      format: normalizeNumberFormat(source.format || source.style || "number"),
+      currencyCode: normalizeNumberCurrencyCode(source.currencyCode || source.currency || DEFAULT_NUMBER_CURRENCY),
+      unitLabel: normalizeNumberUnitLabel(source.unitLabel || source.unit || ""),
+      ratingScale: normalizeNumberRatingScale(source.ratingScale || source.scale || DEFAULT_NUMBER_RATING_SCALE)
+    };
+  }
+
+  function getNumberConfig(property) {
+    return normalizeNumberConfig(property?.numberConfig || {});
+  }
+
+  function getNumberFormatLabel(value = "number") {
+    const format = typeof value === "object"
+      ? getNumberConfig(value).format
+      : normalizeNumberFormat(value);
+    return NUMBER_FORMAT_OPTIONS.find((entry) => entry.value === format)?.label || "Number";
+  }
+
+  function getNumberCurrencyLabel(value = DEFAULT_NUMBER_CURRENCY) {
+    const currencyCode = typeof value === "object"
+      ? getNumberConfig(value).currencyCode
+      : normalizeNumberCurrencyCode(value);
+    return NUMBER_CURRENCY_OPTIONS.find((entry) => entry.value === currencyCode)?.label || currencyCode;
+  }
+
+  function formatNumericValue(value, maximumFractionDigits = 6) {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value);
+  }
+
+  function formatDurationValue(totalMinutes = 0) {
+    if (!Number.isFinite(totalMinutes)) return "";
+    const sign = totalMinutes < 0 ? "-" : "";
+    const absoluteMinutes = Math.abs(totalMinutes);
+    if (absoluteMinutes < 60) {
+      return `${sign}${formatNumericValue(absoluteMinutes, absoluteMinutes % 1 === 0 ? 0 : 2)} min`;
+    }
+    const roundedMinutes = Math.round(absoluteMinutes);
+    const hours = Math.floor(roundedMinutes / 60);
+    const minutes = roundedMinutes % 60;
+    if (!minutes) return `${sign}${hours} hr${hours === 1 ? "" : "s"}`;
+    return `${sign}${hours} hr${hours === 1 ? "" : "s"} ${minutes} min`;
+  }
+
+  function formatNumberValue(property, value = "") {
+    const safeValue = String(value || "").trim();
+    const numeric = Number(safeValue);
+    if (!Number.isFinite(numeric)) return safeValue;
+
+    const config = getNumberConfig(property);
+    if (config.format === "currency") {
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: config.currencyCode,
+          maximumFractionDigits: 2
+        }).format(numeric);
+      } catch (error) {
+        return `${config.currencyCode} ${formatNumericValue(numeric, 2)}`;
+      }
+    }
+    if (config.format === "percent") {
+      return `${formatNumericValue(numeric, 2)}%`;
+    }
+    if (config.format === "duration-minutes") {
+      return formatDurationValue(numeric);
+    }
+    if (config.format === "duration-hours") {
+      return formatDurationValue(numeric * 60);
+    }
+    if (config.format === "rating") {
+      const safeScale = normalizeNumberRatingScale(config.ratingScale);
+      const clampedValue = Math.max(0, Math.min(safeScale, numeric));
+      const filled = Math.round(clampedValue);
+      return `${"★".repeat(filled)}${"☆".repeat(Math.max(0, safeScale - filled))} ${formatNumericValue(clampedValue, 2)}/${safeScale}`.trim();
+    }
+    if (config.format === "unit") {
+      return `${formatNumericValue(numeric, 2)} ${config.unitLabel || DEFAULT_NUMBER_UNIT_LABEL}`.trim();
+    }
+    return formatNumericValue(numeric, 6);
+  }
+
   function getChecklistAutomationProperties(properties = []) {
     const supported = new Set(["text", "number", "select", "checkbox", "status", "tag", "date", "notes"]);
     return safeParseArray(properties || []).filter((property) => supported.has(normalizePropertyType(property?.type || "", "")));
@@ -1482,6 +1606,7 @@
       folderField: normalizeFolderField(raw.folderField || ""),
       folderAutoFill: normalizeFolderAutoFill(raw.folderAutoFill || "", type)
     };
+    if (type === "number") property.numberConfig = normalizeNumberConfig(raw.numberConfig || {});
     if (type === "status") property.statusGroups = normalizeStatusGroups(raw.statusGroups || []);
     if (type === "tag") property.tagOptions = normalizeTagOptions(raw.tagOptions || []);
     if (type === "select") property.selectOptions = normalizeSelectOptions(raw.selectOptions || []);
@@ -3812,10 +3937,7 @@
     }
 
     if (property?.type === "number") {
-      const numeric = Number(safeValue);
-      if (Number.isFinite(numeric)) {
-        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(numeric);
-      }
+      return formatNumberValue(property, safeValue) || safeValue;
     }
 
     if (property?.type === "notes" && safeValue.length > 72) {
@@ -5492,6 +5614,8 @@
     if (safeType === "title") return;
 
     property.type = safeType;
+  if (safeType === "number") property.numberConfig = normalizeNumberConfig(property.numberConfig || {});
+  else delete property.numberConfig;
     if (safeType === "status") property.statusGroups = normalizeStatusGroups(property.statusGroups || []);
     else delete property.statusGroups;
     if (safeType === "tag") property.tagOptions = normalizeTagOptions(property.tagOptions || []);
@@ -8195,6 +8319,100 @@
           });
         });
       });
+    }
+
+    if (property.type === "number") {
+      const numberConfig = getNumberConfig(property);
+      appendMenuSubmenuButton(actionsEl, `Number format: ${getNumberFormatLabel(numberConfig.format)}`, (buttonEl) => {
+        openPropertySubmenu(buttonEl, "Number format", (submenuEl) => {
+          NUMBER_FORMAT_OPTIONS.forEach((entry) => {
+            appendMenuButton(submenuEl, entry.label, () => {
+              if (entry.value === "unit") {
+                const nextUnit = window.prompt("Custom unit label", numberConfig.unitLabel || DEFAULT_NUMBER_UNIT_LABEL);
+                if (nextUnit === null) return;
+                property.numberConfig = normalizeNumberConfig({
+                  ...numberConfig,
+                  format: entry.value,
+                  unitLabel: String(nextUnit || "").trim() || numberConfig.unitLabel || DEFAULT_NUMBER_UNIT_LABEL
+                });
+              } else {
+                property.numberConfig = normalizeNumberConfig({
+                  ...numberConfig,
+                  format: entry.value
+                });
+              }
+              commit();
+            }, { active: numberConfig.format === entry.value });
+          });
+        });
+      }, { active: numberConfig.format !== "number" });
+
+      if (numberConfig.format === "currency") {
+        appendMenuSubmenuButton(actionsEl, `Currency: ${getNumberCurrencyLabel(numberConfig.currencyCode)}`, (buttonEl) => {
+          openPropertySubmenu(buttonEl, "Currency", (submenuEl) => {
+            NUMBER_CURRENCY_OPTIONS.forEach((entry) => {
+              appendMenuButton(submenuEl, entry.label, () => {
+                property.numberConfig = normalizeNumberConfig({
+                  ...numberConfig,
+                  format: "currency",
+                  currencyCode: entry.value
+                });
+                commit();
+              }, { active: normalizeNumberCurrencyCode(numberConfig.currencyCode) === entry.value });
+            });
+            appendMenuButton(submenuEl, "Custom code…", () => {
+              const nextCode = window.prompt("Currency code (for example USD, EUR, GBP)", numberConfig.currencyCode || DEFAULT_NUMBER_CURRENCY);
+              if (nextCode === null) return;
+              property.numberConfig = normalizeNumberConfig({
+                ...numberConfig,
+                format: "currency",
+                currencyCode: nextCode
+              });
+              commit();
+            }, { active: !NUMBER_CURRENCY_OPTIONS.some((entry) => entry.value === normalizeNumberCurrencyCode(numberConfig.currencyCode)) });
+          });
+        }, { active: true });
+      }
+
+      if (numberConfig.format === "unit") {
+        appendMenuButton(actionsEl, `Custom unit: ${numberConfig.unitLabel || DEFAULT_NUMBER_UNIT_LABEL}`, () => {
+          const nextUnit = window.prompt("Custom unit label", numberConfig.unitLabel || DEFAULT_NUMBER_UNIT_LABEL);
+          if (nextUnit === null) return;
+          property.numberConfig = normalizeNumberConfig({
+            ...numberConfig,
+            format: "unit",
+            unitLabel: String(nextUnit || "").trim() || DEFAULT_NUMBER_UNIT_LABEL
+          });
+          commit();
+        }, { active: !!String(numberConfig.unitLabel || "").trim() });
+      }
+
+      if (numberConfig.format === "rating") {
+        appendMenuSubmenuButton(actionsEl, `Rating scale: ${numberConfig.ratingScale}`, (buttonEl) => {
+          openPropertySubmenu(buttonEl, "Rating scale", (submenuEl) => {
+            [5, 10].forEach((scale) => {
+              appendMenuButton(submenuEl, String(scale), () => {
+                property.numberConfig = normalizeNumberConfig({
+                  ...numberConfig,
+                  format: "rating",
+                  ratingScale: scale
+                });
+                commit();
+              }, { active: numberConfig.ratingScale === scale });
+            });
+            appendMenuButton(submenuEl, "Custom…", () => {
+              const nextScale = window.prompt("Rating scale (3-10)", String(numberConfig.ratingScale || DEFAULT_NUMBER_RATING_SCALE));
+              if (nextScale === null) return;
+              property.numberConfig = normalizeNumberConfig({
+                ...numberConfig,
+                format: "rating",
+                ratingScale: nextScale
+              });
+              commit();
+            }, { active: ![5, 10].includes(normalizeNumberRatingScale(numberConfig.ratingScale)) });
+          });
+        }, { active: numberConfig.ratingScale !== DEFAULT_NUMBER_RATING_SCALE });
+      }
     }
 
     if (isFolderSystemProperty(property)) {

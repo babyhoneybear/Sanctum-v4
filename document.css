@@ -4295,3 +4295,78 @@
         display: none;
     }
 }
+
+/* Theme defaults. User-applied document colors remain inline and are left alone. */
+:root[data-theme="light"] .doc-toolbar,
+:root[data-theme="light"] .doc-footer,
+:root[data-theme="light"] #docStatsPanel,
+:root[data-theme="light"] .doc-insert-menu {
+    background: var(--surface-bg);
+    border-color: var(--surface-border);
+    box-shadow: 0 8px 24px var(--shadow-strong);
+}
+
+:root[data-theme="light"] .doc-body-wrap {
+    background: var(--mainpage-bg);
+    scrollbar-color: var(--surface-border-strong) transparent;
+}
+
+:root[data-theme="light"] .doc-page {
+    background: var(--surface-bg);
+    box-shadow: 0 2px 24px var(--shadow-strong);
+}
+
+:root[data-theme="light"] .doc-sections,
+:root[data-theme="light"] .doc-inspector {
+    background: var(--surface-bg-raised);
+    border-color: var(--surface-border);
+}
+
+:root[data-theme="light"] .doc-toolbar-divider,
+:root[data-theme="light"] .doc-inspector-header,
+:root[data-theme="light"] .doc-section-header,
+:root[data-theme="light"] .doc-page-divider-line {
+    background: var(--surface-border);
+    border-color: var(--surface-border);
+}
+
+:root[data-theme="light"] .doc-tool-btn:hover,
+:root[data-theme="light"] .doc-tool-btn.active,
+:root[data-theme="light"] .doc-section-item:hover,
+:root[data-theme="light"] .doc-section-item.active,
+:root[data-theme="light"] .doc-insert-item:hover {
+    background: var(--surface-bg-hover);
+    color: var(--text-main);
+}
+
+:root[data-theme="light"] .doc-tool-select,
+:root[data-theme="light"] .doc-select,
+:root[data-theme="light"] .doc-inspector-select,
+:root[data-theme="light"] .doc-inspector-input,
+:root[data-theme="light"] .doc-note-card-textarea {
+    background: var(--input-bg);
+    border-color: var(--surface-border);
+    color: var(--text-main);
+    color-scheme: light;
+}
+
+:root[data-theme="light"] .doc-tool-select option,
+:root[data-theme="light"] .doc-select option,
+:root[data-theme="light"] .doc-inspector-select option {
+    background: var(--surface-bg);
+    color: var(--text-main);
+}
+
+:root[data-theme="light"] .doc-content,
+:root[data-theme="light"] .doc-content strong,
+:root[data-theme="light"] .doc-inspector-name {
+    color: var(--text-main);
+}
+
+:root[data-theme="light"] .doc-content em,
+:root[data-theme="light"] .doc-page-divider-label,
+:root[data-theme="light"] .doc-section-item,
+:root[data-theme="light"] .doc-tool-btn,
+:root[data-theme="light"] .doc-inspector-label {
+    color: var(--muted2);
+}

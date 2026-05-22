@@ -215,6 +215,88 @@ body.sidebar-open #menuBtn {
     background: #d7cec1;
 }
 
+:root[data-theme="light"] .sidebar-nav .nav-item,
+:root[data-theme="light"] .section-header,
+:root[data-theme="light"] .bottom-item {
+    color: var(--text-primary);
+}
+
+:root[data-theme="light"] .row:hover,
+:root[data-theme="light"] .section-header:hover,
+:root[data-theme="light"] .bottom-item:hover {
+    background: var(--row-hover);
+}
+
+:root[data-theme="light"] .divider,
+:root[data-theme="light"] .sidebar-bottom,
+:root[data-theme="light"] .topbar {
+    border-color: var(--surface-border);
+}
+
+/* Light-theme defaults for legacy dark-coded surfaces. Custom colors still win. */
+:root[data-theme="light"] .page-title,
+:root[data-theme="light"] .nav-item.active,
+:root[data-theme="light"] .block,
+:root[data-theme="light"] .calendar-db-page-host,
+:root[data-theme="light"] .page-db-cell-input,
+:root[data-theme="light"] .page-db-cell-trigger,
+:root[data-theme="light"] .page-db-cell-trigger-placeholder,
+:root[data-theme="light"] .page-db-cell-date-value,
+:root[data-theme="light"] .page-database-visibility-item,
+:root[data-theme="light"] .data-callout-value,
+:root[data-theme="light"] .progress-block-value,
+:root[data-theme="light"] .clock-block-time {
+    color: var(--text-main);
+    -webkit-text-fill-color: currentColor;
+}
+
+:root[data-theme="light"] .page-db-cell-input::placeholder,
+:root[data-theme="light"] .page-db-row-icon,
+:root[data-theme="light"] .page-db-cell-trigger-icon,
+:root[data-theme="light"] .page-database-visibility-caption,
+:root[data-theme="light"] .page-database-visibility-link,
+:root[data-theme="light"] .image-placeholder {
+    color: var(--muted3);
+    -webkit-text-fill-color: currentColor;
+}
+
+:root[data-theme="light"] .page-database-cell,
+:root[data-theme="light"] .page-database-row,
+:root[data-theme="light"] .page-database-header-cell,
+:root[data-theme="light"] .page-database-block-header,
+:root[data-theme="light"] .calendar-db-surface {
+    border-color: var(--surface-border);
+}
+
+:root[data-theme="light"] .topbar-search-wrap,
+:root[data-theme="light"] .settings-select,
+:root[data-theme="light"] .settings-input,
+:root[data-theme="light"] .page-database-visibility-search {
+    background: var(--input-bg);
+    border-color: var(--surface-border);
+    color: var(--text-main);
+}
+
+:root[data-theme="light"] .ambient-tile,
+:root[data-theme="light"] .page-db-cell-pill:not([style]),
+:root[data-theme="light"] .data-callout-block,
+:root[data-theme="light"] .progress-block,
+:root[data-theme="light"] .clock-block {
+    background: var(--surface-bg-raised);
+    border-color: var(--surface-border);
+    color: var(--text-main);
+}
+
+:root[data-theme="light"] .ambient-tile:hover,
+:root[data-theme="light"] .page-database-visibility-item:hover {
+    background: var(--surface-bg-hover);
+}
+
+:root[data-theme="light"] .ambient-slider,
+:root[data-theme="light"] input[type="range"] {
+    accent-color: var(--accent);
+}
+
 /* #region Sidebar nav (Search,Inbox) */
 .sidebar-nav .nav-item {
     display: block;
@@ -509,7 +591,7 @@ body.sidebar-open #menuBtn {
 }
 .page-title {
     font-size: 14px; font-weight: 400;
-    color: white;
+    color: var(--text-main);
 }
 
 body.sheet-page .page-title {
@@ -554,8 +636,8 @@ body.sheet-page .page-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(0,0,0,0.28);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: color-mix(in srgb, var(--input-bg) 84%, transparent);
+    border: 1px solid var(--surface-border);
     border-radius: 2px;
     padding: 6px 14px;
     cursor: pointer;
@@ -565,7 +647,7 @@ body.sheet-page .page-title {
 }
 
 .topbar-search-wrap:hover {
-    border-color: rgba(255,255,255,0.18);
+    border-color: var(--surface-border-strong);
 }
 
 .topbar-search-icon {
@@ -1751,7 +1833,7 @@ body.editing.block-selected.block-type-table .edit-dock .dock-mode-table {
 
 .nav-item.active {
     background: var(--row-hover);
-    color: white;
+    color: var(--text-main);
 }
 
 /* #region Page canvas (where page content goes) */
@@ -1778,8 +1860,8 @@ body.editing .page-canvas {
 
 body.editing .grid {
     background-image: 
-        linear-gradient(to right, rgba(255,255,255,0.1) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255,255,255,0.4) 1px, transparent 1px);
+        linear-gradient(to right, color-mix(in srgb, var(--text-main) 10%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--text-main) 28%, transparent) 1px, transparent 1px);
     background-size: 24px 24px;
     background-position: -1px -1px;
 }
@@ -1814,7 +1896,7 @@ body.editing .grid {
     width: 15px;
     height: 15px;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.25);
+    background: color-mix(in srgb, var(--text-main) 25%, transparent);
     cursor: se-resize;
     opacity: 0;
 }
@@ -9137,7 +9219,7 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
 
 .page-database-checklist-item {
     display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr) minmax(0, 240px);
     align-items: center;
     gap: 8px;
     min-height: 30px;
@@ -9196,9 +9278,11 @@ body.editing .page-database-row-shell:focus-within .page-database-row-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    justify-self: end;
     gap: 6px;
     min-width: 0;
-    max-width: min(44%, 240px);
+    width: 100%;
+    max-width: 100%;
     overflow: hidden;
 }
 

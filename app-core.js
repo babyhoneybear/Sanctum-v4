@@ -621,37 +621,6 @@ function savePageSettings(pageId, settings) {
   return saved;
 }
 
-function getWorkspaceTheme() {
-  return normalizeThemeMode(sanctumSettings?.workspace?.theme || "dark", "dark");
-}
-
-function getResolvedPageTheme(pageId = currentPageId) {
-  const pageTheme = normalizePageThemeOverride(getPageSettings(pageId).theme || "");
-  return pageTheme || getWorkspaceTheme();
-}
-
-function applyResolvedTheme(pageId = currentPageId) {
-  const workspaceTheme = getWorkspaceTheme();
-  const pageTheme = normalizePageThemeOverride(pageId ? getPageSettings(pageId).theme : "");
-  const resolvedTheme = pageTheme || workspaceTheme;
-  const root = document.documentElement;
-
-  root.dataset.workspaceTheme = workspaceTheme;
-  root.dataset.theme = resolvedTheme;
-  root.dataset.pageTheme = pageTheme || "inherit";
-  root.style.colorScheme = resolvedTheme;
-
-  document.body?.setAttribute("data-theme", resolvedTheme);
-  document.body?.setAttribute("data-page-theme", pageTheme || "inherit");
-}
-
-function getPageThemeLabel(value = "") {
-  const normalized = normalizePageThemeOverride(value);
-  if (normalized === "light") return "Light";
-  if (normalized === "dark") return "Dark";
-  return "Use workspace";
-}
-
 function applyPageFontPreset(pageId) {
   const pageCanvas = document.getElementById("pageCanvas");
   const docEditor = document.getElementById("docEditor");
@@ -2199,25 +2168,6 @@ document.getElementById("moreBtn")?.addEventListener("click", (e) => {
     });
 
     items.push({ type: "divider" });
-    items.push({ type: "label", label: `Page Theme: ${getPageThemeLabel(pageSettings.theme)}` });
-
-    [
-      { value: "", label: `Use workspace (${getPageThemeLabel(getWorkspaceTheme())})` },
-      { value: "dark", label: "Dark" },
-      { value: "light", label: "Light" }
-    ].forEach((themeOption) => {
-      items.push({
-        label: themeOption.label,
-        active: normalizePageThemeOverride(pageSettings.theme) === themeOption.value,
-        action: () => {
-          pageSettings.theme = themeOption.value;
-          savePageSettings(currentPageId, pageSettings);
-          applyResolvedTheme(currentPageId);
-        }
-      });
-    });
-
-    items.push({ type: "divider" });
 
     items.push({
       label: "Trash",
@@ -2984,11 +2934,6 @@ function loadSettings() {
   if (!sanctumSettings.workspace) sanctumSettings.workspace = { theme: "dark", uiFont: "system", borders: "none", cornerStyle: "square", gridSize: "medium" };
   if (!sanctumSettings.editor) sanctumSettings.editor = { blockBehavior: "expand", snapToGrid: true, autoFocus: true, defaultBlockWidth: "medium" };
   if (!sanctumSettings.navigation) sanctumSettings.navigation = { rememberPage: true, sidebarState: "collapsed", openBehavior: "replace", breadcrumbs: false };
-  sanctumSettings.workspace.theme = normalizeThemeMode(sanctumSettings.workspace.theme || "dark", "dark");
-  sanctumSettings.workspace.uiFont = sanctumSettings.workspace.uiFont || "system";
-  sanctumSettings.workspace.borders = sanctumSettings.workspace.borders || "none";
-  sanctumSettings.workspace.cornerStyle = sanctumSettings.workspace.cornerStyle || "square";
-  sanctumSettings.workspace.gridSize = sanctumSettings.workspace.gridSize || "medium";
 
   if (!sanctumSettings.operator.id) {
     sanctumSettings.operator.id = generateSanctumId();
@@ -2999,7 +2944,6 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanctumSettings));
   syncSidebarProfile();
-  applyResolvedTheme(typeof currentPageId === "string" ? currentPageId : "home");
 }
 
 function syncSidebarProfile(options = {}) {
@@ -3031,7 +2975,6 @@ function syncSidebarProfile(options = {}) {
 
 loadSettings();
 syncSidebarProfile();
-applyResolvedTheme(typeof currentPageId === "string" ? currentPageId : "home");
 
 function generateSanctumId() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
