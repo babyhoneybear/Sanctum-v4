@@ -266,14 +266,40 @@
   }
 
   function getCanvasSlashMatches(context) {
-    return canvasSlashCommands.filter((command) => {
+    const availableCommands = canvasSlashCommands.filter((command) => {
       if (typeof command.when === "function" && !command.when(context)) {
         return false;
       }
+      return true;
+    });
 
+    if (!context.query) {
+      return getCanvasSlashCommandGroups(availableCommands);
+    }
+
+    return availableCommands.filter((command) => {
       const haystack = `${command.label} ${(command.keywords || []).join(" ")}`.toLowerCase();
       return haystack.includes(context.query);
     });
+  }
+
+  function getCanvasSlashCommandGroups(commands = []) {
+    const groups = [
+      { label: "Study Tools", icon: "S", labels: ["Flashcard Deck"] },
+      { label: "Text", icon: "T", labels: ["Heading 1", "Heading 2", "Heading 3", "Bullet List", "Numbered List", "Toggle List", "Text Box"] },
+      { label: "Pages", icon: "P", labels: ["New Page", "Link Page", "Link Page Gallery", "Link Domain", "Link Domain Gallery"] },
+      { label: "Databases", icon: "D", labels: ["Inline Database", "Database Page", "Table"] },
+      { label: "Media", icon: "M", labels: ["Image", "Web Link"] },
+      { label: "Layout", icon: "L", labels: ["Frame", "Divider", "Vertical Divider", "Up-Down Divider", "Dashed Divider"] },
+      { label: "Widgets", icon: "W", labels: ["Clock Widget"] }
+    ];
+
+    return groups
+      .map((group) => ({
+        ...group,
+        children: group.labels.map((label) => commands.find((command) => command.label === label)).filter(Boolean)
+      }))
+      .filter((group) => group.children.length);
   }
 
   const canvasSlashCommands = [
@@ -309,7 +335,7 @@
     },
     {
       label: "Toggle List",
-      icon: "▸",
+      icon: ">",
       keywords: ["toggle", "dropdown", "list"],
       run: () => insertCanvasToggleMarkup()
     },
@@ -325,7 +351,7 @@
     },
     {
       label: "New Page",
-      icon: "⊞",
+      icon: "P",
       keywords: ["page", "subpage", "card", "create"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -334,7 +360,7 @@
     },
     {
       label: "Inline Database",
-      icon: "▦",
+      icon: "D",
       keywords: ["inline database", "database", "db", "table", "board", "embed"],
       when: isPlainCanvasTextBlockContext,
       run: (_editable, block) => {
@@ -349,7 +375,7 @@
     },
     {
       label: "Database Page",
-      icon: "🗂",
+      icon: "DB",
       keywords: ["database", "db", "calendar", "notion", "sheet"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -364,7 +390,7 @@
     },
     {
       label: "Link Page",
-      icon: "↩",
+      icon: "LP",
       keywords: ["link", "existing", "backlink", "page"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -373,7 +399,7 @@
     },
     {
       label: "Link Page Gallery",
-      icon: "▣",
+      icon: "LG",
       keywords: ["link", "existing", "backlink", "page", "gallery", "cover", "image"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -386,7 +412,7 @@
     },
     {
       label: "Link Domain",
-      icon: "⌂",
+      icon: "DM",
       keywords: ["link", "existing", "backlink", "domain", "bucket"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -395,7 +421,7 @@
     },
     {
       label: "Link Domain Gallery",
-      icon: "▤",
+      icon: "DG",
       keywords: ["link", "existing", "backlink", "domain", "bucket", "gallery", "cover", "image"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -408,7 +434,7 @@
     },
     {
       label: "Image",
-      icon: "🖼",
+      icon: "IMG",
       keywords: ["img", "photo", "picture"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -417,14 +443,14 @@
     },
     {
       label: "Frame",
-      icon: "▤",
+      icon: "F",
       keywords: ["section", "box", "panel"],
       when: isPlainCanvasTextBlockContext,
       run: (_editable, block) => window.convertCanvasBlockType?.(block, "container")
     },
     {
       label: "Table",
-      icon: "⊞",
+      icon: "TB",
       keywords: ["grid", "columns", "rows"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -432,8 +458,15 @@
         : window.convertCanvasBlockType?.(block, "table")
     },
     {
+      label: "Flashcard Deck",
+      icon: "S",
+      keywords: ["study", "flashcard", "cards", "review", "quiz"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "flashcards", { openFlashcardPicker: true })
+    },
+    {
       label: "Divider",
-      icon: "─",
+      icon: "-",
       keywords: ["line", "rule", "separator", "horizontal"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -442,7 +475,7 @@
     },
     {
       label: "Vertical Divider",
-      icon: "│",
+      icon: "|",
       keywords: ["vertical", "line", "rule", "separator"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -451,7 +484,7 @@
     },
     {
       label: "Up-Down Divider",
-      icon: "╎",
+      icon: "UD",
       keywords: ["up", "down", "vertical", "line", "separator"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -460,7 +493,7 @@
     },
     {
       label: "Dashed Divider",
-      icon: "╌",
+      icon: "--",
       keywords: ["dashed", "line", "rule", "separator"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => isFrameCanvasTextContext({ editable, block })
@@ -469,7 +502,7 @@
     },
     {
       label: "Web Link",
-      icon: "🔗",
+      icon: "URL",
       keywords: ["link", "url", "web", "external", "youtube", "website", "href", "http"],
       when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
       run: (editable, block) => {
@@ -493,7 +526,7 @@
     },
     {
       label: "Clock Widget",
-      icon: "◴",
+      icon: "CLK",
       keywords: ["clock", "time", "widget", "digital", "watch"],
       when: isPlainCanvasTextBlockContext,
       run: (_editable, block) => window.convertCanvasBlockType?.(block, "clock", { openClockPicker: true })
@@ -553,8 +586,50 @@
       menu.style.top = "";
       menu.style.left = "";
     }
+    closeCanvasSlashSubmenu();
 
     resetCanvasSlashState();
+  }
+
+  function closeCanvasSlashSubmenu() {
+    document.getElementById("canvasSlashSubmenu")?.remove();
+  }
+
+  function openCanvasSlashSubmenu(anchorEl, commands = []) {
+    closeCanvasSlashSubmenu();
+    if (!anchorEl || !commands.length) return;
+
+    const submenu = document.createElement("div");
+    submenu.id = "canvasSlashSubmenu";
+    submenu.className = "canvas-slash-menu canvas-slash-submenu open";
+
+    commands.forEach((command) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "canvas-slash-item";
+      item.innerHTML = `<span class="canvas-slash-icon">${command.icon}</span><span class="canvas-slash-label">${command.label}</span>`;
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        executeCanvasSlashCommandObject(command);
+      });
+      submenu.appendChild(item);
+    });
+
+    document.body.appendChild(submenu);
+    const rect = anchorEl.getBoundingClientRect();
+    const submenuRect = submenu.getBoundingClientRect();
+    const viewportPadding = 12;
+    const rightSpace = window.innerWidth - rect.right - viewportPadding;
+    const leftSpace = rect.left - viewportPadding;
+    const openLeft = leftSpace >= submenuRect.width + 6 && leftSpace > rightSpace;
+    const left = openLeft
+      ? Math.max(viewportPadding, rect.left - submenuRect.width - 6)
+      : Math.min(window.innerWidth - submenuRect.width - viewportPadding, rect.right + 6);
+    const top = Math.max(viewportPadding, Math.min(rect.top, window.innerHeight - submenuRect.height - viewportPadding));
+
+    submenu.style.left = `${Math.round(left)}px`;
+    submenu.style.top = `${Math.round(top)}px`;
   }
 
   function getCanvasSlashContext(editable) {
@@ -598,13 +673,21 @@
     menu.innerHTML = "";
 
     canvasSlashState.matches.forEach((command, index) => {
+      const isGroup = Array.isArray(command.children) && command.children.length;
       const item = document.createElement("button");
       item.type = "button";
-      item.className = `canvas-slash-item${index === canvasSlashState.activeIndex ? " active" : ""}`;
-      item.innerHTML = `<span class="canvas-slash-icon">${command.icon}</span><span class="canvas-slash-label">${command.label}</span>`;
+      item.className = `canvas-slash-item${index === canvasSlashState.activeIndex ? " active" : ""}${isGroup ? " has-submenu" : ""}`;
+      item.innerHTML = `<span class="canvas-slash-icon">${command.icon}</span><span class="canvas-slash-label">${command.label}</span>${isGroup ? `<span class="canvas-slash-arrow">&rsaquo;</span>` : ""}`;
+      if (isGroup) {
+        item.addEventListener("mouseenter", () => openCanvasSlashSubmenu(item, command.children));
+      }
       item.addEventListener("mousedown", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (isGroup) {
+          openCanvasSlashSubmenu(item, command.children);
+          return;
+        }
         executeCanvasSlashCommand(index);
       });
       menu.appendChild(item);
@@ -664,6 +747,17 @@
     if (!canvasSlashState.active) return;
 
     const command = canvasSlashState.matches[index];
+    if (command?.children?.length) {
+      executeCanvasSlashCommandObject(command.children[0]);
+      return;
+    }
+
+    executeCanvasSlashCommandObject(command);
+  }
+
+  function executeCanvasSlashCommandObject(command) {
+    if (!canvasSlashState.active) return;
+
     const editable = canvasSlashState.editable;
     const block = canvasSlashState.block;
     const startNode = canvasSlashState.startNode;
@@ -707,7 +801,7 @@
   window.isCanvasSlashEditable = isCanvasSlashEditable;
 
   document.addEventListener("mousedown", (e) => {
-    if (!e.target.closest("#canvasSlashMenu")) {
+    if (!e.target.closest("#canvasSlashMenu") && !e.target.closest("#canvasSlashSubmenu")) {
       closeCanvasSlashMenu();
     }
   });

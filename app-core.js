@@ -1,5 +1,5 @@
 // == Topbar Dropdown ==
-function openTopbarDropdown(anchorEl, items) {
+function openTopbarDropdown(anchorEl, items, options = {}) {
   if (typeof getDocUIState === "function" && typeof handleDocMajorOverlayOpen === "function") {
     const state = getDocUIState();
     if (state.editorOpen) {
@@ -13,30 +13,77 @@ function openTopbarDropdown(anchorEl, items) {
   dropdown.className = "topbar-dropdown";
   dropdown.dataset.uiId = "topbarDropdown";
 
-  items.forEach(item => {
+  const closeSubmenus = (fromLevel = 0) => {
+    document.querySelectorAll(".topbar-dropdown-submenu").forEach((submenu) => {
+      if (Number(submenu.dataset.submenuLevel || 0) >= fromLevel) submenu.remove();
+    });
+  };
+
+  const openSubmenu = (button, children = [], level = 1, path = []) => {
+    closeSubmenus(level);
+    if (!button || !Array.isArray(children) || !children.length) return;
+
+    const submenu = document.createElement("div");
+    submenu.className = "topbar-dropdown topbar-dropdown-submenu";
+    submenu.dataset.uiId = "topbarDropdown";
+    submenu.dataset.submenuLevel = String(level);
+    renderItems(submenu, children, level, path);
+    document.body.appendChild(submenu);
+
+    const rect = button.getBoundingClientRect();
+    const width = submenu.offsetWidth || 220;
+    const height = submenu.offsetHeight || 180;
+    const viewportPadding = 12;
+    const leftSpace = rect.left - viewportPadding;
+    const rightSpace = window.innerWidth - rect.right - viewportPadding;
+    const openLeft = leftSpace >= width + 6 || leftSpace > rightSpace;
+    const left = openLeft
+      ? Math.max(viewportPadding, rect.left - width - 6)
+      : Math.min(window.innerWidth - width - viewportPadding, rect.right + 6);
+    const top = Math.max(viewportPadding, Math.min(rect.top, window.innerHeight - height - viewportPadding));
+
+    submenu.style.left = `${Math.round(left)}px`;
+    submenu.style.top = `${Math.round(top)}px`;
+  };
+
+  function renderItems(container, menuItems, level = 0, parentPath = []) {
+    menuItems.forEach(item => {
     if (item.type === "label") {
       const label = document.createElement("div");
       label.className = "topbar-dropdown-label";
       label.textContent = item.label;
-      dropdown.appendChild(label);
+      container.appendChild(label);
       return;
     }
 
     if (item.type === "divider") {
       const divider = document.createElement("div");
       divider.className = "topbar-dropdown-divider";
-      dropdown.appendChild(divider);
+      container.appendChild(divider);
       return;
     }
 
     const btn = document.createElement("div");
-    btn.className = "topbar-dropdown-btn" + (item.danger ? " danger" : "");
-    btn.textContent = item.label;
+    const hasChildren = Array.isArray(item.children) && item.children.length;
+    const nextPath = item.key ? [...parentPath, item.key] : parentPath;
+    btn.className = `topbar-dropdown-btn${item.danger ? " danger" : ""}${hasChildren ? " has-submenu" : ""}`;
+    btn.innerHTML = hasChildren
+      ? `<span>${escapeHTML(item.label || "")}</span><span class="topbar-dropdown-submenu-arrow">&lsaquo;</span>`
+      : escapeHTML(item.label || "");
+    if (item.key) btn.dataset.menuPath = nextPath.join("/");
     if (item.active) btn.classList.add("active");
     if (item.fontFamily) btn.style.fontFamily = item.fontFamily;
+    if (hasChildren) {
+      btn.addEventListener("mouseenter", () => openSubmenu(btn, item.children, level + 1, nextPath));
+    }
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      dropdown.remove();
+      if (hasChildren) {
+        openSubmenu(btn, item.children, level + 1, nextPath);
+        return;
+      }
+
+      document.querySelectorAll(".topbar-dropdown").forEach((menu) => menu.remove());
 
       if (typeof setUIState === "function") {
         setUIState({ openOverlay: null });
@@ -44,8 +91,11 @@ function openTopbarDropdown(anchorEl, items) {
 
       item.action();
     });
-    dropdown.appendChild(btn);
-  });
+    container.appendChild(btn);
+    });
+  }
+
+  renderItems(dropdown, items, 0);
 
   document.body.appendChild(dropdown);
 
@@ -67,6 +117,31 @@ function openTopbarDropdown(anchorEl, items) {
 
   if (typeof openOverlay === "function") {
     openOverlay("topbarDropdown", dropdown);
+  }
+
+  const defaultOpenPath = Array.isArray(options.defaultOpenPath) ? options.defaultOpenPath.filter(Boolean) : [];
+  if (defaultOpenPath.length) {
+    const openSavedPath = () => {
+      let currentItems = items;
+      let currentButton = null;
+
+      defaultOpenPath.forEach((pathKey, index) => {
+        const path = defaultOpenPath.slice(0, index + 1).join("/");
+        const scope = index === 0
+          ? dropdown
+          : document.querySelector(`.topbar-dropdown-submenu[data-submenu-level="${index}"]`);
+        const button = scope?.querySelector(`.topbar-dropdown-btn[data-menu-path="${path}"]`);
+        const match = currentItems.find((entry) => entry?.key === pathKey);
+        if (!button || !match?.children?.length) return;
+        currentButton = button;
+        openSubmenu(button, match.children, index + 1, defaultOpenPath.slice(0, index + 1));
+        currentItems = match.children;
+      });
+
+      if (currentButton) currentButton.classList.add("active");
+    };
+
+    window.requestAnimationFrame(openSavedPath);
   }
 }
 
@@ -621,6 +696,37 @@ function savePageSettings(pageId, settings) {
   return saved;
 }
 
+function getWorkspaceTheme() {
+  return normalizeThemeMode(sanctumSettings?.workspace?.theme || "dark", "dark");
+}
+
+function getResolvedPageTheme(pageId = currentPageId) {
+  const pageTheme = normalizePageThemeOverride(getPageSettings(pageId).theme || "");
+  return pageTheme || getWorkspaceTheme();
+}
+
+function applyResolvedTheme(pageId = currentPageId) {
+  const workspaceTheme = getWorkspaceTheme();
+  const pageTheme = normalizePageThemeOverride(pageId ? getPageSettings(pageId).theme : "");
+  const resolvedTheme = pageTheme || workspaceTheme;
+  const root = document.documentElement;
+
+  root.dataset.workspaceTheme = workspaceTheme;
+  root.dataset.theme = resolvedTheme;
+  root.dataset.pageTheme = pageTheme || "inherit";
+  root.style.colorScheme = resolvedTheme;
+
+  document.body?.setAttribute("data-theme", resolvedTheme);
+  document.body?.setAttribute("data-page-theme", pageTheme || "inherit");
+}
+
+function getPageThemeLabel(value = "") {
+  const normalized = normalizePageThemeOverride(value);
+  if (normalized === "light") return "Light";
+  if (normalized === "dark") return "Dark";
+  return "Use workspace";
+}
+
 function applyPageFontPreset(pageId) {
   const pageCanvas = document.getElementById("pageCanvas");
   const docEditor = document.getElementById("docEditor");
@@ -676,6 +782,40 @@ function setCurrentHeroPosition(pos, { persist = true } = {}) {
   return next;
 }
 
+function getHeroTitlePlacement(settings = {}) {
+  if (settings.heroOverlay) return "overlay";
+  if (settings.showTitle) return "below";
+  return "hidden";
+}
+
+function getHeroTitlePlacementLabel(settings = {}) {
+  const placement = getHeroTitlePlacement(settings);
+  if (placement === "overlay") return "Over banner";
+  if (placement === "below") return "Below banner";
+  return "Off";
+}
+
+function cycleHeroTitlePlacement(settings = {}, currentPage = null) {
+  const placement = getHeroTitlePlacement(settings);
+  if (placement === "below") {
+    settings.showTitle = false;
+    settings.heroOverlay = true;
+    if (!settings.heroOverlayTitle) {
+      settings.heroOverlayTitle = currentPage?.title || "";
+    }
+    return;
+  }
+
+  if (placement === "overlay") {
+    settings.showTitle = false;
+    settings.heroOverlay = false;
+    return;
+  }
+
+  settings.showTitle = true;
+  settings.heroOverlay = false;
+}
+
 function renderPageHero(pageId) {
   const allPages = { ...SYSTEM_PAGES };
   userDomains.forEach(d => allPages[d.id] = d);
@@ -687,11 +827,15 @@ function renderPageHero(pageId) {
   const heroImg = document.getElementById("pageHeroImg");
   const heroIcon = document.getElementById("pageHeroIcon");
   const heroTitle = document.getElementById("pageHeroTitle");
+  const heroOverlayText = document.getElementById("pageHeroOverlayText");
+  const heroOverlayTitle = document.getElementById("pageHeroOverlayTitle");
+  const heroOverlaySubtitle = document.getElementById("pageHeroOverlaySubtitle");
+  const heroChangeBtn = document.getElementById("pageHeroChangeBtn");
 
   if (!hero || !page) return;
 
   const settings = getPageSettings(pageId);
-  const headerSize = ["sm", "md", "lg"].includes(settings.headerSize) ? settings.headerSize : "md";
+  const headerSize = ["sm", "md", "lg", "xl"].includes(settings.headerSize) ? settings.headerSize : "md";
   const headerPos = normalizeHeaderPos(settings.headerPos);
   const isSystem = ["home", "search", "inbox", "notes"].includes(pageId);
   const isDatabasePage = page?.layout === "sheet";
@@ -708,6 +852,10 @@ function renderPageHero(pageId) {
   heroImgWrap.style.display = "";
   heroImgWrap.dataset.hasHeader = settings.showHeader ? "true" : "false";
   heroImgWrap.dataset.heroSize = headerSize;
+  heroImgWrap.dataset.hasOverlay = settings.heroOverlay && settings.showHeader ? "true" : "false";
+  if (heroChangeBtn) {
+    heroChangeBtn.textContent = settings.showHeader ? "Edit banner" : "+ Add banner";
+  }
   if (!settings.showHeader) {
     heroImg.src = "";
     heroImg.style.display = "none";
@@ -717,6 +865,20 @@ function renderPageHero(pageId) {
   }
   if (settings.showHeader && settings.headerSrc) {
     heroImg.src = settings.headerSrc;
+  }
+
+  if (heroOverlayText && heroOverlayTitle && heroOverlaySubtitle) {
+    const isEditing = document.body.classList.contains("editing");
+    const overlayTitle = String(settings.heroOverlayTitle || "").trim() || page.title || "";
+    const overlaySubtitle = String(settings.heroOverlaySubtitle || "").trim();
+    heroOverlayText.style.display = settings.heroOverlay && settings.showHeader ? "" : "none";
+    heroOverlayTitle.textContent = overlayTitle;
+    heroOverlaySubtitle.textContent = overlaySubtitle;
+    heroOverlaySubtitle.style.display = overlaySubtitle || (isEditing && settings.heroOverlay && settings.showHeader) ? "" : "none";
+    heroOverlayTitle.contentEditable = isEditing && settings.heroOverlay && settings.showHeader ? "true" : "false";
+    heroOverlaySubtitle.contentEditable = isEditing && settings.heroOverlay && settings.showHeader ? "true" : "false";
+    heroOverlayTitle.dataset.placeholder = "Type title";
+    heroOverlaySubtitle.dataset.placeholder = "Type subtitle";
   }
 
   updateHeroPositionPreview(headerPos);
@@ -736,7 +898,7 @@ function renderPageHero(pageId) {
   if (heroBelow) heroBelow.style.display = (settings.showTitle || settings.showIcon) ? "" : "none";
 
   // show whole hero if anything is on
-  hero.style.display = (settings.showHeader || settings.showTitle || settings.showIcon) ? "" : "none";
+  hero.style.display = (settings.showHeader || settings.showTitle || settings.showIcon || settings.heroOverlay) ? "" : "none";
 
   applyPageFontPreset(pageId);
 
@@ -942,7 +1104,7 @@ document.getElementById("pageHeroImgWrap")?.addEventListener("pointerdown", (e) 
   const wrap = e.currentTarget;
   if (!document.body.classList.contains("editing")) return;
   if (wrap.dataset.hasHeader !== "true") return;
-  if (e.target.closest(".page-hero-controls") || e.target.closest(".page-hero-change-btn")) return;
+  if (e.target.closest(".page-hero-controls") || e.target.closest(".page-hero-change-btn") || e.target.closest(".page-hero-overlay-text")) return;
 
   heroImageDragState = {
     startY: e.clientY,
@@ -983,6 +1145,44 @@ document.getElementById("pageHeroTitle")?.addEventListener("blur", () => {
   if (!newTitle) return;
 
   applyPageRenameEverywhere(currentPageId, newTitle);
+});
+
+function saveHeroOverlayField(field) {
+  const settings = getPageSettings(currentPageId);
+  if (!settings.heroOverlay) return;
+
+  const heroOverlayTitle = document.getElementById("pageHeroOverlayTitle");
+  const heroOverlaySubtitle = document.getElementById("pageHeroOverlaySubtitle");
+  if (!heroOverlayTitle || !heroOverlaySubtitle) return;
+
+  if (field === "title") {
+    settings.heroOverlayTitle = heroOverlayTitle.textContent.trim();
+  } else if (field === "subtitle") {
+    settings.heroOverlaySubtitle = heroOverlaySubtitle.textContent.trim();
+  }
+
+  savePageSettings(currentPageId, settings);
+  renderPageHero(currentPageId);
+}
+
+document.getElementById("pageHeroOverlayTitle")?.addEventListener("blur", () => {
+  saveHeroOverlayField("title");
+});
+
+document.getElementById("pageHeroOverlaySubtitle")?.addEventListener("blur", () => {
+  saveHeroOverlayField("subtitle");
+});
+
+document.getElementById("pageHeroOverlayTitle")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  e.currentTarget.blur();
+});
+
+document.getElementById("pageHeroOverlaySubtitle")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  e.currentTarget.blur();
 });
 
 
@@ -2058,8 +2258,8 @@ function openRenameModal(targetId, currentTitle) {
 }
 
 // == More button dropdown ==
-document.getElementById("moreBtn")?.addEventListener("click", (e) => {
-  e.stopPropagation();
+function openCurrentPageMoreMenu(anchorEl, options = {}) {
+  if (!anchorEl) return;
 
   if (typeof getDocUIState === "function" && typeof handleDocMajorOverlayOpen === "function") {
     const state = getDocUIState();
@@ -2074,6 +2274,14 @@ document.getElementById("moreBtn")?.addEventListener("click", (e) => {
   const isInbox  = currentPageId === "inbox";
 
   const items = [];
+  const keepMoreMenuOpen = (action, submenuPath = []) => () => {
+    action?.();
+    window.requestAnimationFrame(() => {
+      const currentAnchor = document.getElementById("moreBtn");
+      if (!currentAnchor) return;
+      openCurrentPageMoreMenu(currentAnchor, { defaultOpenPath: submenuPath });
+    });
+  };
 
   if (isDomain || isPage) {
     const currentPage = isDomain
@@ -2123,48 +2331,93 @@ document.getElementById("moreBtn")?.addEventListener("click", (e) => {
     const pageSettings = getPageSettings(currentPageId);
     const fontPreset = normalizePageFontPreset(pageSettings.fontPreset);
 
-    if (!isDocPage) items.push({
-      label: pageSettings.showHeader ? "Hide Header" : "Show Header",
-      action: () => {
-        pageSettings.showHeader = !pageSettings.showHeader;
+    if (!isDocPage) {
+      const saveHeroSettings = () => {
         savePageSettings(currentPageId, pageSettings);
         renderPageHero(currentPageId);
-      }
-    });
+      };
 
-    if (!isDocPage) items.push({
-      label: pageSettings.showTitle ? "Hide Title" : "Show Title",
-      action: () => {
-        pageSettings.showTitle = !pageSettings.showTitle;
-        savePageSettings(currentPageId, pageSettings);
-        renderPageHero(currentPageId);
-      }
-    });
-
-    if (!isDocPage) items.push({
-      label: pageSettings.showIcon ? "Hide Icon" : "Show Icon",
-      action: () => {
-        pageSettings.showIcon = !pageSettings.showIcon;
-        savePageSettings(currentPageId, pageSettings);
-        renderPageHero(currentPageId);
-      }
-    });
-
-    items.push({ type: "divider" });
-    items.push({ type: "label", label: "Page Font" });
-
-    Object.entries(PAGE_FONT_PRESETS).forEach(([presetKey, meta]) => {
       items.push({
+        key: "banner-title",
+        label: "Banner / title",
+        children: [
+          {
+            key: "banner-image",
+            label: pageSettings.showHeader ? "Banner image: On" : "Banner image: Off",
+            action: keepMoreMenuOpen(() => {
+              pageSettings.showHeader = !pageSettings.showHeader;
+              saveHeroSettings();
+            }, ["banner-title"])
+          },
+          {
+            key: "banner-size",
+            label: "Banner size",
+            children: ["sm", "md", "lg", "xl"].map((size) => ({
+              key: `banner-size-${size}`,
+              label: size === "sm" ? "Small" : size === "md" ? "Medium" : size === "lg" ? "Large" : "XL",
+              active: pageSettings.headerSize === size,
+              action: keepMoreMenuOpen(() => {
+                pageSettings.headerSize = size;
+                saveHeroSettings();
+              }, ["banner-title", "banner-size"])
+            }))
+          },
+          { type: "divider" },
+          {
+            key: "banner-icon",
+            label: pageSettings.showIcon ? "Icon below image: On" : "Icon below image: Off",
+            action: keepMoreMenuOpen(() => {
+              pageSettings.showIcon = !pageSettings.showIcon;
+              saveHeroSettings();
+            }, ["banner-title"])
+          },
+          { type: "divider" },
+          {
+            key: "title-placement",
+            label: `Title placement: ${getHeroTitlePlacementLabel(pageSettings)}`,
+            action: keepMoreMenuOpen(() => {
+              cycleHeroTitlePlacement(pageSettings, currentPage);
+              saveHeroSettings();
+            }, ["banner-title"])
+          }
+        ]
+      });
+    }
+
+    items.push({
+      key: "page-font",
+      label: `Page Font: ${getPageFontPresetMeta(fontPreset).label}`,
+      children: Object.entries(PAGE_FONT_PRESETS).map(([presetKey, meta]) => ({
+        key: `page-font-${presetKey}`,
         label: meta.label,
         active: presetKey === fontPreset,
         fontFamily: meta.family || "",
-        action: () => {
+        action: keepMoreMenuOpen(() => {
           pageSettings.fontPreset = presetKey;
           savePageSettings(currentPageId, pageSettings);
           applyPageFontPreset(currentPageId);
           renderPageHero(currentPageId);
-        }
-      });
+        }, ["page-font"])
+      }))
+    });
+
+    items.push({
+      key: "page-theme",
+      label: `Page Theme: ${getPageThemeLabel(pageSettings.theme)}`,
+      children: [
+        { value: "", label: `Use workspace (${getPageThemeLabel(getWorkspaceTheme())})` },
+        { value: "dark", label: "Dark" },
+        { value: "light", label: "Light" }
+      ].map((themeOption) => ({
+        key: `page-theme-${themeOption.value || "workspace"}`,
+        label: themeOption.label,
+        active: normalizePageThemeOverride(pageSettings.theme) === themeOption.value,
+        action: keepMoreMenuOpen(() => {
+          pageSettings.theme = themeOption.value;
+          savePageSettings(currentPageId, pageSettings);
+          applyResolvedTheme(currentPageId);
+        }, ["page-theme"])
+      }))
     });
 
     items.push({ type: "divider" });
@@ -2200,7 +2453,12 @@ document.getElementById("moreBtn")?.addEventListener("click", (e) => {
     items.push({ label: "More options coming soon", danger: false, action: () => {} });
   }
 
-  if (items.length) openTopbarDropdown(e.currentTarget, items);
+  if (items.length) openTopbarDropdown(anchorEl, items, options);
+}
+
+document.getElementById("moreBtn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  openCurrentPageMoreMenu(e.currentTarget);
 });
 
 // == Layout mode (edit mode) ==
@@ -2934,6 +3192,11 @@ function loadSettings() {
   if (!sanctumSettings.workspace) sanctumSettings.workspace = { theme: "dark", uiFont: "system", borders: "none", cornerStyle: "square", gridSize: "medium" };
   if (!sanctumSettings.editor) sanctumSettings.editor = { blockBehavior: "expand", snapToGrid: true, autoFocus: true, defaultBlockWidth: "medium" };
   if (!sanctumSettings.navigation) sanctumSettings.navigation = { rememberPage: true, sidebarState: "collapsed", openBehavior: "replace", breadcrumbs: false };
+  sanctumSettings.workspace.theme = normalizeThemeMode(sanctumSettings.workspace.theme || "dark", "dark");
+  sanctumSettings.workspace.uiFont = sanctumSettings.workspace.uiFont || "system";
+  sanctumSettings.workspace.borders = sanctumSettings.workspace.borders || "none";
+  sanctumSettings.workspace.cornerStyle = sanctumSettings.workspace.cornerStyle || "square";
+  sanctumSettings.workspace.gridSize = sanctumSettings.workspace.gridSize || "medium";
 
   if (!sanctumSettings.operator.id) {
     sanctumSettings.operator.id = generateSanctumId();
@@ -2944,6 +3207,7 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanctumSettings));
   syncSidebarProfile();
+  applyResolvedTheme(typeof currentPageId === "string" ? currentPageId : "home");
 }
 
 function syncSidebarProfile(options = {}) {
@@ -2975,6 +3239,7 @@ function syncSidebarProfile(options = {}) {
 
 loadSettings();
 syncSidebarProfile();
+applyResolvedTheme(typeof currentPageId === "string" ? currentPageId : "home");
 
 function generateSanctumId() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

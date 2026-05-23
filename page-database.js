@@ -1018,6 +1018,14 @@
     return String(value || "").trim() || "Database";
   }
 
+  function focusAndSelectInput(inputEl) {
+    if (!inputEl) return;
+    window.requestAnimationFrame(() => {
+      inputEl.focus();
+      if (typeof inputEl.select === "function") inputEl.select();
+    });
+  }
+
   function normalizeViewMode(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
     if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board" || safe === "checklist") return safe;
@@ -2312,11 +2320,17 @@
       source,
       database: {
         title: String(normalized.title || "Database").trim() || "Database",
-        properties: safeParseArray(normalized.properties || []).map((property) => ({
-          id: property.id,
-          name: String(property.name || "").trim() || "Property",
-          type: normalizePropertyType(property.type || "text", "text")
-        })),
+        properties: safeParseArray(normalized.properties || []).map((property) => {
+          const type = normalizePropertyType(property.type || "text", "text");
+          return {
+            id: property.id,
+            name: String(property.name || "").trim() || "Property",
+            type,
+            selectOptions: type === "select" ? normalizeSelectOptions(property.selectOptions || []) : [],
+            tagOptions: type === "tag" ? normalizeTagOptions(property.tagOptions || []) : [],
+            statusGroups: type === "status" ? normalizeStatusGroups(property.statusGroups || []) : []
+          };
+        }),
         rows: safeParseArray(normalized.rows || []).map((row) => ({
           id: row.id,
           title: getRowTitle(normalized, row),
@@ -2324,6 +2338,35 @@
         }))
       }
     };
+  }
+
+  function updateDatabaseSourceRowValues(sourceInput = {}, rowId = "", valuesPatch = {}) {
+    const source = {
+      kind: sourceInput?.kind === "block" ? "block" : "page",
+      pageId: String(sourceInput?.pageId || "").trim(),
+      blockId: sourceInput?.kind === "block" ? String(sourceInput?.blockId || "").trim() : ""
+    };
+    const safeRowId = String(rowId || "").trim();
+    if (!source.pageId || !safeRowId || !valuesPatch || typeof valuesPatch !== "object") return false;
+
+    const database = getDatabaseFromSource(source);
+    if (!database) return false;
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const row = getRowById(normalized, safeRowId);
+    if (!row) return false;
+
+    let changed = false;
+    Object.entries(valuesPatch).forEach(([propertyId, value]) => {
+      const property = getPropertyById(normalized, propertyId);
+      if (!property || property.type === "title" || property.type === "formula" || property.type === "rollup") return;
+      const nextValue = normalizeCellValue(property, value);
+      if (row.values[property.id] === nextValue) return;
+      row.values[property.id] = nextValue;
+      changed = true;
+    });
+
+    if (!changed) return true;
+    return saveDatabaseToSource(source, normalized);
   }
 
   function saveDatabaseToSource(source, database) {
@@ -7191,6 +7234,12 @@
       openPageFn?.(page.id);
     }
 
+    if (options.startRename && typeof window.openRenameModal === "function") {
+      window.requestAnimationFrame(() => {
+        window.openRenameModal(page.id, page.title || "New database");
+      });
+    }
+
     return page;
   }
 
@@ -7200,7 +7249,7 @@
     const pageSources = getDatabasePageSources();
 
     appendMenuButton(menuEl, "New database", () => {
-      createInlineDatabasePage(context);
+      createInlineDatabasePage(context, { startRename: true });
       closeDatabaseMenus();
     });
 
@@ -7313,7 +7362,7 @@
     }
 
     appendMenuButton(menuEl, "New database", () => {
-      createInlineDatabasePage(context);
+      createInlineDatabasePage(context, { startRename: true });
       closeDatabaseMenus();
     });
     appendMenuButton(menuEl, "Link existing", () => {
@@ -7867,7 +7916,7 @@
       }
     });
 
-    requestAnimationFrame(() => inputEl?.focus());
+    focusAndSelectInput(inputEl);
   }
 
   function buildStatusEditorOptionRow(groupIndex, option, optionIndex, defaultName = "") {
@@ -8247,6 +8296,7 @@
             : buildFormulaPropertyPanelHTML(property, database);
     panel.addEventListener("mousedown", (event) => event.stopPropagation());
     document.body.appendChild(panel);
+    focusAndSelectInput(panel.querySelector('.page-database-property-panel-name'));
   }
 
   function openPropertyMenu(anchorEl, context, database, propertyId = "") {
@@ -8526,7 +8576,7 @@
       });
     }, { active: !!getPropertyFilter(database, property.id) });
 
-    requestAnimationFrame(() => nameInput?.focus());
+    focusAndSelectInput(nameInput);
   }
 
   function applyPendingFocus(surfaceEl, context) {
@@ -9012,7 +9062,7 @@
       }
 
       if (action === "create-inline-database") {
-        createInlineDatabasePage(context);
+        createInlineDatabasePage(context, { startRename: true });
         closeDatabaseMenus();
         return;
       }
@@ -9517,6 +9567,24 @@
     }
   });
 
+  document.addEventListener("dblclick", (event) => {
+    const titleEl = event.target.closest('.page-database-block-title');
+    if (!titleEl) return;
+
+    const context = getCalendarContext(titleEl);
+    if (!context) return;
+    const hostEl = getInlineDatabaseHost(context);
+    const source = getEmbedSourceTarget(hostEl);
+    if (!source?.pageId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (typeof window.openRenameModal === "function") {
+      window.openRenameModal(source.pageId, getInlineDatabaseSourceLabel(source) || "Database");
+    }
+  });
+
   document.addEventListener("input", (event) => {
     const formulaInput = event.target.closest(`#${PROPERTY_PANEL_ID} [data-db-action="formula-expression"]`);
     if (formulaInput) {
@@ -9801,6 +9869,7 @@
   window.openDatabaseRowCoverMenu = openDatabaseRowCoverMenu;
   window.getDatabaseCalloutSources = getDatabaseCalloutSources;
   window.getDatabaseCalloutSourceData = getDatabaseCalloutSourceData;
+  window.updateDatabaseSourceRowValues = updateDatabaseSourceRowValues;
   window.mountDatabaseEmbedBlock = function mountDatabaseEmbedBlock(hostEl, options = {}) {
     if (!hostEl) return null;
     if (!hostEl.querySelector(".page-database-block-shell")) return null;

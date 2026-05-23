@@ -176,6 +176,8 @@ function buildBlockFromData(data) {
     if (data.dataCalloutAlign) b.dataset.dataCalloutAlign = data.dataCalloutAlign;
     if (data.dataCalloutSize) b.dataset.dataCalloutSize = data.dataCalloutSize;
     if (data.dataCalloutLabelPos) b.dataset.dataCalloutLabelPos = data.dataCalloutLabelPos;
+    if ("dataCalloutShowIcon" in data) b.dataset.dataCalloutShowIcon = data.dataCalloutShowIcon;
+    if ("dataCalloutIcon" in data) b.dataset.dataCalloutIcon = data.dataCalloutIcon;
 
     requestAnimationFrame(() => {
       window.mountDataCalloutBlock?.(b);
@@ -206,6 +208,14 @@ function buildBlockFromData(data) {
 
     requestAnimationFrame(() => {
       window.mountProgressBlock?.(b);
+    });
+  }
+
+  if (data.type === "flashcards") {
+    if (data.flashcardsConfig) b.dataset.flashcardsConfig = data.flashcardsConfig;
+
+    requestAnimationFrame(() => {
+      window.mountFlashcardDeckBlock?.(b);
     });
   }
 

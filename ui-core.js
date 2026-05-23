@@ -339,10 +339,13 @@ function normalizePageSettings(settings = {}) {
     showTitle: settings.showTitle !== false,
     showIcon: settings.showIcon !== false,
     headerSrc: typeof settings.headerSrc === "string" ? settings.headerSrc : "",
-    headerSize: ["sm", "md", "lg"].includes(settings.headerSize) ? settings.headerSize : "md",
+    headerSize: ["sm", "md", "lg", "xl"].includes(settings.headerSize) ? settings.headerSize : "md",
     headerPos: normalizeHeaderPos(settings.headerPos),
     fontPreset: normalizePageFontPreset(settings.fontPreset),
     theme: normalizePageThemeOverride(settings.theme || settings.themeOverride || ""),
+    heroOverlay: !!settings.heroOverlay,
+    heroOverlayTitle: typeof settings.heroOverlayTitle === "string" ? settings.heroOverlayTitle : "",
+    heroOverlaySubtitle: typeof settings.heroOverlaySubtitle === "string" ? settings.heroOverlaySubtitle : "",
     canvasZoom: normalizeCanvasZoom(settings.canvasZoom),
     canvasScrollLeft: normalizeCanvasOffset(settings.canvasScrollLeft),
     canvasScrollTop: normalizeCanvasOffset(settings.canvasScrollTop),
@@ -357,43 +360,55 @@ const PAGE_FONT_PRESETS = {
   },
   arial: {
     label: "Arial",
-    family: "Arial, Helvetica, sans-serif"
+    family: "Arial, 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', Helvetica, sans-serif"
   },
   manrope: {
     label: "Manrope",
-    family: "'Manrope', 'Segoe UI', sans-serif"
+    family: "'Manrope', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', 'Segoe UI', sans-serif"
   },
   notoSansJp: {
     label: "Noto Sans JP",
     family: "'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
   },
+  bizUdGothic: {
+    label: "BIZ UDPGothic",
+    family: "'BIZ UDPGothic', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
+  },
+  mPlusRounded: {
+    label: "M PLUS Rounded",
+    family: "'M PLUS Rounded 1c', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
+  },
   notoSerifJp: {
     label: "Noto Serif JP",
     family: "'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', serif"
   },
+  bizUdMincho: {
+    label: "BIZ UDPMincho",
+    family: "'BIZ UDPMincho', 'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', serif"
+  },
   times: {
     label: "Times New Roman",
-    family: "'Times New Roman', Times, serif"
+    family: "'Times New Roman', 'Noto Serif JP', Times, serif"
   },
   playfair: {
     label: "Playfair Display",
-    family: "'Playfair Display', Georgia, serif"
+    family: "'Playfair Display', 'Noto Serif JP', Georgia, serif"
   },
   cormorant: {
     label: "Cormorant Garamond",
-    family: "'Cormorant Garamond', Garamond, serif"
+    family: "'Cormorant Garamond', 'Noto Serif JP', Garamond, serif"
   },
   marcellus: {
     label: "Marcellus",
-    family: "'Marcellus', 'Times New Roman', serif"
+    family: "'Marcellus', 'Noto Serif JP', 'Times New Roman', serif"
   },
   sunrise: {
     label: "Waiting for the Sunrise",
-    family: "'Waiting for the Sunrise', 'Comic Sans MS', cursive"
+    family: "'Waiting for the Sunrise', 'Noto Sans JP', 'Comic Sans MS', cursive"
   },
   cursive: {
     label: "Great Vibes",
-    family: "'Great Vibes', 'Brush Script MT', cursive"
+    family: "'Great Vibes', 'Noto Sans JP', 'Brush Script MT', cursive"
   }
 };
 
@@ -404,6 +419,9 @@ function normalizePageFontPreset(value) {
   if (preset === "playfair display") return "playfair";
   if (preset === "noto sans jp") return "notoSansJp";
   if (preset === "noto serif jp") return "notoSerifJp";
+  if (preset === "biz udpgothic" || preset === "biz ud gothic" || preset === "ud gothic") return "bizUdGothic";
+  if (preset === "biz udpmincho" || preset === "biz ud mincho" || preset === "ud mincho") return "bizUdMincho";
+  if (preset === "m plus rounded" || preset === "m plus rounded 1c") return "mPlusRounded";
   return Object.prototype.hasOwnProperty.call(PAGE_FONT_PRESETS, preset) ? preset : "";
 }
 
@@ -1199,4 +1217,3 @@ function deleteSinglePageTree(pageId) {
   const childPageIds = collectDescendantPageIds(pageId);
   deletePagesAndStoredData([pageId, ...childPageIds]);
 }
-

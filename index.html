@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Great+Vibes&family=Manrope:wght@400;500;600;700;800&family=Marcellus&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDPMincho:wght@400;700&family=Cormorant+Garamond:wght@400;500;600;700&family=Great+Vibes&family=M+PLUS+Rounded+1c:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&family=Marcellus&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;500;700&family=Playfair+Display:wght@400;500;600;700&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="document.css">
   <link rel="stylesheet" href="canvas-rich-text.css">
@@ -637,18 +637,23 @@
         <div class="page-hero" id="pageHero">
           <div class="page-hero-img-wrap" id="pageHeroImgWrap">
             <img class="page-hero-img" id="pageHeroImg" src="" alt="" />
-            <button class="page-hero-change-btn" id="pageHeroChangeBtn">+ Add Header</button>
-            <div class="page-hero-controls" id="pageHeroControls" aria-label="Header controls">
-              <div class="page-hero-controls-row" role="group" aria-label="Header size">
+            <button class="page-hero-change-btn" id="pageHeroChangeBtn">+ Add banner</button>
+            <div class="page-hero-controls" id="pageHeroControls" aria-label="Banner controls">
+              <div class="page-hero-controls-row" role="group" aria-label="Banner size">
                 <button class="page-hero-ctrl-btn" data-hero-size="sm" title="Compact header">S</button>
                 <button class="page-hero-ctrl-btn" data-hero-size="md" title="Medium header">M</button>
                 <button class="page-hero-ctrl-btn" data-hero-size="lg" title="Large header">L</button>
+                <button class="page-hero-ctrl-btn" data-hero-size="xl" title="Extra large header">XL</button>
               </div>
-              <div class="page-hero-controls-row page-hero-position-row" role="group" aria-label="Header position">
+              <div class="page-hero-controls-row page-hero-position-row" role="group" aria-label="Banner position">
                 <span class="page-hero-control-label">Focus</span>
                 <input class="page-hero-pos-slider" id="pageHeroPosSlider" type="range" min="0" max="100" step="1" value="50" title="Adjust header image position" />
                 <span class="page-hero-pos-value" id="pageHeroPosValue">50%</span>
               </div>
+            </div>
+            <div class="page-hero-overlay-text" id="pageHeroOverlayText">
+              <div class="page-hero-overlay-title" id="pageHeroOverlayTitle" contenteditable="false" spellcheck="false"></div>
+              <div class="page-hero-overlay-subtitle" id="pageHeroOverlaySubtitle" contenteditable="false" spellcheck="false"></div>
             </div>
           </div>
           <div class="page-hero-below" id="pageHeroBelow">

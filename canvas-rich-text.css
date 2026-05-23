@@ -4,10 +4,12 @@
     position: fixed;
     z-index: 3200;
     min-width: 196px;
+    max-width: min(260px, calc(100vw - 24px));
     background: #1b1b1b;
     border: 1px solid #2f2f2f;
     box-shadow: 0 8px 22px rgba(0,0,0,0.45);
     display: none;
+    overflow: visible;
 }
 
 .canvas-slash-menu.open {
@@ -25,6 +27,7 @@
     color: var(--muted2);
     text-align: left;
     cursor: pointer;
+    font-family: inherit;
 }
 
 .canvas-slash-item:hover,
@@ -43,7 +46,30 @@
 }
 
 .canvas-slash-label {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 13px;
+}
+
+.canvas-slash-arrow {
+    color: var(--muted3);
+    font-size: 13px;
+    line-height: 1;
+}
+
+.canvas-slash-submenu {
+    z-index: 3201;
+}
+
+:root[data-theme="light"] .canvas-slash-menu {
+    background: var(--menu-bg);
+    border-color: var(--surface-border-strong);
+    box-shadow: 0 8px 22px var(--shadow-strong);
+}
+
+:root[data-theme="light"] .canvas-slash-item:hover,
+:root[data-theme="light"] .canvas-slash-item.active {
+    background: var(--surface-bg-hover);
 }
 
 .block-body h1,

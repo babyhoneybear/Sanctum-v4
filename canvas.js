@@ -1290,6 +1290,10 @@ function getDefaultBlockDimensions(type = "text") {
     return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 4) };
   }
 
+  if (type === "flashcards") {
+    return { width: snap(GRID_SIZE * 14), height: snap(GRID_SIZE * 8) };
+  }
+
   if (isVerticalDividerType(type)) {
     return { width: snap(GRID_SIZE * 1), height: snap(GRID_SIZE * 6) };
   }
@@ -2821,6 +2825,8 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.dataCalloutAlign;
   delete block.dataset.dataCalloutSize;
   delete block.dataset.dataCalloutLabelPos;
+  delete block.dataset.dataCalloutShowIcon;
+  delete block.dataset.dataCalloutIcon;
   delete block.dataset.progressTitle;
   delete block.dataset.progressSourceType;
   delete block.dataset.progressSourceKind;
@@ -2847,6 +2853,7 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.clockFormat;
   delete block.dataset.clockShowSeconds;
   delete block.dataset.clockShowDate;
+  delete block.dataset.flashcardsConfig;
   block.innerHTML = makeBlockHTML(nextType);
 
   normalizeBlockAppearanceForType(block, nextType);
@@ -2899,6 +2906,10 @@ function convertCanvasBlockType(block, nextType, options = {}) {
 
   if (nextType === "progress") {
     window.mountProgressBlock?.(block, { openPicker: !!options.openProgressPicker });
+  }
+
+  if (nextType === "flashcards") {
+    window.mountFlashcardDeckBlock?.(block, { openPicker: !!options.openFlashcardPicker });
   }
 
   if (options.openImagePicker) {
@@ -3106,6 +3117,49 @@ function makeBlockHTML(type = "text") {
           <span class="progress-block-percent">0%</span>
         </div>
         <div class="progress-block-deadline" hidden></div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "flashcards") {
+    return `
+      <div class="flashcard-deck-shell" data-template="basic" data-surface="blank" data-show-back="0">
+        <div class="flashcard-deck-head">
+          <div class="flashcard-deck-head-copy">
+            <span class="flashcard-deck-title">Flashcard Deck</span>
+            <span class="flashcard-deck-count">0 cards</span>
+          </div>
+          <button type="button" class="flashcard-deck-config-btn" data-flashcards-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="flashcard-deck-stage" data-flashcards-action="flip">
+          <div class="flashcard-card">
+            <div class="flashcard-card-inner">
+              <div class="flashcard-card-face flashcard-card-front">
+                <div class="flashcard-card-media" hidden>
+                  <img class="flashcard-card-image" alt="" draggable="false">
+                </div>
+                <div class="flashcard-card-kicker">Front</div>
+                <div class="flashcard-card-title">Untitled</div>
+                <div class="flashcard-card-body">Add a card to get started.</div>
+              </div>
+              <div class="flashcard-card-face flashcard-card-back">
+                <div class="flashcard-card-media" hidden>
+                  <img class="flashcard-card-image" alt="" draggable="false">
+                </div>
+                <div class="flashcard-card-kicker">Back</div>
+                <div class="flashcard-card-title">Answer</div>
+                <div class="flashcard-card-body">Flip to review the other side.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flashcard-deck-footer">
+          <button type="button" class="flashcard-deck-nav-btn" data-flashcards-action="prev">‹</button>
+          <span class="flashcard-deck-position">0 / 0</span>
+          <button type="button" class="flashcard-deck-study-btn" data-flashcards-action="review">Studied</button>
+          <button type="button" class="flashcard-deck-nav-btn" data-flashcards-action="next">›</button>
+        </div>
       </div>
       <div class="block-resize-handle" title="Resize"></div>
     `;
@@ -3411,6 +3465,10 @@ function normalizeDataCalloutSize(value = "") {
 function normalizeDataCalloutLabelPos(value = "") {
   const safe = String(value || "").trim().toLowerCase();
   return ["above", "below", "hidden"].includes(safe) ? safe : "below";
+}
+
+function normalizeDataCalloutShowIcon(value = "") {
+  return String(value || "").trim().toLowerCase() === "true";
 }
 
 function normalizeProgressBlockSourceType(value = "") {
@@ -4076,7 +4134,9 @@ function normalizeDataCalloutConfig(raw = {}) {
     systemFormat: normalizeDataCalloutSystemFormat(raw?.systemFormat || "", systemKey),
     align: normalizeDataCalloutAlign(raw?.align || "left"),
     size: normalizeDataCalloutSize(raw?.size || "md"),
-    labelPos: normalizeDataCalloutLabelPos(raw?.labelPos || "below")
+    labelPos: normalizeDataCalloutLabelPos(raw?.labelPos || "below"),
+    showIcon: normalizeDataCalloutShowIcon(raw?.showIcon || ""),
+    icon: String(raw?.icon || "").trim()
   };
 }
 
@@ -4097,7 +4157,9 @@ function readDataCalloutConfig(block) {
     systemFormat: block.dataset.dataCalloutSystemFormat || "",
     align: block.dataset.dataCalloutAlign || "left",
     size: block.dataset.dataCalloutSize || "md",
-    labelPos: block.dataset.dataCalloutLabelPos || "below"
+    labelPos: block.dataset.dataCalloutLabelPos || "below",
+    showIcon: block.dataset.dataCalloutShowIcon || "",
+    icon: block.dataset.dataCalloutIcon || ""
   });
 }
 
@@ -4119,6 +4181,43 @@ function writeDataCalloutConfig(block, config) {
   block.dataset.dataCalloutAlign = normalized.align;
   block.dataset.dataCalloutSize = normalized.size;
   block.dataset.dataCalloutLabelPos = normalized.labelPos;
+  block.dataset.dataCalloutShowIcon = normalized.showIcon ? "true" : "false";
+  block.dataset.dataCalloutIcon = normalized.icon;
+}
+
+function ensureDataCalloutStructure(block) {
+  if (!block || block.dataset.type !== "data-callout") return null;
+  const shellEl = block.querySelector(".data-callout-shell");
+  if (!shellEl) return null;
+
+  let iconEl = shellEl.querySelector(".data-callout-icon");
+  if (!iconEl) {
+    iconEl = document.createElement("span");
+    iconEl.className = "data-callout-icon";
+    iconEl.setAttribute("aria-hidden", "true");
+    iconEl.textContent = "✦";
+    shellEl.insertBefore(iconEl, shellEl.firstChild);
+  }
+
+  let contentEl = shellEl.querySelector(".data-callout-content");
+  if (!contentEl) {
+    contentEl = document.createElement("div");
+    contentEl.className = "data-callout-content";
+    const valueEl = shellEl.querySelector(".data-callout-value");
+    const labelEl = shellEl.querySelector(".data-callout-label");
+    if (valueEl) contentEl.appendChild(valueEl);
+    if (labelEl) contentEl.appendChild(labelEl);
+    const configBtn = shellEl.querySelector(".data-callout-config-btn");
+    shellEl.insertBefore(contentEl, configBtn || null);
+  }
+
+  return {
+    shellEl,
+    iconEl,
+    contentEl,
+    valueEl: contentEl.querySelector(".data-callout-value"),
+    labelEl: contentEl.querySelector(".data-callout-label")
+  };
 }
 
 function formatDataCalloutNumber(value = 0) {
@@ -4431,23 +4530,25 @@ function computeDataCalloutValue(sourcePayload, config) {
 function renderDataCalloutBlock(block) {
   if (!block || block.dataset.type !== "data-callout") return;
 
-  const labelEl = block.querySelector(".data-callout-label");
-  const valueEl = block.querySelector(".data-callout-value");
-  const shellEl = block.querySelector(".data-callout-shell");
-  if (!labelEl || !valueEl || !shellEl) return;
+  const refs = ensureDataCalloutStructure(block);
+  if (!refs?.labelEl || !refs?.valueEl || !refs?.shellEl || !refs?.iconEl) return;
+  const valueEl = refs.valueEl;
 
   const config = readDataCalloutConfig(block);
   const result = config.sourceType === "system"
     ? computeSystemDataCalloutValue(config)
     : computeDataCalloutValue(getDataCalloutSourcePayload(config), config);
 
-  labelEl.textContent = config.label || getDefaultDataCalloutLabel(config);
+  refs.labelEl.textContent = config.label || getDefaultDataCalloutLabel(config);
   valueEl.textContent = result.configured ? result.valueText : "—";
-  shellEl.classList.toggle("is-configured", !!result.configured);
-  shellEl.dataset.sourceType = config.sourceType;
-  shellEl.dataset.align = config.align;
-  shellEl.dataset.size = config.size;
-  shellEl.dataset.labelPos = config.labelPos;
+  refs.iconEl.textContent = config.icon || "✦";
+  refs.iconEl.hidden = !config.showIcon;
+  refs.shellEl.classList.toggle("is-configured", !!result.configured);
+  refs.shellEl.dataset.sourceType = config.sourceType;
+  refs.shellEl.dataset.align = config.align;
+  refs.shellEl.dataset.size = config.size;
+  refs.shellEl.dataset.labelPos = config.labelPos;
+  refs.shellEl.dataset.showIcon = config.showIcon ? "true" : "false";
 }
 
 function renderVisibleDataCalloutBlocks() {
@@ -4556,6 +4657,17 @@ function openDataCalloutPicker(block, anchorEl = null) {
         <option value="hidden">Hidden</option>
       </select>
     </label>
+    <label class="data-callout-picker-field">
+      <span>Show icon</span>
+      <select data-callout-input="showIcon">
+        <option value="false">Off</option>
+        <option value="true">On</option>
+      </select>
+    </label>
+    <label class="data-callout-picker-field">
+      <span>Icon</span>
+      <input type="text" data-callout-input="icon" maxlength="8" placeholder="✦" />
+    </label>
     <div class="data-callout-picker-actions">
       <button type="button" class="topbar-dropdown-btn" data-callout-action="save">Save</button>
       <button type="button" class="topbar-dropdown-btn" data-callout-action="clear">Clear</button>
@@ -4603,10 +4715,12 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const alignSelect = picker.querySelector('[data-callout-input="align"]');
   const sizeSelect = picker.querySelector('[data-callout-input="size"]');
   const labelPosSelect = picker.querySelector('[data-callout-input="labelPos"]');
+  const showIconSelect = picker.querySelector('[data-callout-input="showIcon"]');
+  const iconInput = picker.querySelector('[data-callout-input="icon"]');
   const saveBtn = picker.querySelector('[data-callout-action="save"]');
   const clearBtn = picker.querySelector('[data-callout-action="clear"]');
 
-  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !saveBtn || !clearBtn) {
+  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !showIconSelect || !iconInput || !saveBtn || !clearBtn) {
     closeDataCalloutPicker();
     return;
   }
@@ -4618,6 +4732,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
   if (alignSelect) alignSelect.value = normalizeDataCalloutAlign(config.align || "left");
   if (sizeSelect) sizeSelect.value = normalizeDataCalloutSize(config.size || "md");
   if (labelPosSelect) labelPosSelect.value = normalizeDataCalloutLabelPos(config.labelPos || "below");
+  showIconSelect.value = config.showIcon ? "true" : "false";
+  iconInput.value = config.icon || "";
 
   sourceSelect.innerHTML = '<option value="">Choose a table...</option>' + sources.map((source) => {
     const key = source.kind === "block"
@@ -4682,6 +4798,14 @@ function openDataCalloutPicker(block, anchorEl = null) {
     systemFormatSelect.value = normalized;
     if (!systemFormatSelect.value && options.length) {
       systemFormatSelect.value = options[0].value;
+    }
+  };
+
+  const syncIconInputs = () => {
+    const isEnabled = showIconSelect.value === "true";
+    iconInput.disabled = !isEnabled;
+    if (!isEnabled) {
+      iconInput.blur();
     }
   };
 
@@ -4756,6 +4880,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
     maybeSyncAutoLabel();
     refreshSystemOptions();
   });
+  showIconSelect.addEventListener("change", syncIconInputs);
 
   refreshDependentOptions();
   fillSystemTargetOptions(config.systemTargetKind === "page" && config.systemTargetPageId
@@ -4763,6 +4888,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
     : "current|");
   fillSystemFormatOptions(systemKeySelect.value, config.systemFormat || "");
   syncPickerSections();
+  syncIconInputs();
 
   saveBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -4788,7 +4914,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
         systemFormat: systemFormatSelect.value || "",
         align: alignSelect?.value || "left",
         size: sizeSelect?.value || "md",
-        labelPos: labelPosSelect?.value || "below"
+        labelPos: labelPosSelect?.value || "below",
+        showIcon: showIconSelect.value === "true",
+        icon: iconInput.value || ""
       });
 
       renderDataCalloutBlock(block);
@@ -4829,7 +4957,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
       systemFormat: systemFormatSelect.value || "",
       align: alignSelect?.value || "left",
       size: sizeSelect?.value || "md",
-      labelPos: labelPosSelect?.value || "below"
+      labelPos: labelPosSelect?.value || "below",
+      showIcon: showIconSelect.value === "true",
+      icon: iconInput.value || ""
     });
 
     renderDataCalloutBlock(block);
@@ -4854,7 +4984,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
       systemFormat: "short",
       align: alignSelect?.value || "left",
       size: sizeSelect?.value || "md",
-      labelPos: labelPosSelect?.value || "below"
+      labelPos: labelPosSelect?.value || "below",
+      showIcon: showIconSelect.value === "true",
+      icon: iconInput.value || ""
     });
     renderDataCalloutBlock(block);
     if (typeof saveState === "function") saveState();
@@ -4887,6 +5019,1315 @@ if (document.readyState === "loading") {
   setTrackedPageActivityPage(typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home");
   renderVisibleDataCalloutBlocks();
 }
+
+function parseFlashcardsJSON(raw, fallback) {
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function normalizeFlashcardDeckSourceType(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return safe === "database" ? "database" : "manual";
+}
+
+function normalizeFlashcardDeckTemplate(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["basic", "visual", "custom"].includes(safe) ? safe : "basic";
+}
+
+function normalizeFlashcardDeckSurface(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["lined", "grid", "blank", "qa"].includes(safe) ? safe : "blank";
+}
+
+function normalizeFlashcardDeckAlign(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["left", "center", "right"].includes(safe) ? safe : "left";
+}
+
+function normalizeFlashcardDeckVAlign(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["top", "center", "bottom"].includes(safe) ? safe : "top";
+}
+
+function normalizeFlashcardDeckTextSize(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["sm", "md", "lg", "xl"].includes(safe) ? safe : "md";
+}
+
+function normalizeFlashcardDeckMappings(raw = {}) {
+  return {
+    frontTitle: String(raw?.frontTitle || "").trim(),
+    frontBody: String(raw?.frontBody || "").trim(),
+    backTitle: String(raw?.backTitle || "").trim(),
+    backBody: String(raw?.backBody || "").trim(),
+    image: String(raw?.image || "").trim()
+  };
+}
+
+function inferFlashcardDeckMappings(properties = [], current = {}) {
+  const normalized = normalizeFlashcardDeckMappings(current || {});
+  const props = Array.isArray(properties) ? properties : [];
+  const isValid = (value) => value === "__title__" || props.some((property) => property?.id === value);
+  const currentValue = (key) => {
+    const value = normalized[key];
+    if (!value) return "";
+    return isValid(value) ? value : "";
+  };
+  const hasUserMapping = Object.values(normalized).some((value) => String(value || "").trim());
+  if (hasUserMapping) {
+    return normalizeFlashcardDeckMappings({
+      frontTitle: currentValue("frontTitle"),
+      frontBody: currentValue("frontBody"),
+      backTitle: currentValue("backTitle"),
+      backBody: currentValue("backBody"),
+      image: currentValue("image")
+    });
+  }
+  const findByName = (patterns) => {
+    const match = props.find((property) => {
+      const name = String(property?.name || "").trim().toLowerCase();
+      return patterns.some((pattern) => pattern.test(name));
+    });
+    return match?.id || "";
+  };
+  const usableIds = props.map((property) => property?.id).filter(Boolean);
+  return normalizeFlashcardDeckMappings({
+    frontTitle: currentValue("frontTitle") || findByName([/^(term|word|question|prompt|front|title)$/i]) || "__title__",
+    frontBody: currentValue("frontBody") || findByName([/^(hint|context|example|note|notes|front body)$/i]) || "",
+    backTitle: currentValue("backTitle") || findByName([/^(answer title|back title)$/i]) || "",
+    backBody: currentValue("backBody") || findByName([/^(answer|definition|meaning|back|response|value)$/i]) || usableIds[0] || "",
+    image: currentValue("image") || findByName([/^(image|img|picture|photo|visual)$/i]) || ""
+  });
+}
+
+function normalizeFlashcardDeckCard(raw = {}, fallbackId = "") {
+  const card = {
+    id: String(raw?.id || fallbackId || `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
+    frontTitle: String(raw?.frontTitle || "").trim(),
+    frontBody: String(raw?.frontBody || "").trim(),
+    backTitle: String(raw?.backTitle || "").trim(),
+    backBody: String(raw?.backBody || "").trim(),
+    image: String(raw?.image || "").trim(),
+    template: raw?.template ? normalizeFlashcardDeckTemplate(raw.template) : "",
+    surface: raw?.surface ? normalizeFlashcardDeckSurface(raw.surface) : ""
+  };
+  const isStarterDefault = card.id === "card-1"
+    && card.frontTitle === "Front"
+    && card.frontBody === "Prompt"
+    && card.backTitle === "Back"
+    && card.backBody === "Answer";
+  if (isStarterDefault) {
+    card.frontTitle = "";
+    card.frontBody = "";
+    card.backTitle = "";
+    card.backBody = "";
+  }
+  return card;
+}
+
+function normalizeFlashcardDeckOverrides(raw = {}) {
+  const next = {};
+  if (!raw || typeof raw !== "object") return next;
+  Object.entries(raw).forEach(([key, value]) => {
+    if (!key) return;
+    next[key] = normalizeFlashcardDeckCard(value, key);
+  });
+  return next;
+}
+
+function normalizeFlashcardDeckFilters(raw = []) {
+  const source = Array.isArray(raw) ? raw : [];
+  return source.map((filter) => ({
+    propertyId: String(filter?.propertyId || "").trim(),
+    operator: ["is", "is-not", "contains", "checked", "unchecked"].includes(filter?.operator) ? filter.operator : "is",
+    value: String(filter?.value || "").trim()
+  })).filter((filter) => filter.propertyId);
+}
+
+function normalizeFlashcardDeckStudy(raw = {}) {
+  return {
+    setPropertyId: String(raw?.setPropertyId || "").trim(),
+    setValue: String(raw?.setValue || "").trim(),
+    countPropertyId: String(raw?.countPropertyId || "").trim(),
+    stagePropertyId: String(raw?.stagePropertyId || "").trim(),
+    stageReviewCount: Math.max(0, Number(raw?.stageReviewCount || 0) || 0),
+    stageValue: String(raw?.stageValue || "").trim()
+  };
+}
+
+function normalizeFlashcardDeckConfig(raw = {}) {
+  const manualCards = Array.isArray(raw?.manualCards) ? raw.manualCards : [];
+  const normalizedCards = manualCards.length
+    ? manualCards.map((card, index) => normalizeFlashcardDeckCard(card, `card-${index + 1}`))
+    : [
+        normalizeFlashcardDeckCard({
+          id: "card-1",
+          frontTitle: "",
+          frontBody: "",
+          backTitle: "",
+          backBody: ""
+        }, "card-1")
+      ];
+  const currentIndex = Math.max(0, Number(raw?.currentIndex || 0) || 0);
+  return {
+    title: String(raw?.title || "").trim() || "Flashcard Deck",
+    sourceType: normalizeFlashcardDeckSourceType(raw?.sourceType || "manual"),
+    sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(raw?.sourcePageId || "").trim(),
+    sourceBlockId: String(raw?.sourceBlockId || "").trim(),
+    template: normalizeFlashcardDeckTemplate(raw?.template || "basic"),
+    customSurface: normalizeFlashcardDeckSurface(raw?.customSurface || "blank"),
+    textAlign: normalizeFlashcardDeckAlign(raw?.textAlign || "left"),
+    verticalAlign: normalizeFlashcardDeckVAlign(raw?.verticalAlign || "top"),
+    titleSize: normalizeFlashcardDeckTextSize(raw?.titleSize || "md"),
+    bodySize: normalizeFlashcardDeckTextSize(raw?.bodySize || "md"),
+    backgroundImage: String(raw?.backgroundImage || "").trim(),
+    mappings: normalizeFlashcardDeckMappings(raw?.mappings || {}),
+    filters: normalizeFlashcardDeckFilters(raw?.filters || []),
+    study: normalizeFlashcardDeckStudy(raw?.study || {}),
+    manualCards: normalizedCards,
+    cardOverrides: normalizeFlashcardDeckOverrides(raw?.cardOverrides || {}),
+    currentIndex,
+    showBack: !!raw?.showBack
+  };
+}
+
+function readFlashcardDeckConfig(block) {
+  if (!block) return normalizeFlashcardDeckConfig({});
+  return normalizeFlashcardDeckConfig(parseFlashcardsJSON(block.dataset.flashcardsConfig || "", {}));
+}
+
+function writeFlashcardDeckConfig(block, config) {
+  if (!block) return;
+  block.dataset.flashcardsConfig = JSON.stringify(normalizeFlashcardDeckConfig(config));
+}
+
+function getFlashcardDeckDatabaseSourceData(config) {
+  if (!config || config.sourceType !== "database") return null;
+  if (typeof window.getDatabaseCalloutSourceData !== "function") return null;
+  if (!config.sourcePageId) return null;
+  return window.getDatabaseCalloutSourceData({
+    kind: config.sourceKind === "block" ? "block" : "page",
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  });
+}
+
+function getFlashcardDeckValueText(value) {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => getFlashcardDeckValueText(entry)).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") {
+    if (typeof value.name === "string") return value.name;
+    if (typeof value.label === "string") return value.label;
+    if (typeof value.title === "string") return value.title;
+    if (typeof value.value === "string" || typeof value.value === "number") return String(value.value);
+  }
+  return "";
+}
+
+function getFlashcardDeckRowField(row, propertyId = "") {
+  if (!row || !propertyId) return "";
+  if (propertyId === "__title__") return String(row.title || "").trim();
+  return getFlashcardDeckValueText(row.values?.[propertyId]);
+}
+
+function getFlashcardDeckProperty(properties = [], propertyId = "") {
+  return (properties || []).find((property) => property?.id === propertyId) || null;
+}
+
+function getFlashcardDeckPropertyOptions(property) {
+  if (!property) return [];
+  if (property.type === "status") {
+    return (property.statusGroups || []).flatMap((group) => group?.options || []);
+  }
+  if (property.type === "select") return property.selectOptions || [];
+  if (property.type === "tag") return property.tagOptions || [];
+  return [];
+}
+
+function rowMatchesFlashcardDeckFilter(row, properties, filter) {
+  if (!filter?.propertyId) return true;
+  const property = getFlashcardDeckProperty(properties, filter.propertyId);
+  const rawValue = filter.propertyId === "__title__" ? row?.title : row?.values?.[filter.propertyId];
+  if (filter.operator === "checked") return rawValue === true || rawValue === "true" || rawValue === 1 || rawValue === "1";
+  if (filter.operator === "unchecked") return !(rawValue === true || rawValue === "true" || rawValue === 1 || rawValue === "1");
+  const rowText = getFlashcardDeckValueText(rawValue).trim().toLowerCase();
+  const filterText = String(filter.value || "").trim().toLowerCase();
+  if (!filterText && property?.type !== "checkbox") return true;
+  if (filter.operator === "is-not") return rowText !== filterText;
+  if (filter.operator === "contains") return rowText.includes(filterText);
+  return rowText === filterText;
+}
+
+function rowMatchesFlashcardDeckFilters(row, properties = [], filters = []) {
+  return normalizeFlashcardDeckFilters(filters).every((filter) => rowMatchesFlashcardDeckFilter(row, properties, filter));
+}
+
+function getFlashcardDeckCards(config) {
+  const normalized = normalizeFlashcardDeckConfig(config || {});
+  if (normalized.sourceType !== "database") {
+    return normalized.manualCards.map((card) => ({
+      ...card,
+      sourceRowId: "",
+      templateResolved: card.template || normalized.template,
+      surfaceResolved: card.surface || normalized.customSurface
+    }));
+  }
+
+  const sourceData = getFlashcardDeckDatabaseSourceData(normalized);
+  if (!sourceData?.database?.rows?.length) return [];
+  const properties = sourceData.database.properties || [];
+  const rows = sourceData.database.rows.filter((row) => rowMatchesFlashcardDeckFilters(row, properties, normalized.filters));
+  return rows.map((row, index) => {
+    const baseCard = normalizeFlashcardDeckCard({
+      id: row.id || `row-${index + 1}`,
+      frontTitle: getFlashcardDeckRowField(row, normalized.mappings.frontTitle),
+      frontBody: getFlashcardDeckRowField(row, normalized.mappings.frontBody),
+      backTitle: getFlashcardDeckRowField(row, normalized.mappings.backTitle),
+      backBody: getFlashcardDeckRowField(row, normalized.mappings.backBody),
+      image: getFlashcardDeckRowField(row, normalized.mappings.image)
+    }, row.id || `row-${index + 1}`);
+    const override = normalized.cardOverrides[baseCard.id] || null;
+    const mergedCard = override ? {
+      ...baseCard,
+      ...override,
+      id: baseCard.id
+    } : baseCard;
+    return {
+      ...mergedCard,
+      sourceRowId: row.id || "",
+      templateResolved: mergedCard.template || normalized.template,
+      surfaceResolved: mergedCard.surface || normalized.customSurface
+    };
+  });
+}
+
+function getFlashcardDeckCurrentCard(config) {
+  const cards = getFlashcardDeckCards(config);
+  if (!cards.length) return { cards, card: null, index: 0 };
+  const index = Math.max(0, Math.min(Number(config?.currentIndex || 0) || 0, cards.length - 1));
+  return {
+    cards,
+    card: cards[index] || null,
+    index
+  };
+}
+
+function applyFlashcardDeckStudyAction(block, options = {}) {
+  if (!block || typeof window.updateDatabaseSourceRowValues !== "function") return false;
+  const includeSet = options.includeSet !== false;
+  const includeCount = options.includeCount !== false;
+  const includeStage = options.includeStage !== false;
+  const config = readFlashcardDeckConfig(block);
+  if (config.sourceType !== "database") return false;
+  const { card } = getFlashcardDeckCurrentCard(config);
+  if (!card?.sourceRowId) return false;
+  const sourceData = getFlashcardDeckDatabaseSourceData(config);
+  const row = sourceData?.database?.rows?.find((entry) => entry?.id === card.sourceRowId) || null;
+  if (!row) return false;
+
+  const patch = {};
+  const properties = sourceData?.database?.properties || [];
+  const setProperty = getFlashcardDeckProperty(properties, config.study.setPropertyId);
+  if (includeSet && setProperty && config.study.setValue) {
+    patch[setProperty.id] = config.study.setValue;
+  }
+
+  const countProperty = getFlashcardDeckProperty(properties, config.study.countPropertyId);
+  let nextReviewCount = 0;
+  if (includeCount && countProperty && countProperty.type === "number") {
+    const currentCount = Number(row.values?.[countProperty.id] || 0);
+    nextReviewCount = (Number.isFinite(currentCount) ? currentCount : 0) + 1;
+    patch[countProperty.id] = String(nextReviewCount);
+  }
+
+  const stageProperty = getFlashcardDeckProperty(properties, config.study.stagePropertyId);
+  if (includeStage && stageProperty && config.study.stageReviewCount > 0 && nextReviewCount >= config.study.stageReviewCount && config.study.stageValue) {
+    patch[stageProperty.id] = config.study.stageValue;
+  }
+
+  if (!Object.keys(patch).length) return false;
+  return window.updateDatabaseSourceRowValues({
+    kind: config.sourceKind,
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  }, card.sourceRowId, patch);
+}
+
+function ensureFlashcardDeckStructure(block) {
+  const cardEl = block?.querySelector(".flashcard-card");
+  if (!cardEl || cardEl.querySelector(".flashcard-card-inner")) return;
+  const innerEl = document.createElement("div");
+  innerEl.className = "flashcard-card-inner";
+  Array.from(cardEl.querySelectorAll(":scope > .flashcard-card-face")).forEach((faceEl) => {
+    innerEl.appendChild(faceEl);
+  });
+  cardEl.appendChild(innerEl);
+}
+
+function renderFlashcardFace(faceEl, side, card, showBack) {
+  if (!faceEl) return;
+  const titleEl = faceEl.querySelector(".flashcard-card-title");
+  const bodyEl = faceEl.querySelector(".flashcard-card-body");
+  const kickerEl = faceEl.querySelector(".flashcard-card-kicker");
+  const mediaEl = faceEl.querySelector(".flashcard-card-media");
+  const imgEl = faceEl.querySelector(".flashcard-card-image");
+  const isFront = side === "front";
+  const titleText = isFront ? (card?.frontTitle || "") : (card?.backTitle || "");
+  const bodyText = isFront ? (card?.frontBody || "") : (card?.backBody || "");
+  const imageText = card?.image || "";
+  const titlePlaceholder = isFront ? "Question" : "Answer";
+  const bodyPlaceholder = isFront ? "Add the prompt here." : "Add the answer here.";
+
+  if (kickerEl) kickerEl.textContent = isFront ? "Front" : "Back";
+  if (titleEl) {
+    titleEl.textContent = titleText || titlePlaceholder;
+    titleEl.classList.toggle("is-placeholder", !titleText);
+  }
+  if (bodyEl) {
+    bodyEl.textContent = bodyText || bodyPlaceholder;
+    bodyEl.classList.toggle("is-placeholder", !bodyText);
+  }
+
+  const showImage = !!imageText;
+  if (mediaEl) mediaEl.hidden = !showImage;
+  if (imgEl) {
+    imgEl.src = showImage ? imageText : "";
+    imgEl.alt = titleText || bodyText || "Flashcard image";
+  }
+}
+
+function renderFlashcardDeckBlock(block) {
+  if (!block || block.dataset.type !== "flashcards") return null;
+  ensureFlashcardDeckStructure(block);
+  const config = readFlashcardDeckConfig(block);
+  const shellEl = block.querySelector(".flashcard-deck-shell");
+  const titleEl = block.querySelector(".flashcard-deck-title");
+  const countEl = block.querySelector(".flashcard-deck-count");
+  const positionEl = block.querySelector(".flashcard-deck-position");
+  const cardEl = block.querySelector(".flashcard-card");
+  const frontEl = block.querySelector(".flashcard-card-front");
+  const backEl = block.querySelector(".flashcard-card-back");
+  const prevBtn = block.querySelector('[data-flashcards-action="prev"]');
+  const nextBtn = block.querySelector('[data-flashcards-action="next"]');
+  const studyBtn = block.querySelector('[data-flashcards-action="review"]');
+  const { cards, card, index } = getFlashcardDeckCurrentCard(config);
+  const total = cards.length;
+
+  if (titleEl) titleEl.textContent = config.title || "Flashcard Deck";
+  if (countEl) countEl.textContent = `${total} card${total === 1 ? "" : "s"}`;
+  if (positionEl) positionEl.textContent = total ? `${index + 1} / ${total}` : "0 / 0";
+  if (shellEl) {
+    shellEl.dataset.template = card?.templateResolved || config.template;
+    shellEl.dataset.surface = card?.surfaceResolved || config.customSurface;
+    shellEl.dataset.showBack = config.showBack ? "1" : "0";
+  }
+  if (cardEl) {
+    cardEl.dataset.template = card?.templateResolved || config.template;
+    cardEl.dataset.surface = card?.surfaceResolved || config.customSurface;
+    cardEl.dataset.align = config.textAlign;
+    cardEl.dataset.valign = config.verticalAlign;
+    cardEl.dataset.titleSize = config.titleSize;
+    cardEl.dataset.bodySize = config.bodySize;
+    cardEl.style.setProperty("--flashcard-bg-image", config.backgroundImage ? `url("${config.backgroundImage.replace(/"/g, "%22")}")` : "none");
+    cardEl.classList.toggle("is-flipped", !!config.showBack);
+    cardEl.classList.toggle("is-empty", !card);
+    cardEl.classList.toggle("has-background-image", !!config.backgroundImage);
+  }
+  if (prevBtn) prevBtn.disabled = total <= 1;
+  if (nextBtn) nextBtn.disabled = total <= 1;
+  if (studyBtn) {
+    const hasStudyAction = config.sourceType === "database" && (!!config.study.setPropertyId || !!config.study.countPropertyId);
+    studyBtn.hidden = config.sourceType !== "database";
+    studyBtn.disabled = !total || !hasStudyAction;
+  }
+
+  renderFlashcardFace(frontEl, "front", card, !!config.showBack);
+  renderFlashcardFace(backEl, "back", card, !!config.showBack);
+  return block;
+}
+
+function closeFlashcardDeckPicker() {
+  document.querySelector(".topbar-dropdown.flashcard-deck-picker")?.remove();
+}
+
+function openFlashcardDeckPicker(block, anchorEl = null) {
+  if (!block || block.dataset.type !== "flashcards") return;
+  closeFlashcardDeckPicker();
+
+  const config = readFlashcardDeckConfig(block);
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown flashcard-deck-picker";
+  picker.dataset.uiId = "topbarDropdown";
+  picker.innerHTML = `
+    <label class="flashcard-deck-picker-field">
+      <span>Deck title</span>
+      <input type="text" data-flashcards-input="title" />
+    </label>
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>Source</span>
+        <select data-flashcards-input="sourceType">
+          <option value="manual">Manual</option>
+          <option value="database">Database</option>
+        </select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Template</span>
+        <select data-flashcards-input="template">
+          <option value="basic">Basic</option>
+          <option value="visual">Visual</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+    </div>
+    <label class="flashcard-deck-picker-field">
+      <span>Surface</span>
+      <select data-flashcards-input="customSurface">
+        <option value="blank">Blank</option>
+        <option value="lined">Lined</option>
+        <option value="grid">Grid</option>
+        <option value="qa">Q / A</option>
+      </select>
+    </label>
+    <div data-flashcards-database-wrap hidden>
+      <label class="flashcard-deck-picker-field">
+        <span>Database</span>
+        <select data-flashcards-input="source"></select>
+      </label>
+      <div class="flashcard-deck-picker-grid">
+        <label class="flashcard-deck-picker-field">
+          <span>Front title</span>
+          <select data-flashcards-input="frontTitleMap"></select>
+        </label>
+        <label class="flashcard-deck-picker-field">
+          <span>Front body</span>
+          <select data-flashcards-input="frontBodyMap"></select>
+        </label>
+        <label class="flashcard-deck-picker-field">
+          <span>Back title</span>
+          <select data-flashcards-input="backTitleMap"></select>
+        </label>
+        <label class="flashcard-deck-picker-field">
+          <span>Back body</span>
+          <select data-flashcards-input="backBodyMap"></select>
+        </label>
+      </div>
+      <label class="flashcard-deck-picker-field">
+        <span>Image</span>
+        <select data-flashcards-input="imageMap"></select>
+      </label>
+    </div>
+    <div class="flashcard-deck-picker-divider"></div>
+    <div class="flashcard-deck-picker-card-head">
+      <span data-flashcards-card-label>Card</span>
+      <div class="flashcard-deck-picker-mini-actions">
+        <button type="button" class="topbar-dropdown-btn" data-flashcards-action="prev-card">‹</button>
+        <button type="button" class="topbar-dropdown-btn" data-flashcards-action="add-card">+</button>
+        <button type="button" class="topbar-dropdown-btn" data-flashcards-action="delete-card">−</button>
+        <button type="button" class="topbar-dropdown-btn" data-flashcards-action="next-card">›</button>
+      </div>
+    </div>
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>Front title</span>
+        <input type="text" data-flashcards-input="frontTitle" />
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Back title</span>
+        <input type="text" data-flashcards-input="backTitle" />
+      </label>
+    </div>
+    <label class="flashcard-deck-picker-field">
+      <span>Front body</span>
+      <textarea data-flashcards-input="frontBody" rows="3"></textarea>
+    </label>
+    <label class="flashcard-deck-picker-field">
+      <span>Back body</span>
+      <textarea data-flashcards-input="backBody" rows="3"></textarea>
+    </label>
+    <label class="flashcard-deck-picker-field">
+      <span>Image URL</span>
+      <input type="text" data-flashcards-input="image" />
+    </label>
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>Card template</span>
+        <select data-flashcards-input="cardTemplate">
+          <option value="">Deck default</option>
+          <option value="basic">Basic</option>
+          <option value="visual">Visual</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Card surface</span>
+        <select data-flashcards-input="cardSurface">
+          <option value="">Deck default</option>
+          <option value="blank">Blank</option>
+          <option value="lined">Lined</option>
+          <option value="grid">Grid</option>
+          <option value="qa">Q / A</option>
+        </select>
+      </label>
+    </div>
+    <div class="flashcard-deck-picker-actions">
+      <button type="button" class="topbar-dropdown-btn" data-flashcards-action="save">Save</button>
+      <button type="button" class="topbar-dropdown-btn" data-flashcards-action="clear-overrides">Clear overrides</button>
+    </div>
+  `;
+
+  document.body.appendChild(picker);
+
+  const titleFieldEl = picker.querySelector('[data-flashcards-input="title"]')?.closest(".flashcard-deck-picker-field");
+  const sourceGridEl = picker.querySelector('[data-flashcards-input="sourceType"]')?.closest(".flashcard-deck-picker-grid");
+  const surfaceFieldEl = picker.querySelector('[data-flashcards-input="customSurface"]')?.closest(".flashcard-deck-picker-field");
+  const databaseWrapEl = picker.querySelector("[data-flashcards-database-wrap]");
+  const cardHeadEl = picker.querySelector(".flashcard-deck-picker-card-head");
+  const actionsEl = picker.querySelector(".flashcard-deck-picker-actions");
+  const cardTitleGridForPanel = picker.querySelector('[data-flashcards-input="frontTitle"]')?.closest(".flashcard-deck-picker-grid");
+  const frontBodyFieldForPanel = picker.querySelector('[data-flashcards-input="frontBody"]')?.closest(".flashcard-deck-picker-field");
+  const backBodyFieldForPanel = picker.querySelector('[data-flashcards-input="backBody"]')?.closest(".flashcard-deck-picker-field");
+  const imageFieldForPanel = picker.querySelector('[data-flashcards-input="image"]')?.closest(".flashcard-deck-picker-field");
+  const cardStyleGridForPanel = picker.querySelector('[data-flashcards-input="cardTemplate"]')?.closest(".flashcard-deck-picker-grid");
+  const dividerEls = Array.from(picker.querySelectorAll(".flashcard-deck-picker-divider"));
+  const tabsEl = document.createElement("div");
+  tabsEl.className = "flashcard-deck-picker-tabs";
+  tabsEl.innerHTML = `
+    <button type="button" class="active" data-flashcards-tab="source">Source</button>
+    <button type="button" data-flashcards-tab="card">Card</button>
+    <button type="button" data-flashcards-tab="study">Study</button>
+    <button type="button" data-flashcards-tab="style">Style</button>
+  `;
+  const sourcePanelEl = document.createElement("div");
+  sourcePanelEl.className = "flashcard-deck-picker-panel active";
+  sourcePanelEl.dataset.flashcardsPanel = "source";
+  const cardPanelEl = document.createElement("div");
+  cardPanelEl.className = "flashcard-deck-picker-panel";
+  cardPanelEl.dataset.flashcardsPanel = "card";
+  const stylePanelEl = document.createElement("div");
+  stylePanelEl.className = "flashcard-deck-picker-panel";
+  stylePanelEl.dataset.flashcardsPanel = "style";
+  const studyPanelEl = document.createElement("div");
+  studyPanelEl.className = "flashcard-deck-picker-panel";
+  studyPanelEl.dataset.flashcardsPanel = "study";
+  picker.prepend(tabsEl);
+  [titleFieldEl, sourceGridEl, surfaceFieldEl, databaseWrapEl].forEach((el) => {
+    if (el) sourcePanelEl.appendChild(el);
+  });
+  [cardHeadEl, cardTitleGridForPanel, frontBodyFieldForPanel, backBodyFieldForPanel, imageFieldForPanel].forEach((el) => {
+    if (el) cardPanelEl.appendChild(el);
+  });
+  [cardStyleGridForPanel, actionsEl].forEach((el) => {
+    if (el) stylePanelEl.appendChild(el);
+  });
+  dividerEls.forEach((el) => {
+    if (el.parentElement === picker) el.remove();
+  });
+  picker.appendChild(sourcePanelEl);
+  picker.appendChild(cardPanelEl);
+  picker.appendChild(studyPanelEl);
+  picker.appendChild(stylePanelEl);
+
+  const anchorTarget = anchorEl || block.querySelector(".flashcard-deck-config-btn") || block;
+  const rect = anchorTarget.getBoundingClientRect();
+  const pickerWidth = picker.offsetWidth || 340;
+  const pickerHeight = picker.offsetHeight || 560;
+  let left = rect.right - pickerWidth;
+  let top = rect.bottom + 8;
+  if (left < 12) left = 12;
+  if (left + pickerWidth > window.innerWidth - 12) left = window.innerWidth - pickerWidth - 12;
+  if (top + pickerHeight > window.innerHeight - 12) top = Math.max(12, rect.top - pickerHeight - 8);
+  picker.style.left = `${Math.round(left)}px`;
+  picker.style.top = `${Math.round(top)}px`;
+
+  const titleInput = picker.querySelector('[data-flashcards-input="title"]');
+  const sourceTypeSelect = picker.querySelector('[data-flashcards-input="sourceType"]');
+  const templateSelect = picker.querySelector('[data-flashcards-input="template"]');
+  const surfaceSelect = picker.querySelector('[data-flashcards-input="customSurface"]');
+  const databaseWrap = picker.querySelector("[data-flashcards-database-wrap]");
+  const sourceSelect = picker.querySelector('[data-flashcards-input="source"]');
+  const frontTitleMapSelect = picker.querySelector('[data-flashcards-input="frontTitleMap"]');
+  const frontBodyMapSelect = picker.querySelector('[data-flashcards-input="frontBodyMap"]');
+  const backTitleMapSelect = picker.querySelector('[data-flashcards-input="backTitleMap"]');
+  const backBodyMapSelect = picker.querySelector('[data-flashcards-input="backBodyMap"]');
+  const imageMapSelect = picker.querySelector('[data-flashcards-input="imageMap"]');
+  const cardLabel = picker.querySelector("[data-flashcards-card-label]");
+  const frontTitleInput = picker.querySelector('[data-flashcards-input="frontTitle"]');
+  const backTitleInput = picker.querySelector('[data-flashcards-input="backTitle"]');
+  const frontBodyInput = picker.querySelector('[data-flashcards-input="frontBody"]');
+  const backBodyInput = picker.querySelector('[data-flashcards-input="backBody"]');
+  const imageInput = picker.querySelector('[data-flashcards-input="image"]');
+  const cardTemplateSelect = picker.querySelector('[data-flashcards-input="cardTemplate"]');
+  const cardSurfaceSelect = picker.querySelector('[data-flashcards-input="cardSurface"]');
+  const prevCardBtn = picker.querySelector('[data-flashcards-action="prev-card"]');
+  const nextCardBtn = picker.querySelector('[data-flashcards-action="next-card"]');
+  const addCardBtn = picker.querySelector('[data-flashcards-action="add-card"]');
+  const deleteCardBtn = picker.querySelector('[data-flashcards-action="delete-card"]');
+  const saveBtn = picker.querySelector('[data-flashcards-action="save"]');
+  const clearOverridesBtn = picker.querySelector('[data-flashcards-action="clear-overrides"]');
+
+  const imageLabelEl = imageInput?.closest(".flashcard-deck-picker-field")?.querySelector("span");
+  if (imageLabelEl) imageLabelEl.textContent = "Image";
+  if (imageInput) imageInput.placeholder = "Upload or paste an image";
+
+  const styleControlsEl = document.createElement("div");
+  styleControlsEl.className = "flashcard-deck-style-controls";
+  styleControlsEl.innerHTML = `
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>Text align</span>
+        <select data-flashcards-input="textAlign">
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Position</span>
+        <select data-flashcards-input="verticalAlign">
+          <option value="top">Top</option>
+          <option value="center">Center</option>
+          <option value="bottom">Bottom</option>
+        </select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Title size</span>
+        <select data-flashcards-input="titleSize">
+          <option value="sm">Small</option>
+          <option value="md">Medium</option>
+          <option value="lg">Large</option>
+          <option value="xl">XL</option>
+        </select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Body size</span>
+        <select data-flashcards-input="bodySize">
+          <option value="sm">Small</option>
+          <option value="md">Medium</option>
+          <option value="lg">Large</option>
+          <option value="xl">XL</option>
+        </select>
+      </label>
+    </div>
+    <div class="flashcard-deck-upload-row">
+      <button type="button" class="topbar-dropdown-btn" data-flashcards-action="upload-bg">Upload background</button>
+      <button type="button" class="topbar-dropdown-btn" data-flashcards-action="clear-bg">Clear</button>
+      <input type="file" data-flashcards-input="backgroundUpload" accept="image/*" hidden />
+    </div>
+  `;
+  if (actionsEl) stylePanelEl.insertBefore(styleControlsEl, actionsEl);
+
+  const imageUploadRow = document.createElement("div");
+  imageUploadRow.className = "flashcard-deck-upload-row";
+  imageUploadRow.innerHTML = `
+    <button type="button" class="topbar-dropdown-btn" data-flashcards-action="upload-card-image">Upload image</button>
+    <button type="button" class="topbar-dropdown-btn" data-flashcards-action="clear-card-image">Clear</button>
+    <input type="file" data-flashcards-input="cardImageUpload" accept="image/*" hidden />
+  `;
+  imageInput?.closest(".flashcard-deck-picker-field")?.appendChild(imageUploadRow);
+
+  const textAlignSelect = picker.querySelector('[data-flashcards-input="textAlign"]');
+  const verticalAlignSelect = picker.querySelector('[data-flashcards-input="verticalAlign"]');
+  const titleSizeSelect = picker.querySelector('[data-flashcards-input="titleSize"]');
+  const bodySizeSelect = picker.querySelector('[data-flashcards-input="bodySize"]');
+  const backgroundUploadInput = picker.querySelector('[data-flashcards-input="backgroundUpload"]');
+  const cardImageUploadInput = picker.querySelector('[data-flashcards-input="cardImageUpload"]');
+
+  const filterControlsEl = document.createElement("details");
+  filterControlsEl.className = "flashcard-deck-picker-details";
+  filterControlsEl.innerHTML = `
+    <summary>Filters</summary>
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>Property</span>
+        <select data-flashcards-input="filterProperty"></select>
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Match</span>
+        <select data-flashcards-input="filterOperator">
+          <option value="is">Is</option>
+          <option value="contains">Contains</option>
+          <option value="is-not">Is not</option>
+          <option value="checked">Checked</option>
+          <option value="unchecked">Unchecked</option>
+        </select>
+      </label>
+    </div>
+    <label class="flashcard-deck-picker-field">
+      <span>Value</span>
+      <input type="text" data-flashcards-input="filterValue" list="flashcard-filter-values" placeholder="Places, Animals, etc." />
+      <datalist id="flashcard-filter-values"></datalist>
+    </label>
+    <div class="flashcard-deck-upload-row">
+      <button type="button" class="topbar-dropdown-btn" data-flashcards-action="clear-filter">Clear filter</button>
+    </div>
+  `;
+  databaseWrapEl?.appendChild(filterControlsEl);
+
+  const studyControlsEl = document.createElement("details");
+  studyControlsEl.className = "flashcard-deck-picker-details";
+  studyControlsEl.open = true;
+  studyControlsEl.innerHTML = `
+    <summary>On studied</summary>
+    <label class="flashcard-deck-picker-field">
+      <span>Set property</span>
+      <select data-flashcards-input="studySetProperty"></select>
+    </label>
+    <label class="flashcard-deck-picker-field">
+      <span>Set value</span>
+      <input type="text" data-flashcards-input="studySetValue" list="flashcard-study-values" placeholder="Learning, Reviewed, etc." />
+      <datalist id="flashcard-study-values"></datalist>
+    </label>
+    <label class="flashcard-deck-picker-field">
+      <span>Increment number</span>
+      <select data-flashcards-input="studyCountProperty"></select>
+    </label>
+    <div class="flashcard-deck-picker-grid">
+      <label class="flashcard-deck-picker-field">
+        <span>After count</span>
+        <input type="number" min="0" step="1" data-flashcards-input="studyStageCount" placeholder="0" />
+      </label>
+      <label class="flashcard-deck-picker-field">
+        <span>Then set</span>
+        <select data-flashcards-input="studyStageProperty"></select>
+      </label>
+    </div>
+    <label class="flashcard-deck-picker-field">
+      <span>Stage value</span>
+      <input type="text" data-flashcards-input="studyStageValue" list="flashcard-stage-values" placeholder="Known, Mastered, etc." />
+      <datalist id="flashcard-stage-values"></datalist>
+    </label>
+  `;
+  studyPanelEl.appendChild(studyControlsEl);
+
+  const filterPropertySelect = picker.querySelector('[data-flashcards-input="filterProperty"]');
+  const filterOperatorSelect = picker.querySelector('[data-flashcards-input="filterOperator"]');
+  const filterValueInput = picker.querySelector('[data-flashcards-input="filterValue"]');
+  const filterValuesList = picker.querySelector("#flashcard-filter-values");
+  const studySetPropertySelect = picker.querySelector('[data-flashcards-input="studySetProperty"]');
+  const studySetValueInput = picker.querySelector('[data-flashcards-input="studySetValue"]');
+  const studyValuesList = picker.querySelector("#flashcard-study-values");
+  const studyCountPropertySelect = picker.querySelector('[data-flashcards-input="studyCountProperty"]');
+  const studyStageCountInput = picker.querySelector('[data-flashcards-input="studyStageCount"]');
+  const studyStagePropertySelect = picker.querySelector('[data-flashcards-input="studyStageProperty"]');
+  const studyStageValueInput = picker.querySelector('[data-flashcards-input="studyStageValue"]');
+  const studyStageValuesList = picker.querySelector("#flashcard-stage-values");
+
+  function setFlashcardPickerTab(tabName = "source") {
+    const safeTab = ["source", "card", "study", "style"].includes(tabName) ? tabName : "source";
+    picker.querySelectorAll("[data-flashcards-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.flashcardsTab === safeTab);
+    });
+    picker.querySelectorAll("[data-flashcards-panel]").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.flashcardsPanel === safeTab);
+    });
+  }
+
+  tabsEl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-flashcards-tab]");
+    if (!button) return;
+    event.preventDefault();
+    setFlashcardPickerTab(button.dataset.flashcardsTab || "source");
+  });
+
+  const mappingGrid = databaseWrap?.querySelector(".flashcard-deck-picker-grid");
+  const imageMapField = imageMapSelect?.closest(".flashcard-deck-picker-field");
+  if (databaseWrap && mappingGrid && imageMapField) {
+    const mappingDetails = document.createElement("details");
+    mappingDetails.className = "flashcard-deck-picker-details";
+    const mappingSummary = document.createElement("summary");
+    mappingSummary.textContent = "Field mapping";
+    mappingDetails.appendChild(mappingSummary);
+    databaseWrap.insertBefore(mappingDetails, mappingGrid);
+    mappingDetails.appendChild(mappingGrid);
+    mappingDetails.appendChild(imageMapField);
+  }
+
+  const cardTitleGrid = frontTitleInput?.closest(".flashcard-deck-picker-grid");
+  const frontBodyField = frontBodyInput?.closest(".flashcard-deck-picker-field");
+  const backBodyField = backBodyInput?.closest(".flashcard-deck-picker-field");
+  const imageField = imageInput?.closest(".flashcard-deck-picker-field");
+  if (cardTitleGrid && frontBodyField && backBodyField && imageField) {
+    const cardPreviewWrap = document.createElement("div");
+    cardPreviewWrap.className = "flashcard-deck-editor-preview";
+    cardTitleGrid.parentNode.insertBefore(cardPreviewWrap, cardTitleGrid);
+    cardPreviewWrap.appendChild(cardTitleGrid);
+    cardPreviewWrap.appendChild(frontBodyField);
+    cardPreviewWrap.appendChild(backBodyField);
+    cardPreviewWrap.appendChild(imageField);
+  }
+
+  const cardStyleGrid = cardTemplateSelect?.closest(".flashcard-deck-picker-grid");
+  if (cardStyleGrid) {
+    const styleDetails = document.createElement("details");
+    styleDetails.className = "flashcard-deck-picker-details";
+    const styleSummary = document.createElement("summary");
+    styleSummary.textContent = "Per-card style";
+    styleDetails.appendChild(styleSummary);
+    cardStyleGrid.parentNode.insertBefore(styleDetails, cardStyleGrid);
+    styleDetails.appendChild(cardStyleGrid);
+  }
+
+  const sourceOptions = typeof window.getDatabaseCalloutSources === "function"
+    ? window.getDatabaseCalloutSources()
+    : [];
+
+  function readFlashcardImageFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) {
+        resolve("");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function fillPropertySelect(selectEl, properties, selectedValue) {
+    if (!selectEl) return;
+    const options = [{ value: "", label: "None" }, { value: "__title__", label: "Row title" }]
+      .concat((properties || []).map((property) => ({
+        value: property.id,
+        label: property.name || "Property"
+      })));
+    selectEl.innerHTML = options.map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`).join("");
+    selectEl.value = selectedValue || "";
+  }
+
+  function fillDatabasePropertySelect(selectEl, properties, selectedValue, options = {}) {
+    if (!selectEl) return;
+    const allowedTypes = Array.isArray(options.types) ? options.types : null;
+    const includeTitle = !!options.includeTitle;
+    const entries = [{ value: "", label: "None" }];
+    if (includeTitle) entries.push({ value: "__title__", label: "Row title" });
+    (properties || []).forEach((property) => {
+      if (!property?.id) return;
+      if (allowedTypes && !allowedTypes.includes(property.type)) return;
+      if (["formula", "rollup", "relation"].includes(property.type)) return;
+      entries.push({ value: property.id, label: property.name || "Property" });
+    });
+    selectEl.innerHTML = entries.map((entry) => `<option value="${escapeHTML(entry.value)}">${escapeHTML(entry.label)}</option>`).join("");
+    selectEl.value = selectedValue || "";
+    if (selectEl.value !== (selectedValue || "")) selectEl.value = "";
+  }
+
+  function fillFlashcardValueDatalist(listEl, property) {
+    if (!listEl) return;
+    const options = getFlashcardDeckPropertyOptions(property);
+    listEl.innerHTML = options.map((option) => `<option value="${escapeHTML(option.name || "")}"></option>`).join("");
+  }
+
+  function getSelectedSourceMeta() {
+    const selected = sourceOptions.find((source) => {
+      const key = `${source.kind}:${source.pageId}:${source.blockId || ""}`;
+      return key === sourceSelect.value;
+    });
+    return selected || null;
+  }
+
+  function populateSourceSelect() {
+    if (!sourceSelect) return;
+    sourceSelect.innerHTML = sourceOptions.map((source) => {
+      const value = `${source.kind}:${source.pageId}:${source.blockId || ""}`;
+      return `<option value="${escapeHTML(value)}">${escapeHTML(source.label || source.title || "Database")}</option>`;
+    }).join("");
+    const currentValue = `${config.sourceKind}:${config.sourcePageId}:${config.sourceBlockId || ""}`;
+    if (sourceSelect.querySelector(`option[value="${CSS.escape(currentValue)}"]`)) {
+      sourceSelect.value = currentValue;
+    } else if (sourceOptions[0]) {
+      sourceSelect.value = `${sourceOptions[0].kind}:${sourceOptions[0].pageId}:${sourceOptions[0].blockId || ""}`;
+    }
+  }
+
+  function getWorkingConfig() {
+    const baseConfig = readFlashcardDeckConfig(block);
+    const selectedSource = getSelectedSourceMeta();
+    const selectValue = (selectEl, fallback = "") => {
+      if (!selectEl || !selectEl.options || selectEl.options.length === 0) return fallback;
+      return selectEl.value;
+    };
+    const inputValue = (inputEl, fallback = "") => {
+      if (!inputEl || inputEl.dataset.flashcardsReady !== "true") return fallback;
+      return inputEl.value;
+    };
+    const nextConfig = normalizeFlashcardDeckConfig({
+      ...baseConfig,
+      title: titleInput.value,
+      sourceType: sourceTypeSelect.value,
+      sourceKind: selectedSource?.kind || baseConfig.sourceKind,
+      sourcePageId: selectedSource?.pageId || baseConfig.sourcePageId,
+      sourceBlockId: selectedSource?.blockId || baseConfig.sourceBlockId,
+      template: templateSelect.value,
+      customSurface: surfaceSelect.value,
+      textAlign: textAlignSelect?.value || baseConfig.textAlign,
+      verticalAlign: verticalAlignSelect?.value || baseConfig.verticalAlign,
+      titleSize: titleSizeSelect?.value || baseConfig.titleSize,
+      bodySize: bodySizeSelect?.value || baseConfig.bodySize,
+      backgroundImage: baseConfig.backgroundImage || "",
+      mappings: {
+        frontTitle: selectValue(frontTitleMapSelect, baseConfig.mappings.frontTitle),
+        frontBody: selectValue(frontBodyMapSelect, baseConfig.mappings.frontBody),
+        backTitle: selectValue(backTitleMapSelect, baseConfig.mappings.backTitle),
+        backBody: selectValue(backBodyMapSelect, baseConfig.mappings.backBody),
+        image: selectValue(imageMapSelect, baseConfig.mappings.image)
+      },
+      filters: filterPropertySelect?.value ? [{
+        propertyId: filterPropertySelect.value,
+        operator: filterOperatorSelect?.value || "is",
+        value: inputValue(filterValueInput, baseConfig.filters[0]?.value || "")
+      }] : [],
+      study: {
+        setPropertyId: selectValue(studySetPropertySelect, baseConfig.study.setPropertyId),
+        setValue: inputValue(studySetValueInput, baseConfig.study.setValue),
+        countPropertyId: selectValue(studyCountPropertySelect, baseConfig.study.countPropertyId),
+        stageReviewCount: Number(inputValue(studyStageCountInput, baseConfig.study.stageReviewCount ? String(baseConfig.study.stageReviewCount) : "") || 0) || 0,
+        stagePropertyId: selectValue(studyStagePropertySelect, baseConfig.study.stagePropertyId),
+        stageValue: inputValue(studyStageValueInput, baseConfig.study.stageValue)
+      }
+    });
+    if (nextConfig.sourceType === "database") {
+      const sourceData = getFlashcardDeckDatabaseSourceData(nextConfig);
+      nextConfig.mappings = inferFlashcardDeckMappings(sourceData?.database?.properties || [], nextConfig.mappings);
+    }
+    return normalizeFlashcardDeckConfig(nextConfig);
+  }
+
+  function commitDeckSettingsState(options = {}) {
+    const nextConfig = getWorkingConfig();
+    if (options.clearDatabaseOverrides && nextConfig.sourceType === "database") {
+      nextConfig.cardOverrides = {};
+    }
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    return nextConfig;
+  }
+
+  function syncCardEditor() {
+    const workingConfig = getWorkingConfig();
+    databaseWrap.hidden = workingConfig.sourceType !== "database";
+
+  if (workingConfig.sourceType === "database") {
+      const sourceData = getFlashcardDeckDatabaseSourceData(workingConfig);
+      const properties = sourceData?.database?.properties || [];
+      const mappings = inferFlashcardDeckMappings(properties, workingConfig.mappings);
+      fillPropertySelect(frontTitleMapSelect, properties, mappings.frontTitle);
+      fillPropertySelect(frontBodyMapSelect, properties, mappings.frontBody);
+      fillPropertySelect(backTitleMapSelect, properties, mappings.backTitle);
+      fillPropertySelect(backBodyMapSelect, properties, mappings.backBody);
+      fillPropertySelect(imageMapSelect, properties, mappings.image);
+      const activeFilter = workingConfig.filters[0] || {};
+      fillDatabasePropertySelect(filterPropertySelect, properties, activeFilter.propertyId || "", { includeTitle: true });
+      if (filterOperatorSelect) filterOperatorSelect.value = activeFilter.operator || "is";
+      const filterProperty = activeFilter.propertyId === "__title__"
+        ? { type: "title" }
+        : getFlashcardDeckProperty(properties, activeFilter.propertyId || "");
+      fillFlashcardValueDatalist(filterValuesList, filterProperty);
+      if (filterValueInput) {
+        filterValueInput.value = activeFilter.value || "";
+        filterValueInput.disabled = ["checked", "unchecked"].includes(filterOperatorSelect?.value || "");
+        filterValueInput.dataset.flashcardsReady = "true";
+      }
+      fillDatabasePropertySelect(studySetPropertySelect, properties, workingConfig.study.setPropertyId, {
+        types: ["text", "select", "status", "tag", "checkbox", "date", "number"]
+      });
+      const studyProperty = getFlashcardDeckProperty(properties, workingConfig.study.setPropertyId || "");
+      fillFlashcardValueDatalist(studyValuesList, studyProperty);
+      if (studySetValueInput) {
+        studySetValueInput.value = workingConfig.study.setValue || "";
+        studySetValueInput.disabled = !workingConfig.study.setPropertyId;
+        studySetValueInput.dataset.flashcardsReady = "true";
+      }
+      fillDatabasePropertySelect(studyCountPropertySelect, properties, workingConfig.study.countPropertyId, {
+        types: ["number"]
+      });
+      if (studyStageCountInput) {
+        studyStageCountInput.value = workingConfig.study.stageReviewCount ? String(workingConfig.study.stageReviewCount) : "";
+        studyStageCountInput.disabled = !workingConfig.study.countPropertyId;
+        studyStageCountInput.dataset.flashcardsReady = "true";
+      }
+      fillDatabasePropertySelect(studyStagePropertySelect, properties, workingConfig.study.stagePropertyId, {
+        types: ["text", "select", "status", "tag", "checkbox", "date", "number"]
+      });
+      const stageProperty = getFlashcardDeckProperty(properties, workingConfig.study.stagePropertyId || "");
+      fillFlashcardValueDatalist(studyStageValuesList, stageProperty);
+      if (studyStageValueInput) {
+        studyStageValueInput.value = workingConfig.study.stageValue || "";
+        studyStageValueInput.disabled = !workingConfig.study.stagePropertyId;
+        studyStageValueInput.dataset.flashcardsReady = "true";
+      }
+      workingConfig.mappings = mappings;
+    } else {
+      fillDatabasePropertySelect(filterPropertySelect, [], "");
+      fillDatabasePropertySelect(studySetPropertySelect, [], "");
+      fillDatabasePropertySelect(studyCountPropertySelect, [], "");
+      fillDatabasePropertySelect(studyStagePropertySelect, [], "");
+    }
+
+    const { cards, card, index } = getFlashcardDeckCurrentCard(workingConfig);
+    const isDatabase = workingConfig.sourceType === "database";
+    cardLabel.textContent = cards.length ? `Card ${index + 1} of ${cards.length}` : "Card";
+    const sourceLabel = workingConfig.sourceType === "database" ? "No database rows found" : "Card";
+    frontTitleInput.placeholder = sourceLabel;
+    frontBodyInput.placeholder = workingConfig.sourceType === "database" ? "Mapped from database" : "";
+    backTitleInput.placeholder = "Back title";
+    backBodyInput.placeholder = workingConfig.sourceType === "database" ? "Mapped from database" : "";
+    frontTitleInput.value = card?.frontTitle || "";
+    backTitleInput.value = card?.backTitle || "";
+    frontBodyInput.value = card?.frontBody || "";
+    backBodyInput.value = card?.backBody || "";
+    imageInput.value = card?.image || "";
+    cardTemplateSelect.value = card?.template || "";
+    cardSurfaceSelect.value = card?.surface || "";
+    deleteCardBtn.disabled = isDatabase || workingConfig.manualCards.length <= 1;
+    addCardBtn.disabled = isDatabase;
+    prevCardBtn.disabled = cards.length <= 1;
+    nextCardBtn.disabled = cards.length <= 1;
+  }
+
+  function writeCurrentCardDraft() {
+    const nextConfig = getWorkingConfig();
+    if (nextConfig.sourceType === "manual") {
+      const card = nextConfig.manualCards[nextConfig.currentIndex];
+      if (!card) return nextConfig;
+      card.frontTitle = frontTitleInput.value.trim();
+      card.frontBody = frontBodyInput.value.trim();
+      card.backTitle = backTitleInput.value.trim();
+      card.backBody = backBodyInput.value.trim();
+      card.image = imageInput.value.trim();
+      card.template = cardTemplateSelect.value;
+      card.surface = cardSurfaceSelect.value;
+      return nextConfig;
+    }
+
+    const current = getFlashcardDeckCurrentCard(nextConfig);
+    if (!current.card) return nextConfig;
+    nextConfig.cardOverrides[current.card.id] = normalizeFlashcardDeckCard({
+      id: current.card.id,
+      frontTitle: frontTitleInput.value.trim(),
+      frontBody: frontBodyInput.value.trim(),
+      backTitle: backTitleInput.value.trim(),
+      backBody: backBodyInput.value.trim(),
+      image: imageInput.value.trim(),
+      template: cardTemplateSelect.value,
+      surface: cardSurfaceSelect.value
+    }, current.card.id);
+    return nextConfig;
+  }
+
+  function commitPickerState() {
+    const nextConfig = writeCurrentCardDraft();
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    return nextConfig;
+  }
+
+  titleInput.value = config.title || "Flashcard Deck";
+  sourceTypeSelect.value = config.sourceType;
+  templateSelect.value = config.template;
+  surfaceSelect.value = config.customSurface;
+  if (textAlignSelect) textAlignSelect.value = config.textAlign;
+  if (verticalAlignSelect) verticalAlignSelect.value = config.verticalAlign;
+  if (titleSizeSelect) titleSizeSelect.value = config.titleSize;
+  if (bodySizeSelect) bodySizeSelect.value = config.bodySize;
+  populateSourceSelect();
+  syncCardEditor();
+
+  picker.querySelector('[data-flashcards-action="clear-filter"]')?.addEventListener("click", () => {
+    if (filterPropertySelect) filterPropertySelect.value = "";
+    if (filterOperatorSelect) filterOperatorSelect.value = "is";
+    if (filterValueInput) {
+      filterValueInput.value = "";
+      filterValueInput.dataset.flashcardsReady = "true";
+    }
+    commitDeckSettingsState();
+    syncCardEditor();
+  });
+
+  picker.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+    if (target === sourceTypeSelect || target === sourceSelect || target === templateSelect || target === surfaceSelect
+      || target === frontTitleMapSelect || target === frontBodyMapSelect || target === backTitleMapSelect || target === backBodyMapSelect || target === imageMapSelect
+      || target === textAlignSelect || target === verticalAlignSelect || target === titleSizeSelect || target === bodySizeSelect
+      || target === filterPropertySelect || target === filterOperatorSelect || target === studySetPropertySelect || target === studyCountPropertySelect || target === studyStagePropertySelect) {
+      if (target === sourceTypeSelect && sourceTypeSelect.value === "database" && !sourceSelect.value && sourceOptions[0]) {
+        sourceSelect.value = `${sourceOptions[0].kind}:${sourceOptions[0].pageId}:${sourceOptions[0].blockId || ""}`;
+      }
+      const shouldClearOverrides = target === sourceTypeSelect || target === sourceSelect
+        || target === frontTitleMapSelect || target === frontBodyMapSelect || target === backTitleMapSelect || target === backBodyMapSelect || target === imageMapSelect;
+      commitDeckSettingsState({ clearDatabaseOverrides: shouldClearOverrides });
+      syncCardEditor();
+      return;
+    }
+    commitPickerState();
+    syncCardEditor();
+  });
+
+  picker.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    if (target === titleInput) {
+      commitDeckSettingsState();
+      return;
+    }
+    if (target === filterValueInput || target === studySetValueInput || target === studyStageValueInput || target === studyStageCountInput) {
+      commitDeckSettingsState();
+      syncCardEditor();
+      return;
+    }
+    commitPickerState();
+  });
+
+  picker.querySelector('[data-flashcards-action="upload-bg"]')?.addEventListener("click", () => {
+    backgroundUploadInput?.click();
+  });
+
+  picker.querySelector('[data-flashcards-action="clear-bg"]')?.addEventListener("click", () => {
+    const nextConfig = getWorkingConfig();
+    nextConfig.backgroundImage = "";
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+  });
+
+  backgroundUploadInput?.addEventListener("change", async () => {
+    const file = backgroundUploadInput.files?.[0] || null;
+    if (!file) return;
+    const nextConfig = getWorkingConfig();
+    nextConfig.backgroundImage = await readFlashcardImageFile(file);
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    backgroundUploadInput.value = "";
+  });
+
+  picker.querySelector('[data-flashcards-action="upload-card-image"]')?.addEventListener("click", () => {
+    cardImageUploadInput?.click();
+  });
+
+  picker.querySelector('[data-flashcards-action="clear-card-image"]')?.addEventListener("click", () => {
+    if (imageInput) imageInput.value = "";
+    commitPickerState();
+  });
+
+  cardImageUploadInput?.addEventListener("change", async () => {
+    const file = cardImageUploadInput.files?.[0] || null;
+    if (!file) return;
+    if (imageInput) imageInput.value = await readFlashcardImageFile(file);
+    commitPickerState();
+    cardImageUploadInput.value = "";
+  });
+
+  prevCardBtn?.addEventListener("click", () => {
+    const nextConfig = writeCurrentCardDraft();
+    const cards = getFlashcardDeckCards(nextConfig);
+    if (!cards.length) return;
+    nextConfig.currentIndex = (nextConfig.currentIndex - 1 + cards.length) % cards.length;
+    nextConfig.showBack = false;
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    syncCardEditor();
+  });
+
+  nextCardBtn?.addEventListener("click", () => {
+    const nextConfig = writeCurrentCardDraft();
+    const cards = getFlashcardDeckCards(nextConfig);
+    if (!cards.length) return;
+    nextConfig.currentIndex = (nextConfig.currentIndex + 1) % cards.length;
+    nextConfig.showBack = false;
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    syncCardEditor();
+  });
+
+  addCardBtn?.addEventListener("click", () => {
+    const nextConfig = writeCurrentCardDraft();
+    if (nextConfig.sourceType !== "manual") return;
+    nextConfig.manualCards.push(normalizeFlashcardDeckCard({
+      id: `card-${Date.now()}`,
+      frontTitle: "Front",
+      frontBody: "",
+      backTitle: "Back",
+      backBody: ""
+    }));
+    nextConfig.currentIndex = nextConfig.manualCards.length - 1;
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    syncCardEditor();
+  });
+
+  deleteCardBtn?.addEventListener("click", () => {
+    const nextConfig = writeCurrentCardDraft();
+    if (nextConfig.sourceType !== "manual" || nextConfig.manualCards.length <= 1) return;
+    nextConfig.manualCards.splice(nextConfig.currentIndex, 1);
+    nextConfig.currentIndex = Math.max(0, Math.min(nextConfig.currentIndex, nextConfig.manualCards.length - 1));
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    syncCardEditor();
+  });
+
+  saveBtn?.addEventListener("click", () => {
+    commitPickerState();
+    syncCardEditor();
+  });
+
+  clearOverridesBtn?.addEventListener("click", () => {
+    const nextConfig = getWorkingConfig();
+    if (nextConfig.sourceType === "database") {
+      const current = getFlashcardDeckCurrentCard(nextConfig);
+      if (current.card) delete nextConfig.cardOverrides[current.card.id];
+    } else {
+      const card = nextConfig.manualCards[nextConfig.currentIndex];
+      if (card) {
+        card.template = "";
+        card.surface = "";
+      }
+    }
+    writeFlashcardDeckConfig(block, nextConfig);
+    renderFlashcardDeckBlock(block);
+    if (typeof saveState === "function") saveState();
+    syncCardEditor();
+  });
+}
+
+window.mountFlashcardDeckBlock = function mountFlashcardDeckBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "flashcards") return null;
+  if (!block.dataset.flashcardsConfig) {
+    writeFlashcardDeckConfig(block, normalizeFlashcardDeckConfig({}));
+  }
+  renderFlashcardDeckBlock(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector(".flashcard-deck-config-btn") || block;
+    openFlashcardDeckPicker(block, anchor);
+  }
+  return block;
+};
+
+window.addEventListener("sanctum:database-updated", () => {
+  window.requestAnimationFrame(() => {
+    document.querySelectorAll('.block[data-type="flashcards"]').forEach((block) => {
+      renderFlashcardDeckBlock(block);
+    });
+  });
+});
 
 function renderLiveDataCalloutBlocks() {
   document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
@@ -5548,6 +6989,9 @@ function serializeBlockElement(b) {
     dataCalloutAlign: blockType === "data-callout" ? (b.dataset.dataCalloutAlign || "") : "",
     dataCalloutSize: blockType === "data-callout" ? (b.dataset.dataCalloutSize || "") : "",
     dataCalloutLabelPos: blockType === "data-callout" ? (b.dataset.dataCalloutLabelPos || "") : "",
+    dataCalloutShowIcon: blockType === "data-callout" ? (b.dataset.dataCalloutShowIcon || "") : "",
+    dataCalloutIcon: blockType === "data-callout" ? (b.dataset.dataCalloutIcon || "") : "",
+    flashcardsConfig: blockType === "flashcards" ? (b.dataset.flashcardsConfig || "") : "",
     progressTitle: blockType === "progress" ? (b.dataset.progressTitle || "") : "",
     progressSourceType: blockType === "progress" ? (b.dataset.progressSourceType || "") : "",
     progressSourceKind: blockType === "progress" ? (b.dataset.progressSourceKind || "") : "",
@@ -5620,6 +7064,56 @@ gridEl.addEventListener("click", (e) => {
   if (!block) return;
   openClockPicker(block, configButton);
 });
+
+gridEl.addEventListener("click", (e) => {
+  const configButton = e.target.closest('[data-flashcards-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="flashcards"]');
+  if (!block) return;
+  if (!document.body.classList.contains("editing")) return;
+  openFlashcardDeckPicker(block, configButton);
+});
+
+gridEl.addEventListener("click", (e) => {
+  const actionEl = e.target.closest('[data-flashcards-action]');
+  if (!actionEl) return;
+  const action = actionEl.dataset.flashcardsAction || "";
+  if (!["flip", "prev", "next", "review"].includes(action)) return;
+
+  const block = actionEl.closest('.block[data-type="flashcards"]');
+  if (!block) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const config = readFlashcardDeckConfig(block);
+  const cards = getFlashcardDeckCards(config);
+  if (!cards.length) return;
+
+  if (action === "flip") {
+    const willShowBack = !config.showBack;
+    config.showBack = !config.showBack;
+    if (willShowBack) {
+      applyFlashcardDeckStudyAction(block, { includeSet: true, includeCount: false, includeStage: false });
+    }
+  } else if (action === "review") {
+    applyFlashcardDeckStudyAction(block);
+  } else if (action === "prev") {
+    config.currentIndex = (config.currentIndex - 1 + cards.length) % cards.length;
+    config.showBack = false;
+  } else if (action === "next") {
+    config.currentIndex = (config.currentIndex + 1) % cards.length;
+    config.showBack = false;
+  }
+
+  writeFlashcardDeckConfig(block, config);
+  renderFlashcardDeckBlock(block);
+  if (typeof saveState === "function") saveState();
+}, true);
 
 // inline link click → peek
 gridEl.addEventListener("click", (e) => {
@@ -5958,6 +7452,10 @@ gridEl.addEventListener("mousedown", (e) => {
     window.mountProgressBlock?.(real, { openPicker: true });
   }
 
+  if (placePreset === "flashcards") {
+    window.mountFlashcardDeckBlock?.(real, { openPicker: true });
+  }
+
   const shouldOpenClockPicker = placePreset === "clock";
 
   if (typeof autoGrowBlock === "function") autoGrowBlock(real);
@@ -6039,7 +7537,7 @@ function selectBlock(block) {
     if (type !== "table" && tableSelectionMode) {
       setTableSelectionMode(false);
     }
-    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || isDividerType(type)) document.body.classList.add("block-type-text");
+    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || isDividerType(type)) document.body.classList.add("block-type-text");
     if (type === "list") document.body.classList.add("block-type-list");
     if (type === "image") document.body.classList.add("block-type-image");
     if (type === "container") document.body.classList.add("block-type-container");
