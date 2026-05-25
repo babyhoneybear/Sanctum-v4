@@ -235,6 +235,14 @@ function buildBlockFromData(data) {
     });
   }
 
+  if (data.type === "match-pairs") {
+    if (data.matchPairsConfig) b.dataset.matchPairsConfig = data.matchPairsConfig;
+
+    requestAnimationFrame(() => {
+      window.mountMatchPairsBlock?.(b);
+    });
+  }
+
   if (data.type === "clock") {
     b.dataset.clockStyle = data.clockStyle || "digital";
     b.dataset.clockSize = data.clockSize || "md";
@@ -358,6 +366,32 @@ function getMinHeightForBlock(block) {
     }
 
     return height;
+  }
+
+  if (block?.dataset?.type === "match-pairs") {
+    const computed = window.getComputedStyle(block);
+    const paddingTop = parseFloat(computed.paddingTop) || 0;
+    const paddingBottom = parseFloat(computed.paddingBottom) || 0;
+    const shell = block.querySelector(".match-pairs-shell");
+    const stage = block.querySelector(".match-pairs-stage");
+    if (!shell) return GRID_SIZE * 8;
+    const shellGap = parseFloat(window.getComputedStyle(shell).gap) || 0;
+    const visibleChildren = Array.from(shell.children).filter((child) => !child.hidden);
+    const fixedHeight = visibleChildren
+      .filter((child) => child !== stage)
+      .reduce((height, child) => height + child.getBoundingClientRect().height, 0);
+    let stageHeight = GRID_SIZE * 5;
+    if (stage) {
+      const stageStyle = window.getComputedStyle(stage);
+      const stagePadding = (parseFloat(stageStyle.paddingTop) || 0) + (parseFloat(stageStyle.paddingBottom) || 0);
+      const stageBorders = (parseFloat(stageStyle.borderTopWidth) || 0) + (parseFloat(stageStyle.borderBottomWidth) || 0);
+      const stageContentHeight = Array.from(stage.children).reduce((height, child) => {
+        return height + Math.max(child.scrollHeight, child.getBoundingClientRect().height);
+      }, 0);
+      stageHeight = Math.max(GRID_SIZE * 5, stageContentHeight + stagePadding + stageBorders);
+    }
+    const naturalHeight = paddingTop + fixedHeight + stageHeight + (Math.max(0, visibleChildren.length - 1) * shellGap) + paddingBottom + 4;
+    return Math.max(GRID_SIZE * 8, Math.ceil(naturalHeight / GRID_SIZE) * GRID_SIZE);
   }
 
   const title = block.querySelector(".block-title");
