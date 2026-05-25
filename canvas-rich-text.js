@@ -285,7 +285,7 @@
 
   function getCanvasSlashCommandGroups(commands = []) {
     const groups = [
-      { label: "Study Tools", icon: "S", labels: ["Flashcard Deck"] },
+      { label: "Study Tools", icon: "S", labels: ["Flashcard Deck", "Typing Drill", "Fill Blank"] },
       { label: "Text", icon: "T", labels: ["Heading 1", "Heading 2", "Heading 3", "Bullet List", "Numbered List", "Toggle List", "Text Box"] },
       { label: "Pages", icon: "P", labels: ["New Page", "Link Page", "Link Page Gallery", "Link Domain", "Link Domain Gallery"] },
       { label: "Databases", icon: "D", labels: ["Inline Database", "Database Page", "Table"] },
@@ -463,6 +463,20 @@
       keywords: ["study", "flashcard", "cards", "review", "quiz"],
       when: isPlainCanvasTextBlockContext,
       run: (_editable, block) => window.convertCanvasBlockType?.(block, "flashcards", { openFlashcardPicker: true })
+    },
+    {
+      label: "Typing Drill",
+      icon: "TY",
+      keywords: ["study", "typing", "drill", "answer", "practice", "quiz"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "typing-drill", { openTypingDrillPicker: true })
+    },
+    {
+      label: "Fill Blank",
+      icon: "FB",
+      keywords: ["study", "fill", "blank", "cloze", "sentence", "quiz"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "fill-blank", { openFillBlankPicker: true })
     },
     {
       label: "Divider",

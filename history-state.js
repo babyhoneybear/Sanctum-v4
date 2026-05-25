@@ -219,6 +219,22 @@ function buildBlockFromData(data) {
     });
   }
 
+  if (data.type === "typing-drill") {
+    if (data.typingDrillConfig) b.dataset.typingDrillConfig = data.typingDrillConfig;
+
+    requestAnimationFrame(() => {
+      window.mountTypingDrillBlock?.(b);
+    });
+  }
+
+  if (data.type === "fill-blank") {
+    if (data.fillBlankConfig) b.dataset.fillBlankConfig = data.fillBlankConfig;
+
+    requestAnimationFrame(() => {
+      window.mountFillBlankBlock?.(b);
+    });
+  }
+
   if (data.type === "clock") {
     b.dataset.clockStyle = data.clockStyle || "digital";
     b.dataset.clockSize = data.clockSize || "md";

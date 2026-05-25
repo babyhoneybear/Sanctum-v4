@@ -26,6 +26,8 @@ const STORAGE_KEYS = {
   pageActivity: "sanctum_page_activity_v1",
   documents: "sanctum_documents",
   docSettings: "sanctum_doc_settings",
+  pageDatabases: "sanctum_page_databases",
+  legacyCalendarDatabases: "sanctum_calendar_databases",
   chronicles: "sanctum_chronicles",
   trash: "sanctum_trash",
   pins: "sanctum_pins",

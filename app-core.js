@@ -3399,6 +3399,13 @@ function renderData() {
   const used = window.SanctumStorage?.getUsageBytes?.() || new Blob([JSON.stringify(localStorage)]).size;
   const usedKB = (used / 1024).toFixed(1);
 
+  const readPageDatabasesForExport = () => {
+    const primary = readStorageJSON(STORAGE_KEYS.pageDatabases, null);
+    if (primary && typeof primary === "object" && !Array.isArray(primary)) return primary;
+    const legacy = readStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, {});
+    return legacy && typeof legacy === "object" && !Array.isArray(legacy) ? legacy : {};
+  };
+
   settingsRight.innerHTML = `
     <div class="settings-section-title">Data</div>
     ${settingsField("Storage Used", "", `<span style="color:var(--muted2);font-size:13px;">${usedKB} KB</span>`)}
@@ -3417,6 +3424,7 @@ function renderData() {
       pageActivity: readStorageJSON(STORAGE_KEYS.pageActivity, {}),
       documents: readStorageJSON(STORAGE_KEYS.documents, {}),
       docSettings: readStorageJSON(STORAGE_KEYS.docSettings, {}),
+      pageDatabases: readPageDatabasesForExport(),
       chronicles: readStorageJSON(STORAGE_KEYS.chronicles, []),
       trash: readStorageJSON(STORAGE_KEYS.trash, []),
       pins: readStorageJSON(STORAGE_KEYS.pins, []),
@@ -3462,6 +3470,11 @@ function renderData() {
           if (data.pageActivity) { writeStorageJSON(STORAGE_KEYS.pageActivity, data.pageActivity); }
           if (data.documents) { writeStorageJSON(STORAGE_KEYS.documents, data.documents); }
           if (data.docSettings) { writeStorageJSON(STORAGE_KEYS.docSettings, data.docSettings); }
+          const importedPageDatabases = data.pageDatabases || data.calendarDatabases;
+          if (importedPageDatabases) {
+            writeStorageJSON(STORAGE_KEYS.pageDatabases, importedPageDatabases);
+            writeStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, importedPageDatabases);
+          }
           if (data.chronicles) { writeStorageJSON(STORAGE_KEYS.chronicles, data.chronicles); }
           if (data.trash) { writeStorageJSON(STORAGE_KEYS.trash, data.trash); }
           if (data.pins) { writeStorageJSON(STORAGE_KEYS.pins, data.pins); }

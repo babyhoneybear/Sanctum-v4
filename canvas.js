@@ -943,6 +943,7 @@ document.addEventListener("mousedown", (e) => {
   if (beginCanvasTableColumnResize(e)) return;
 
   if (e.target.closest('[contenteditable="true"]')) return;
+  if (e.target.closest(".typing-drill-shell input, .typing-drill-shell button, .typing-drill-shell select, .typing-drill-shell textarea")) return;
   if (e.target.closest(".page-card-media-action")) return;
 
   const media = e.target.closest(".page-card-media");
@@ -1218,6 +1219,8 @@ const toolDivider = document.getElementById("toolDivider");
 const toolDataCallout = document.getElementById("toolDataCallout");
 const toolProgress = document.getElementById("toolProgress");
 const toolClock = document.getElementById("toolClock");
+const toolTypingDrill = document.getElementById("toolTypingDrill");
+const toolFillBlank = document.getElementById("toolFillBlank");
 
 
 function startPlacingPreset(preset) {
@@ -1235,6 +1238,8 @@ toolDomain.addEventListener("click", (e) => { e.preventDefault(); startPlacingPr
 toolDataCallout?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("data-callout"); });
 toolProgress?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("progress"); });
 toolClock?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("clock"); });
+toolTypingDrill?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("typing-drill"); });
+toolFillBlank?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("fill-blank"); });
 document.getElementById("toolContainer")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("container"); });
 document.getElementById("toolTable")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("table"); });
 document.getElementById("generateLayoutBtn")?.addEventListener("click", (e) => {
@@ -1291,6 +1296,14 @@ function getDefaultBlockDimensions(type = "text") {
   }
 
   if (type === "flashcards") {
+    return { width: snap(GRID_SIZE * 14), height: snap(GRID_SIZE * 8) };
+  }
+
+  if (type === "typing-drill") {
+    return { width: snap(GRID_SIZE * 14), height: snap(GRID_SIZE * 8) };
+  }
+
+  if (type === "fill-blank") {
     return { width: snap(GRID_SIZE * 14), height: snap(GRID_SIZE * 8) };
   }
 
@@ -2854,6 +2867,8 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.clockShowSeconds;
   delete block.dataset.clockShowDate;
   delete block.dataset.flashcardsConfig;
+  delete block.dataset.typingDrillConfig;
+  delete block.dataset.fillBlankConfig;
   block.innerHTML = makeBlockHTML(nextType);
 
   normalizeBlockAppearanceForType(block, nextType);
@@ -2910,6 +2925,14 @@ function convertCanvasBlockType(block, nextType, options = {}) {
 
   if (nextType === "flashcards") {
     window.mountFlashcardDeckBlock?.(block, { openPicker: !!options.openFlashcardPicker });
+  }
+
+  if (nextType === "typing-drill") {
+    window.mountTypingDrillBlock?.(block, { openPicker: !!options.openTypingDrillPicker });
+  }
+
+  if (nextType === "fill-blank") {
+    window.mountFillBlankBlock?.(block, { openPicker: !!options.openFillBlankPicker });
   }
 
   if (options.openImagePicker) {
@@ -3159,6 +3182,88 @@ function makeBlockHTML(type = "text") {
           <span class="flashcard-deck-position">0 / 0</span>
           <button type="button" class="flashcard-deck-study-btn" data-flashcards-action="review">Studied</button>
           <button type="button" class="flashcard-deck-nav-btn" data-flashcards-action="next">›</button>
+        </div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "typing-drill") {
+    return `
+      <div class="typing-drill-shell">
+        <div class="typing-drill-topbar">
+          <div class="typing-drill-title-wrap">
+            <span class="typing-drill-title">Typing Drill</span>
+            <span class="typing-drill-count">0 items</span>
+          </div>
+          <div class="typing-drill-score" aria-live="polite">0 / 0</div>
+          <div class="typing-drill-chips">
+            <span class="typing-drill-chip" data-typing-drill-chip="database">No database</span>
+            <span class="typing-drill-chip" data-typing-drill-chip="filter">All</span>
+          </div>
+          <button type="button" class="typing-drill-config-btn" data-typing-drill-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="typing-drill-body">
+          <div class="typing-drill-prompt-label">Prompt</div>
+          <div class="typing-drill-prompt">Choose a database and fields to start.</div>
+          <div class="typing-drill-extra" hidden></div>
+          <label class="typing-drill-answer-field">
+            <span>Type answer</span>
+            <input type="text" data-typing-drill-input="answer" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="typing-drill-status" hidden></div>
+          <div class="typing-drill-hint" hidden></div>
+          <div class="typing-drill-actions">
+            <button type="button" data-typing-drill-action="back">Back</button>
+            <button type="button" data-typing-drill-action="check">Check</button>
+            <button type="button" data-typing-drill-action="hint">Hint</button>
+            <button type="button" data-typing-drill-action="skip">Skip</button>
+            <button type="button" data-typing-drill-action="reset">Reset</button>
+          </div>
+          <div class="typing-drill-result" hidden>
+            <div class="typing-drill-result-label">Correct answer</div>
+            <div class="typing-drill-correct-answer"></div>
+            <div class="typing-drill-result-note"></div>
+          </div>
+        </div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "fill-blank") {
+    return `
+      <div class="typing-drill-shell fill-blank-shell">
+        <div class="typing-drill-topbar">
+          <div class="typing-drill-title-wrap">
+            <span class="typing-drill-title">Fill-in-the-Blank</span>
+            <span class="typing-drill-count">0 items</span>
+          </div>
+          <div class="typing-drill-score" aria-live="polite">0 / 0</div>
+          <div class="typing-drill-chips">
+            <span class="typing-drill-chip" data-fill-blank-chip="database">No database</span>
+            <span class="typing-drill-chip" data-fill-blank-chip="filter">All rows</span>
+          </div>
+          <button type="button" class="typing-drill-config-btn" data-fill-blank-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="typing-drill-body">
+          <div class="typing-drill-prompt-label">Prompt</div>
+          <div class="fill-blank-prompt">Choose a database and fields to start.</div>
+          <div class="typing-drill-extra" hidden></div>
+          <div class="typing-drill-status" hidden></div>
+          <div class="typing-drill-hint" hidden></div>
+          <div class="typing-drill-actions">
+            <button type="button" data-fill-blank-action="back">Back</button>
+            <button type="button" data-fill-blank-action="check">Check</button>
+            <button type="button" data-fill-blank-action="hint">Hint</button>
+            <button type="button" data-fill-blank-action="skip">Skip</button>
+            <button type="button" data-fill-blank-action="reset">Reset</button>
+          </div>
+          <div class="typing-drill-result" hidden>
+            <div class="typing-drill-result-label">Correct answer</div>
+            <div class="typing-drill-correct-answer"></div>
+            <div class="typing-drill-result-note"></div>
+          </div>
         </div>
       </div>
       <div class="block-resize-handle" title="Resize"></div>
@@ -6321,10 +6426,1299 @@ window.mountFlashcardDeckBlock = function mountFlashcardDeckBlock(block, options
   return block;
 };
 
+function normalizeTypingDrillCheckMode(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["exact", "loose", "accepted", "contains", "manual", "ai"].includes(safe) ? safe : "loose";
+}
+
+function normalizeTypingDrillPoolMode(value = "") {
+  return "all";
+}
+
+function normalizeTypingDrillOrder(value = "") {
+  return String(value || "").trim().toLowerCase() === "ordered" ? "ordered" : "random";
+}
+
+function normalizeTypingDrillDisplaySize(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["compact", "standard", "wide"].includes(safe) ? safe : "standard";
+}
+
+function normalizeTypingDrillConfig(raw = {}) {
+  return {
+    title: String(raw?.title || "").trim() || "Typing Drill",
+    sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(raw?.sourcePageId || "").trim(),
+    sourceBlockId: raw?.sourceKind === "block" ? String(raw?.sourceBlockId || "").trim() : "",
+    promptFieldId: String(raw?.promptFieldId || "").trim(),
+    answerFieldId: String(raw?.answerFieldId || "").trim(),
+    hintFieldId: String(raw?.hintFieldId || "").trim(),
+    extraFieldId: String(raw?.extraFieldId || "").trim(),
+    acceptedFieldId: String(raw?.acceptedFieldId || "").trim(),
+    checkMode: normalizeTypingDrillCheckMode(raw?.checkMode || "loose"),
+    ignoreSpaces: raw?.ignoreSpaces !== false,
+    ignorePunctuation: raw?.ignorePunctuation !== false,
+    caseSensitive: !!raw?.caseSensitive,
+    keywordText: String(raw?.keywordText || "").trim(),
+    sessionLimit: Math.max(1, Math.min(100, Number(raw?.sessionLimit || 10) || 10)),
+    order: normalizeTypingDrillOrder(raw?.order || "random"),
+    poolMode: normalizeTypingDrillPoolMode(raw?.poolMode || "all"),
+    displaySize: normalizeTypingDrillDisplaySize(raw?.displaySize || "standard"),
+    currentIndex: Math.max(0, Number(raw?.currentIndex || 0) || 0),
+    seenRowIds: Array.isArray(raw?.seenRowIds) ? raw.seenRowIds.map((id) => String(id || "").trim()).filter(Boolean).slice(0, 500) : [],
+    userAnswer: String(raw?.userAnswer || ""),
+    showHint: !!raw?.showHint,
+    resultState: ["idle", "correct", "wrong"].includes(raw?.resultState) ? raw.resultState : "idle",
+    lastCorrect: !!raw?.lastCorrect,
+    feedbackState: ["", "correct", "wrong", "skipped", "reset"].includes(raw?.feedbackState) ? raw.feedbackState : "",
+    feedbackText: String(raw?.feedbackText || "").trim(),
+    scoreCorrect: Math.max(0, Number(raw?.scoreCorrect || 0) || 0),
+    scoreTried: Math.max(0, Number(raw?.scoreTried || 0) || 0),
+    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0)
+  };
+}
+
+function readTypingDrillConfig(block) {
+  if (!block) return normalizeTypingDrillConfig({});
+  return normalizeTypingDrillConfig(parseFlashcardsJSON(block.dataset.typingDrillConfig || "", {}));
+}
+
+function writeTypingDrillConfig(block, config) {
+  if (!block) return;
+  block.dataset.typingDrillConfig = JSON.stringify(normalizeTypingDrillConfig(config));
+}
+
+function getTypingDrillSourceData(config) {
+  if (!config?.sourcePageId || typeof window.getDatabaseCalloutSourceData !== "function") return null;
+  return window.getDatabaseCalloutSourceData({
+    kind: config.sourceKind === "block" ? "block" : "page",
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  });
+}
+
+function getTypingDrillRowValue(row, propertyId = "") {
+  if (!row || !propertyId) return "";
+  if (propertyId === "__title__") return String(row.title || "").trim();
+  return getFlashcardDeckValueText(row.values?.[propertyId]);
+}
+
+function inferTypingDrillFields(properties = [], current = {}) {
+  const props = Array.isArray(properties) ? properties : [];
+  const isValid = (value) => value === "__title__" || props.some((property) => property?.id === value);
+  const safe = (value) => isValid(value) ? value : "";
+  const hasValidMapping = ["promptFieldId", "answerFieldId", "hintFieldId", "extraFieldId", "acceptedFieldId"].some((key) => safe(current?.[key] || ""));
+  if (hasValidMapping) {
+    return {
+      promptFieldId: safe(current.promptFieldId),
+      answerFieldId: safe(current.answerFieldId),
+      hintFieldId: safe(current.hintFieldId),
+      extraFieldId: safe(current.extraFieldId),
+      acceptedFieldId: safe(current.acceptedFieldId)
+    };
+  }
+  const findByName = (patterns) => {
+    const match = props.find((property) => patterns.some((pattern) => pattern.test(String(property?.name || "").trim().toLowerCase())));
+    return match?.id || "";
+  };
+  return {
+    promptFieldId: findByName([/prompt|question|front|english|term/]) || "__title__",
+    answerFieldId: findByName([/answer|back|hiragana|definition|meaning|value/]) || props[0]?.id || "",
+    hintFieldId: findByName([/hint|romaji|note/]),
+    extraFieldId: findByName([/extra|example|sentence|context/]),
+    acceptedFieldId: findByName([/accepted|alternate|alias|also/])
+  };
+}
+
+function normalizeTypingDrillAnswer(value = "", options = {}) {
+  let text = String(value || "");
+  text = text.trim();
+  if (options.ignorePunctuation) text = text.replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~。、，．！？：；「」『』（）［］｛｝]/g, "");
+  if (options.ignoreSpaces) text = text.replace(/\s+/g, "");
+  else text = text.replace(/\s+/g, " ");
+  if (!options.caseSensitive) text = text.toLowerCase();
+  return text;
+}
+
+function splitTypingDrillAnswers(value = "") {
+  return String(value || "")
+    .split(/\r?\n|[;,|]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function getTypingDrillAcceptedAnswers(row, config) {
+  const answers = [getTypingDrillRowValue(row, config.answerFieldId)];
+  if (config.acceptedFieldId) {
+    answers.push(...splitTypingDrillAnswers(getTypingDrillRowValue(row, config.acceptedFieldId)));
+  }
+  return answers.filter(Boolean);
+}
+
+function checkTypingDrillAnswer(row, config, userAnswer = "") {
+  const answers = getTypingDrillAcceptedAnswers(row, config);
+  const primaryAnswer = answers[0] || "";
+  if (!row || !primaryAnswer) return { correct: false, primaryAnswer, note: "No answer field is mapped yet." };
+  if (config.checkMode === "manual" || config.checkMode === "ai") {
+    return { correct: false, primaryAnswer, note: config.checkMode === "ai" ? "AI check can be connected later. Grade this one manually for now." : "Grade this one manually." };
+  }
+  if (config.checkMode === "contains") {
+    const keywords = splitTypingDrillAnswers(config.keywordText || primaryAnswer.replace(/\s+/g, "|"));
+    const haystack = normalizeTypingDrillAnswer(userAnswer, {
+      ignoreSpaces: false,
+      ignorePunctuation: config.ignorePunctuation,
+      caseSensitive: config.caseSensitive
+    });
+    const missing = keywords.filter((keyword) => !haystack.includes(normalizeTypingDrillAnswer(keyword, {
+      ignoreSpaces: false,
+      ignorePunctuation: config.ignorePunctuation,
+      caseSensitive: config.caseSensitive
+    })));
+    return { correct: missing.length === 0, primaryAnswer, note: missing.length ? `Missing: ${missing.join(", ")}` : "Contains the required parts." };
+  }
+  const options = config.checkMode === "exact"
+    ? { ignoreSpaces: false, ignorePunctuation: false, caseSensitive: true }
+    : {
+        ignoreSpaces: config.ignoreSpaces,
+        ignorePunctuation: config.ignorePunctuation,
+        caseSensitive: config.caseSensitive
+      };
+  const submitted = normalizeTypingDrillAnswer(userAnswer, options);
+  const correct = answers.some((answer) => normalizeTypingDrillAnswer(answer, options) === submitted);
+  return { correct, primaryAnswer, note: correct ? "Correct." : "Not quite." };
+}
+
+function typingDrillUsesManualGrade(config) {
+  return config?.checkMode === "manual" || config?.checkMode === "ai";
+}
+
+function rowMatchesTypingDrillPool() {
+  return true;
+}
+
+function getTypingDrillItems(config) {
+  const sourceData = getTypingDrillSourceData(config);
+  const rows = sourceData?.database?.rows || [];
+  const properties = sourceData?.database?.properties || [];
+  if (!rows.length) return { sourceData, rows: [], properties };
+  const filtered = rows
+    .filter((row) => rowMatchesTypingDrillPool(row, properties, config))
+    .filter((row) => getTypingDrillRowValue(row, config.promptFieldId) || getTypingDrillRowValue(row, config.answerFieldId));
+  const limit = Math.max(1, config.sessionLimit || 10);
+  return { sourceData, properties, rows: filtered.slice(0, limit) };
+}
+
+function getTypingDrillCurrent(config) {
+  const payload = getTypingDrillItems(config);
+  if (!payload.rows.length) return { ...payload, row: null, index: 0 };
+  const index = Math.max(0, Math.min(config.currentIndex || 0, payload.rows.length - 1));
+  return { ...payload, row: payload.rows[index], index };
+}
+
+function buildTypingDrillScoreText(config) {
+  const tried = Math.max(0, Number(config?.scoreTried || 0) || 0);
+  const correct = Math.max(0, Number(config?.scoreCorrect || 0) || 0);
+  const skipped = Math.max(0, Number(config?.scoreSkipped || 0) || 0);
+  const percent = tried ? Math.round((correct / tried) * 100) : 0;
+  return tried ? `${correct}/${tried} · ${percent}%${skipped ? ` · ${skipped} skipped` : ""}` : "0/0";
+}
+
+function renderTypingDrillBlock(block) {
+  if (!block || block.dataset.type !== "typing-drill") return null;
+  const config = readTypingDrillConfig(block);
+  const { sourceData, rows, row, index } = getTypingDrillCurrent(config);
+  const titleEl = block.querySelector(".typing-drill-title");
+  const countEl = block.querySelector(".typing-drill-count");
+  const scoreEl = block.querySelector(".typing-drill-score");
+  const databaseChip = block.querySelector('[data-typing-drill-chip="database"]');
+  const filterChip = block.querySelector('[data-typing-drill-chip="filter"]');
+  const promptEl = block.querySelector(".typing-drill-prompt");
+  const extraEl = block.querySelector(".typing-drill-extra");
+  const hintEl = block.querySelector(".typing-drill-hint");
+  const inputEl = block.querySelector('[data-typing-drill-input="answer"]');
+  const statusEl = block.querySelector(".typing-drill-status");
+  const resultEl = block.querySelector(".typing-drill-result");
+  const answerEl = block.querySelector(".typing-drill-correct-answer");
+  const noteEl = block.querySelector(".typing-drill-result-note");
+  const checkBtn = block.querySelector('[data-typing-drill-action="check"]');
+  const hintBtn = block.querySelector('[data-typing-drill-action="hint"]');
+  const skipBtn = block.querySelector('[data-typing-drill-action="skip"]');
+  const backBtn = block.querySelector('[data-typing-drill-action="back"]');
+  const resetBtn = block.querySelector('[data-typing-drill-action="reset"]');
+  const checked = config.resultState === "correct" || config.resultState === "wrong";
+  const check = checked ? checkTypingDrillAnswer(row, config, config.userAnswer) : null;
+  const feedbackState = checked ? config.resultState : config.feedbackState;
+
+  if (titleEl) titleEl.textContent = config.title || "Typing Drill";
+  block.dataset.typingDrillFeedback = feedbackState || "";
+  block.dataset.typingDrillSize = config.displaySize || "standard";
+  if (countEl) countEl.textContent = rows.length ? `${index + 1} / ${rows.length}` : "0 items";
+  if (scoreEl) scoreEl.textContent = buildTypingDrillScoreText(config);
+  if (databaseChip) databaseChip.textContent = sourceData?.database?.title || "No database";
+  if (filterChip) filterChip.textContent = "All rows";
+  if (promptEl) promptEl.textContent = row ? (getTypingDrillRowValue(row, config.promptFieldId) || "No prompt mapped.") : "Choose a database and fields to start.";
+  if (extraEl) {
+    const extraText = row ? getTypingDrillRowValue(row, config.extraFieldId) : "";
+    extraEl.textContent = extraText;
+    extraEl.hidden = !extraText;
+  }
+  if (hintEl) {
+    const hintText = row ? getTypingDrillRowValue(row, config.hintFieldId) : "";
+    hintEl.textContent = hintText ? `Hint: ${hintText}` : "";
+    hintEl.hidden = !config.showHint || !hintText;
+  }
+  if (inputEl && (document.activeElement !== inputEl || !config.userAnswer)) inputEl.value = config.userAnswer || "";
+  if (statusEl) {
+    statusEl.textContent = checked
+      ? (config.resultState === "correct" ? "Correct. Press Enter or Next." : "Not quite. Correct answer shown below.")
+      : (config.feedbackText || "");
+    statusEl.hidden = !statusEl.textContent;
+    statusEl.dataset.state = feedbackState || "";
+  }
+  const showCorrectAnswer = config.resultState === "wrong";
+  if (resultEl) resultEl.hidden = !showCorrectAnswer;
+  if (answerEl) answerEl.textContent = showCorrectAnswer ? (check?.primaryAnswer || "") : "";
+  if (noteEl) {
+    noteEl.textContent = showCorrectAnswer ? (check?.note || "") : "";
+    noteEl.dataset.correct = showCorrectAnswer && check?.correct ? "1" : "0";
+  }
+  if (checkBtn) {
+    checkBtn.disabled = !row || config.resultState === "wrong";
+    checkBtn.textContent = config.resultState === "correct" ? "Next" : "Check";
+  }
+  if (hintBtn) hintBtn.disabled = !row || !config.hintFieldId;
+  if (skipBtn) skipBtn.disabled = !row;
+  if (backBtn) backBtn.disabled = !rows.length;
+  if (resetBtn) resetBtn.disabled = !rows.length && !config.userAnswer && config.resultState === "idle";
+  return block;
+}
+
+function closeTypingDrillPicker() {
+  document.querySelector(".topbar-dropdown.typing-drill-picker")?.remove();
+}
+
+function positionTypingDrillPicker(picker, block, anchorEl = null) {
+  if (!picker || !block) return;
+  const viewportPadding = 12;
+  const gap = 12;
+  const blockRect = block.getBoundingClientRect();
+  const anchorRect = (anchorEl || block).getBoundingClientRect();
+  const pickerWidth = picker.offsetWidth || 320;
+  const pickerHeight = picker.offsetHeight || 460;
+  const spaceRight = window.innerWidth - blockRect.right - viewportPadding;
+  const spaceLeft = blockRect.left - viewportPadding;
+  let left = blockRect.right + gap;
+
+  if (spaceRight >= pickerWidth + gap) {
+    left = blockRect.right + gap;
+  } else if (spaceLeft >= pickerWidth + gap) {
+    left = blockRect.left - pickerWidth - gap;
+  } else {
+    const anchorRightAligned = anchorRect.right - pickerWidth;
+    left = Math.max(viewportPadding, Math.min(window.innerWidth - pickerWidth - viewportPadding, anchorRightAligned));
+  }
+
+  let top = blockRect.top;
+  if (top + pickerHeight > window.innerHeight - viewportPadding) {
+    top = window.innerHeight - pickerHeight - viewportPadding;
+  }
+  if (top < viewportPadding) top = viewportPadding;
+
+  picker.style.left = `${Math.round(left)}px`;
+  picker.style.top = `${Math.round(top)}px`;
+}
+
+function getTypingDrillDisplayDimensions(size = "standard") {
+  const safe = normalizeTypingDrillDisplaySize(size);
+  const snapValue = typeof snap === "function" ? snap : (value) => value;
+  if (safe === "compact") return { width: snapValue(GRID_SIZE * 10), height: snapValue(GRID_SIZE * 5) };
+  if (safe === "wide") return { width: snapValue(GRID_SIZE * 20), height: snapValue(GRID_SIZE * 8) };
+  return { width: snapValue(GRID_SIZE * 14), height: snapValue(GRID_SIZE * 8) };
+}
+
+function applyTypingDrillDisplaySize(block, size = "standard") {
+  if (!block) return;
+  const dimensions = getTypingDrillDisplayDimensions(size);
+  block.style.width = `${dimensions.width}px`;
+  block.style.height = `${dimensions.height}px`;
+}
+
+function openTypingDrillPicker(block, anchorEl = null) {
+  if (!block || block.dataset.type !== "typing-drill") return;
+  closeTypingDrillPicker();
+  const config = readTypingDrillConfig(block);
+  const sources = typeof window.getDatabaseCalloutSources === "function" ? window.getDatabaseCalloutSources() : [];
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown typing-drill-picker";
+  picker.dataset.uiId = "topbarDropdown";
+  picker.innerHTML = `
+    <div class="typing-drill-picker-tabs">
+      <button type="button" class="active" data-typing-drill-tab="setup">Setup</button>
+      <button type="button" data-typing-drill-tab="advanced">Advanced</button>
+      <button type="button" data-typing-drill-tab="session">Session</button>
+      <button type="button" data-typing-drill-tab="style">Style</button>
+    </div>
+    <div class="typing-drill-picker-panel active" data-typing-drill-panel="setup">
+      <label class="typing-drill-picker-field">
+        <span>Title</span>
+        <input type="text" data-typing-drill-setting="title" />
+      </label>
+      <details class="typing-drill-picker-section" open>
+        <summary>Source</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Database</span><select data-typing-drill-setting="source"></select></label>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section" open>
+        <summary>Fields</summary>
+        <div class="typing-drill-picker-section-body">
+          <div class="typing-drill-picker-grid">
+            <label class="typing-drill-picker-field"><span>Prompt</span><select data-typing-drill-setting="prompt"></select></label>
+            <label class="typing-drill-picker-field"><span>Answer</span><select data-typing-drill-setting="answer"></select></label>
+          </div>
+          <label class="typing-drill-picker-field"><span>Hint</span><select data-typing-drill-setting="hint"></select></label>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-typing-drill-panel="advanced">
+      <details class="typing-drill-picker-section">
+        <summary>Answer checking</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field">
+            <span>Mode</span>
+            <select data-typing-drill-setting="mode">
+              <option value="exact">Exact</option>
+              <option value="loose">Loose</option>
+              <option value="accepted">Also Accept</option>
+              <option value="contains">Keywords</option>
+              <option value="manual">Manual</option>
+              <option value="ai">AI</option>
+            </select>
+          </label>
+          <div class="typing-drill-picker-help" data-typing-drill-mode-help></div>
+          <label class="typing-drill-picker-field" data-typing-drill-mode-panel="accepted"><span>Also Accept Field</span><select data-typing-drill-setting="accepted"></select></label>
+          <label class="typing-drill-picker-field" data-typing-drill-mode-panel="contains"><span>Required keywords</span><input type="text" data-typing-drill-setting="keywords" placeholder="function, return" /></label>
+          <div class="typing-drill-picker-toggles" data-typing-drill-mode-panel="loose">
+            <label><input type="checkbox" data-typing-drill-setting="ignoreSpaces" /> Ignore spaces</label>
+            <label><input type="checkbox" data-typing-drill-setting="ignorePunctuation" /> Ignore punctuation</label>
+            <label><input type="checkbox" data-typing-drill-setting="caseSensitive" /> Case sensitive</label>
+          </div>
+          <div class="typing-drill-picker-toggles" data-typing-drill-mode-panel="manual ai">
+            <span>Show correct answer after submit</span>
+            <span>Self-grade buttons</span>
+          </div>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section" open>
+        <summary>Extra display</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Extra field</span><select data-typing-drill-setting="extra"></select></label>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-typing-drill-panel="session">
+      <details class="typing-drill-picker-section" open>
+        <summary>Session</summary>
+        <div class="typing-drill-picker-section-body">
+          <div class="typing-drill-picker-grid">
+            <label class="typing-drill-picker-field"><span>Number of items</span><input type="number" min="1" max="100" data-typing-drill-setting="limit" /></label>
+            <label class="typing-drill-picker-field"><span>Order</span><select data-typing-drill-setting="order"><option value="random">Random</option><option value="ordered">Ordered</option></select></label>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-typing-drill-panel="style">
+      <details class="typing-drill-picker-section" open>
+        <summary>Display</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Display size</span><select data-typing-drill-setting="size"><option value="compact">Compact</option><option value="standard">Standard</option><option value="wide">Wide</option></select></label>
+        </div>
+      </details>
+    </div>
+  `;
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  picker.addEventListener("click", (event) => event.stopPropagation());
+  document.body.appendChild(picker);
+
+  const anchorTarget = anchorEl || block.querySelector(".typing-drill-config-btn") || block;
+  positionTypingDrillPicker(picker, block, anchorTarget);
+
+  const titleInput = picker.querySelector('[data-typing-drill-setting="title"]');
+  const sourceSelect = picker.querySelector('[data-typing-drill-setting="source"]');
+  const promptSelect = picker.querySelector('[data-typing-drill-setting="prompt"]');
+  const answerSelect = picker.querySelector('[data-typing-drill-setting="answer"]');
+  const hintSelect = picker.querySelector('[data-typing-drill-setting="hint"]');
+  const extraSelect = picker.querySelector('[data-typing-drill-setting="extra"]');
+  const acceptedSelect = picker.querySelector('[data-typing-drill-setting="accepted"]');
+  const modeSelect = picker.querySelector('[data-typing-drill-setting="mode"]');
+  const keywordInput = picker.querySelector('[data-typing-drill-setting="keywords"]');
+  const modeHelp = picker.querySelector("[data-typing-drill-mode-help]");
+  const ignoreSpacesInput = picker.querySelector('[data-typing-drill-setting="ignoreSpaces"]');
+  const ignorePunctuationInput = picker.querySelector('[data-typing-drill-setting="ignorePunctuation"]');
+  const caseSensitiveInput = picker.querySelector('[data-typing-drill-setting="caseSensitive"]');
+  const limitInput = picker.querySelector('[data-typing-drill-setting="limit"]');
+  const orderSelect = picker.querySelector('[data-typing-drill-setting="order"]');
+  const sizeSelect = picker.querySelector('[data-typing-drill-setting="size"]');
+
+  const sourceKey = (source) => `${source.kind}:${source.pageId}:${source.blockId || ""}`;
+  const selectedSourceKey = () => sourceSelect?.value || "";
+  const selectedSource = () => sources.find((source) => sourceKey(source) === selectedSourceKey()) || null;
+  const fillPropertySelect = (selectEl, properties, selectedValue, includeTitle = true) => {
+    if (!selectEl) return;
+    const options = [{ value: "", label: "None" }];
+    if (includeTitle) options.push({ value: "__title__", label: "Row title" });
+    (properties || []).forEach((property) => options.push({ value: property.id, label: property.name || "Property" }));
+    selectEl.innerHTML = options.map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`).join("");
+    selectEl.value = selectedValue || "";
+    if (selectEl.value !== (selectedValue || "")) selectEl.value = "";
+  };
+
+  function setTypingDrillPickerTab(tabName = "setup") {
+    const safeTab = ["setup", "advanced", "session", "style"].includes(tabName) ? tabName : "setup";
+    picker.querySelectorAll("[data-typing-drill-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.typingDrillTab === safeTab);
+    });
+    picker.querySelectorAll("[data-typing-drill-panel]").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.typingDrillPanel === safeTab);
+    });
+  }
+
+  picker.querySelector(".typing-drill-picker-tabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-typing-drill-tab]");
+    if (!button) return;
+    event.preventDefault();
+    setTypingDrillPickerTab(button.dataset.typingDrillTab || "setup");
+  });
+
+  function getWorkingTypingConfig() {
+    const base = readTypingDrillConfig(block);
+    const src = selectedSource();
+    const selectValue = (selectEl, fallback = "") => {
+      if (!selectEl || !selectEl.options || selectEl.options.length === 0) return fallback;
+      return selectEl.value;
+    };
+    return normalizeTypingDrillConfig({
+      ...base,
+      title: titleInput?.value || base.title,
+      sourceKind: src?.kind || base.sourceKind,
+      sourcePageId: src?.pageId || base.sourcePageId,
+      sourceBlockId: src?.blockId || base.sourceBlockId,
+      promptFieldId: selectValue(promptSelect, base.promptFieldId),
+      answerFieldId: selectValue(answerSelect, base.answerFieldId),
+      hintFieldId: selectValue(hintSelect, base.hintFieldId),
+      extraFieldId: selectValue(extraSelect, base.extraFieldId),
+      acceptedFieldId: selectValue(acceptedSelect, base.acceptedFieldId),
+      checkMode: modeSelect?.value || base.checkMode,
+      ignoreSpaces: !!ignoreSpacesInput?.checked,
+      ignorePunctuation: !!ignorePunctuationInput?.checked,
+      caseSensitive: !!caseSensitiveInput?.checked,
+      keywordText: keywordInput?.value || "",
+      sessionLimit: limitInput?.value || base.sessionLimit,
+      order: orderSelect?.value || base.order,
+      poolMode: "all",
+      displaySize: sizeSelect?.value || base.displaySize,
+      resultState: "idle",
+      userAnswer: "",
+      showHint: false,
+      seenRowIds: [],
+      scoreCorrect: 0,
+      scoreTried: 0,
+      scoreSkipped: 0,
+      feedbackState: "reset",
+      feedbackText: "Settings updated. Session reset."
+    });
+  }
+
+  function saveTypingConfig() {
+    const previousConfig = readTypingDrillConfig(block);
+    const nextConfig = getWorkingTypingConfig();
+    writeTypingDrillConfig(block, nextConfig);
+    if (nextConfig.displaySize !== previousConfig.displaySize) {
+      applyTypingDrillDisplaySize(block, nextConfig.displaySize);
+      window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
+    }
+    renderTypingDrillBlock(block);
+    if (typeof saveState === "function") saveState();
+    return nextConfig;
+  }
+
+  function syncModePanels() {
+    const mode = normalizeTypingDrillCheckMode(modeSelect?.value || "loose");
+    const helpText = {
+      exact: "Answer must match exactly.",
+      loose: "Ignores small formatting differences like spaces and punctuation.",
+      accepted: "Checks the answer plus anything in the Also Accept field.",
+      contains: "Answer must include the required keywords.",
+      manual: "User checks their own answer after seeing the correct one.",
+      ai: "Uses AI to judge flexible or open-ended answers."
+    };
+    if (modeHelp) modeHelp.textContent = helpText[mode] || helpText.loose;
+    picker.querySelectorAll("[data-typing-drill-mode-panel]").forEach((panel) => {
+      const modes = String(panel.dataset.typingDrillModePanel || "").split(/\s+/).filter(Boolean);
+      panel.hidden = !modes.includes(mode);
+    });
+  }
+
+  function syncPicker() {
+    const working = getWorkingTypingConfig();
+    const sourceData = getTypingDrillSourceData(working);
+    const properties = sourceData?.database?.properties || [];
+    const inferred = inferTypingDrillFields(properties, working);
+    fillPropertySelect(promptSelect, properties, inferred.promptFieldId);
+    fillPropertySelect(answerSelect, properties, inferred.answerFieldId);
+    fillPropertySelect(hintSelect, properties, inferred.hintFieldId);
+    fillPropertySelect(extraSelect, properties, inferred.extraFieldId);
+    fillPropertySelect(acceptedSelect, properties, working.acceptedFieldId);
+    syncModePanels();
+  }
+
+  sourceSelect.innerHTML = sources.map((source) => `<option value="${escapeHTML(sourceKey(source))}">${escapeHTML(source.label || source.title || "Database")}</option>`).join("");
+  const currentSourceValue = `${config.sourceKind}:${config.sourcePageId}:${config.sourceBlockId || ""}`;
+  if (sourceSelect.querySelector(`option[value="${CSS.escape(currentSourceValue)}"]`)) sourceSelect.value = currentSourceValue;
+  else if (sources[0]) sourceSelect.value = sourceKey(sources[0]);
+  if (titleInput) titleInput.value = config.title;
+  if (modeSelect) modeSelect.value = config.checkMode;
+  if (keywordInput) keywordInput.value = config.keywordText;
+  if (ignoreSpacesInput) ignoreSpacesInput.checked = !!config.ignoreSpaces;
+  if (ignorePunctuationInput) ignorePunctuationInput.checked = !!config.ignorePunctuation;
+  if (caseSensitiveInput) caseSensitiveInput.checked = !!config.caseSensitive;
+  if (limitInput) limitInput.value = String(config.sessionLimit || 10);
+  if (orderSelect) orderSelect.value = config.order;
+  if (sizeSelect) sizeSelect.value = config.displaySize || "standard";
+  syncPicker();
+
+  picker.addEventListener("change", () => {
+    saveTypingConfig();
+    syncPicker();
+  });
+  picker.addEventListener("input", (event) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    saveTypingConfig();
+    syncPicker();
+  });
+}
+
+function resetTypingDrillCardState(config) {
+  config.userAnswer = "";
+  config.showHint = false;
+  config.resultState = "idle";
+  config.lastCorrect = false;
+  return config;
+}
+
+function advanceTypingDrill(block, options = {}) {
+  const config = readTypingDrillConfig(block);
+  const { rows } = getTypingDrillItems(config);
+  if (!rows.length) return config;
+  const currentRow = rows[Math.max(0, Math.min(config.currentIndex || 0, rows.length - 1))] || null;
+  if (currentRow?.id && !config.seenRowIds.includes(currentRow.id)) config.seenRowIds.push(currentRow.id);
+  if (config.order === "random") {
+    let candidates = rows
+      .map((row, index) => ({ row, index }))
+      .filter((entry) => entry.index !== config.currentIndex && !config.seenRowIds.includes(entry.row.id));
+    if (!candidates.length) {
+      config.seenRowIds = currentRow?.id ? [currentRow.id] : [];
+      candidates = rows.map((row, index) => ({ row, index })).filter((entry) => entry.index !== config.currentIndex);
+    }
+    const fallbackIndex = rows.length > 1 ? (config.currentIndex + 1) % rows.length : 0;
+    const picked = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : { index: fallbackIndex };
+    config.currentIndex = picked.index;
+  } else {
+    config.currentIndex = (config.currentIndex + 1) % rows.length;
+  }
+  resetTypingDrillCardState(config);
+  config.feedbackState = "";
+  config.feedbackText = "";
+  if (options.feedbackState || options.feedbackText) {
+    config.feedbackState = options.feedbackState || "";
+    config.feedbackText = options.feedbackText || "";
+  }
+  return config;
+}
+
+function moveTypingDrillBack(block) {
+  const config = readTypingDrillConfig(block);
+  const { rows } = getTypingDrillItems(config);
+  if (!rows.length) return config;
+  config.currentIndex = (config.currentIndex - 1 + rows.length) % rows.length;
+  resetTypingDrillCardState(config);
+  config.feedbackState = "";
+  config.feedbackText = "";
+  return config;
+}
+
+function resetTypingDrill(block) {
+  const config = readTypingDrillConfig(block);
+  config.currentIndex = 0;
+  config.seenRowIds = [];
+  resetTypingDrillCardState(config);
+  config.feedbackState = "reset";
+  config.feedbackText = "Session reset.";
+  config.scoreCorrect = 0;
+  config.scoreTried = 0;
+  config.scoreSkipped = 0;
+  return config;
+}
+
+function markTypingDrillCorrectAndAdvance(block) {
+  return advanceTypingDrill(block, {
+    feedbackState: "",
+    feedbackText: ""
+  });
+}
+
+function submitTypingDrillAnswer(block, userAnswer = "") {
+  const config = readTypingDrillConfig(block);
+  const answerText = String(userAnswer || "").trim();
+  if (config.resultState === "correct") {
+    return markTypingDrillCorrectAndAdvance(block);
+  }
+  if (!answerText || config.resultState === "wrong") return config;
+
+  config.userAnswer = userAnswer || "";
+  const { row } = getTypingDrillCurrent(config);
+  const check = checkTypingDrillAnswer(row, config, config.userAnswer);
+  config.resultState = check.correct ? "correct" : "wrong";
+  config.lastCorrect = check.correct;
+  config.feedbackState = check.correct ? "correct" : "wrong";
+  config.feedbackText = "";
+  config.scoreTried += 1;
+  if (check.correct) config.scoreCorrect += 1;
+  return config;
+}
+
+window.mountTypingDrillBlock = function mountTypingDrillBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "typing-drill") return null;
+  if (!block.dataset.typingDrillConfig) {
+    writeTypingDrillConfig(block, normalizeTypingDrillConfig({}));
+  }
+  renderTypingDrillBlock(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector(".typing-drill-config-btn") || block;
+    openTypingDrillPicker(block, anchor);
+  }
+  return block;
+};
+
+function normalizeFillBlankConfig(raw = {}) {
+  return {
+    title: String(raw?.title || "").trim() || "Fill-in-the-Blank",
+    sourceKind: raw?.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(raw?.sourcePageId || "").trim(),
+    sourceBlockId: raw?.sourceKind === "block" ? String(raw?.sourceBlockId || "").trim() : "",
+    promptFieldId: String(raw?.promptFieldId || "").trim(),
+    answerFieldId: String(raw?.answerFieldId || "").trim(),
+    hintFieldId: String(raw?.hintFieldId || "").trim(),
+    extraFieldId: String(raw?.extraFieldId || "").trim(),
+    acceptedFieldId: String(raw?.acceptedFieldId || "").trim(),
+    checkMode: normalizeTypingDrillCheckMode(raw?.checkMode || "loose"),
+    ignoreSpaces: raw?.ignoreSpaces !== false,
+    ignorePunctuation: raw?.ignorePunctuation !== false,
+    caseSensitive: !!raw?.caseSensitive,
+    keywordText: String(raw?.keywordText || "").trim(),
+    sessionLimit: Math.max(1, Math.min(100, Number(raw?.sessionLimit || 10) || 10)),
+    order: normalizeTypingDrillOrder(raw?.order || "random"),
+    displaySize: normalizeTypingDrillDisplaySize(raw?.displaySize || "standard"),
+    currentIndex: Math.max(0, Number(raw?.currentIndex || 0) || 0),
+    seenRowIds: Array.isArray(raw?.seenRowIds) ? raw.seenRowIds.map((id) => String(id || "").trim()).filter(Boolean).slice(0, 500) : [],
+    answers: Array.isArray(raw?.answers) ? raw.answers.map((value) => String(value || "")).slice(0, 30) : [],
+    showHint: !!raw?.showHint,
+    resultState: ["idle", "correct", "wrong"].includes(raw?.resultState) ? raw.resultState : "idle",
+    feedbackState: ["", "correct", "wrong", "skipped", "reset"].includes(raw?.feedbackState) ? raw.feedbackState : "",
+    feedbackText: String(raw?.feedbackText || "").trim(),
+    scoreCorrect: Math.max(0, Number(raw?.scoreCorrect || 0) || 0),
+    scoreTried: Math.max(0, Number(raw?.scoreTried || 0) || 0),
+    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0)
+  };
+}
+
+function readFillBlankConfig(block) {
+  if (!block) return normalizeFillBlankConfig({});
+  return normalizeFillBlankConfig(parseFlashcardsJSON(block.dataset.fillBlankConfig || "", {}));
+}
+
+function writeFillBlankConfig(block, config) {
+  if (!block) return;
+  block.dataset.fillBlankConfig = JSON.stringify(normalizeFillBlankConfig(config));
+}
+
+function getFillBlankSourceData(config) {
+  return getTypingDrillSourceData(config);
+}
+
+function getFillBlankRowValue(row, propertyId = "") {
+  return getTypingDrillRowValue(row, propertyId);
+}
+
+function inferFillBlankFields(properties = [], current = {}) {
+  const inferred = inferTypingDrillFields(properties, {
+    promptFieldId: current.promptFieldId,
+    answerFieldId: current.answerFieldId,
+    hintFieldId: current.hintFieldId,
+    extraFieldId: current.extraFieldId,
+    acceptedFieldId: current.acceptedFieldId
+  });
+  return {
+    promptFieldId: inferred.promptFieldId,
+    answerFieldId: inferred.answerFieldId,
+    hintFieldId: inferred.hintFieldId,
+    extraFieldId: inferred.extraFieldId,
+    acceptedFieldId: inferred.acceptedFieldId
+  };
+}
+
+function getFillBlankItems(config) {
+  const sourceData = getFillBlankSourceData(config);
+  const rows = sourceData?.database?.rows || [];
+  const properties = sourceData?.database?.properties || [];
+  const filtered = rows.filter((row) => getFillBlankRowValue(row, config.promptFieldId) || getFillBlankRowValue(row, config.answerFieldId));
+  const limit = Math.max(1, config.sessionLimit || 10);
+  return { sourceData, properties, rows: filtered.slice(0, limit) };
+}
+
+function getFillBlankCurrent(config) {
+  const payload = getFillBlankItems(config);
+  if (!payload.rows.length) return { ...payload, row: null, index: 0 };
+  const index = Math.max(0, Math.min(config.currentIndex || 0, payload.rows.length - 1));
+  return { ...payload, row: payload.rows[index], index };
+}
+
+function splitFillBlankParts(promptText = "") {
+  const parts = [];
+  const regex = /\{\{([^}]+)\}\}/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(String(promptText || "")))) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", text: promptText.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: "blank", name: String(match[1] || "").trim() });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < String(promptText || "").length) {
+    parts.push({ type: "text", text: String(promptText || "").slice(lastIndex) });
+  }
+  return parts;
+}
+
+function parseFillBlankNamedValues(value = "") {
+  const raw = String(value || "").trim();
+  const named = new Map();
+  raw.split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([^:\n]+?)\s*:\s*(.+?)\s*$/);
+    if (!match) return;
+    named.set(String(match[1] || "").trim().toLowerCase(), String(match[2] || "").trim());
+  });
+  return { raw, named };
+}
+
+function getFillBlankExpectedAnswers(row, config, parts = []) {
+  const answerField = parseFillBlankNamedValues(getFillBlankRowValue(row, config.answerFieldId));
+  const blanks = parts.filter((part) => part.type === "blank");
+  if (!blanks.length) return answerField.raw ? [answerField.raw] : [];
+  if (blanks.length === 1) {
+    const name = String(blanks[0].name || "").trim().toLowerCase();
+    return [answerField.named.get(name) || answerField.raw];
+  }
+  return blanks.map((blank) => answerField.named.get(String(blank.name || "").trim().toLowerCase()) || "");
+}
+
+function getFillBlankAcceptedAnswers(row, config, parts = [], index = 0) {
+  if (config.checkMode !== "accepted" || !config.acceptedFieldId) return [];
+  const acceptedField = parseFillBlankNamedValues(getFillBlankRowValue(row, config.acceptedFieldId));
+  const blanks = parts.filter((part) => part.type === "blank");
+  if (blanks.length <= 1) return splitTypingDrillAnswers(acceptedField.raw);
+  const name = String(blanks[index]?.name || "").trim().toLowerCase();
+  return splitTypingDrillAnswers(acceptedField.named.get(name) || "");
+}
+
+function checkFillBlankSingleAnswer(expected = "", accepted = [], userAnswer = "", config = {}) {
+  const answers = [expected, ...accepted].filter(Boolean);
+  const primaryAnswer = expected || answers[0] || "";
+  if (!primaryAnswer) return { correct: false, primaryAnswer, note: "No answer is available for this blank." };
+  if (config.checkMode === "manual" || config.checkMode === "ai") {
+    return { correct: false, primaryAnswer, note: config.checkMode === "ai" ? "AI check can be connected later." : "Grade this one manually." };
+  }
+  if (config.checkMode === "contains") {
+    const keywords = splitTypingDrillAnswers(config.keywordText || primaryAnswer.replace(/\s+/g, "|"));
+    const haystack = normalizeTypingDrillAnswer(userAnswer, {
+      ignoreSpaces: false,
+      ignorePunctuation: config.ignorePunctuation,
+      caseSensitive: config.caseSensitive
+    });
+    const missing = keywords.filter((keyword) => !haystack.includes(normalizeTypingDrillAnswer(keyword, {
+      ignoreSpaces: false,
+      ignorePunctuation: config.ignorePunctuation,
+      caseSensitive: config.caseSensitive
+    })));
+    return { correct: missing.length === 0, primaryAnswer, note: missing.length ? `Missing: ${missing.join(", ")}` : "Contains the required parts." };
+  }
+  const options = config.checkMode === "exact"
+    ? { ignoreSpaces: false, ignorePunctuation: false, caseSensitive: true }
+    : {
+        ignoreSpaces: config.ignoreSpaces,
+        ignorePunctuation: config.ignorePunctuation,
+        caseSensitive: config.caseSensitive
+      };
+  const submitted = normalizeTypingDrillAnswer(userAnswer, options);
+  const correct = answers.some((answer) => normalizeTypingDrillAnswer(answer, options) === submitted);
+  return { correct, primaryAnswer, note: correct ? "Correct." : "Not quite." };
+}
+
+function checkFillBlankAnswers(row, config) {
+  const promptText = getFillBlankRowValue(row, config.promptFieldId);
+  const parts = splitFillBlankParts(promptText);
+  const expected = getFillBlankExpectedAnswers(row, config, parts);
+  const checks = expected.map((answer, index) => checkFillBlankSingleAnswer(
+    answer,
+    getFillBlankAcceptedAnswers(row, config, parts, index),
+    config.answers[index] || "",
+    config
+  ));
+  const correct = checks.length > 0 && checks.every((check) => check.correct);
+  return { correct, checks, primaryAnswer: expected.filter(Boolean).join(", "), note: correct ? "Correct." : "Not quite." };
+}
+
+function renderFillBlankPrompt(promptEl, row, config) {
+  if (!promptEl) return;
+  promptEl.innerHTML = "";
+  const promptText = row ? getFillBlankRowValue(row, config.promptFieldId) : "";
+  const parts = splitFillBlankParts(promptText);
+  if (!row) {
+    promptEl.textContent = "Choose a database and fields to start.";
+    return;
+  }
+  if (!parts.some((part) => part.type === "blank")) {
+    promptEl.textContent = promptText || "No prompt mapped.";
+    return;
+  }
+  let blankIndex = 0;
+  parts.forEach((part) => {
+    if (part.type === "text") {
+      promptEl.appendChild(document.createTextNode(part.text));
+      return;
+    }
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "fill-blank-input";
+    input.dataset.fillBlankIndex = String(blankIndex);
+    input.value = config.answers[blankIndex] || "";
+    input.placeholder = "blank";
+    promptEl.appendChild(input);
+    blankIndex += 1;
+  });
+}
+
+function renderFillBlankBlock(block) {
+  if (!block || block.dataset.type !== "fill-blank") return null;
+  const config = readFillBlankConfig(block);
+  const { sourceData, rows, row, index } = getFillBlankCurrent(config);
+  const titleEl = block.querySelector(".typing-drill-title");
+  const countEl = block.querySelector(".typing-drill-count");
+  const scoreEl = block.querySelector(".typing-drill-score");
+  const databaseChip = block.querySelector('[data-fill-blank-chip="database"]');
+  const filterChip = block.querySelector('[data-fill-blank-chip="filter"]');
+  const promptEl = block.querySelector(".fill-blank-prompt");
+  const extraEl = block.querySelector(".typing-drill-extra");
+  const hintEl = block.querySelector(".typing-drill-hint");
+  const statusEl = block.querySelector(".typing-drill-status");
+  const resultEl = block.querySelector(".typing-drill-result");
+  const answerEl = block.querySelector(".typing-drill-correct-answer");
+  const noteEl = block.querySelector(".typing-drill-result-note");
+  const checkBtn = block.querySelector('[data-fill-blank-action="check"]');
+  const hintBtn = block.querySelector('[data-fill-blank-action="hint"]');
+  const skipBtn = block.querySelector('[data-fill-blank-action="skip"]');
+  const backBtn = block.querySelector('[data-fill-blank-action="back"]');
+  const resetBtn = block.querySelector('[data-fill-blank-action="reset"]');
+  const hasPromptBlank = row ? splitFillBlankParts(getFillBlankRowValue(row, config.promptFieldId)).some((part) => part.type === "blank") : false;
+  const checked = config.resultState === "correct" || config.resultState === "wrong";
+  const check = checked ? checkFillBlankAnswers(row, config) : null;
+  const feedbackState = checked ? config.resultState : config.feedbackState;
+
+  if (titleEl) titleEl.textContent = config.title || "Fill-in-the-Blank";
+  block.dataset.typingDrillFeedback = feedbackState || "";
+  block.dataset.typingDrillSize = config.displaySize || "standard";
+  if (countEl) countEl.textContent = rows.length ? `${index + 1} / ${rows.length}` : "0 items";
+  if (scoreEl) scoreEl.textContent = buildTypingDrillScoreText(config);
+  if (databaseChip) databaseChip.textContent = sourceData?.database?.title || "No database";
+  if (filterChip) filterChip.textContent = "All rows";
+  renderFillBlankPrompt(promptEl, row, config);
+  if (checked && promptEl && check?.checks?.length) {
+    promptEl.querySelectorAll(".fill-blank-input").forEach((input, blankIndex) => {
+      input.dataset.state = check.checks[blankIndex]?.correct ? "correct" : "wrong";
+    });
+  }
+  if (extraEl) {
+    const extraText = row ? getFillBlankRowValue(row, config.extraFieldId) : "";
+    extraEl.textContent = extraText;
+    extraEl.hidden = !extraText;
+  }
+  if (hintEl) {
+    const hintText = row ? getFillBlankRowValue(row, config.hintFieldId) : "";
+    hintEl.textContent = hintText ? `Hint: ${hintText}` : "";
+    hintEl.hidden = !config.showHint || !hintText;
+  }
+  if (statusEl) {
+    statusEl.textContent = checked
+      ? (config.resultState === "correct" ? "Correct. Press Check or Enter for the next prompt." : "Not quite. Correct answer shown below.")
+      : (config.feedbackText || "");
+    statusEl.hidden = !statusEl.textContent;
+    statusEl.dataset.state = feedbackState || "";
+  }
+  const showCorrectAnswer = config.resultState === "wrong";
+  if (resultEl) resultEl.hidden = !showCorrectAnswer;
+  if (answerEl) answerEl.textContent = showCorrectAnswer ? (check?.primaryAnswer || "") : "";
+  if (noteEl) {
+    noteEl.textContent = showCorrectAnswer ? (check?.note || "") : "";
+    noteEl.dataset.correct = showCorrectAnswer && check?.correct ? "1" : "0";
+  }
+  if (checkBtn) {
+    checkBtn.disabled = !row || !hasPromptBlank || config.resultState === "wrong";
+    checkBtn.textContent = config.resultState === "correct" ? "Next" : "Check";
+  }
+  if (hintBtn) hintBtn.disabled = !row || !config.hintFieldId;
+  if (skipBtn) skipBtn.disabled = !row;
+  if (backBtn) backBtn.disabled = !rows.length;
+  if (resetBtn) resetBtn.disabled = !rows.length && !config.answers.length && config.resultState === "idle";
+  return block;
+}
+
+function closeFillBlankPicker() {
+  document.querySelector(".topbar-dropdown.fill-blank-picker")?.remove();
+}
+
+function applyFillBlankDisplaySize(block, size = "standard") {
+  applyTypingDrillDisplaySize(block, size);
+}
+
+function openFillBlankPicker(block, anchorEl = null) {
+  if (!block || block.dataset.type !== "fill-blank") return;
+  closeFillBlankPicker();
+  const config = readFillBlankConfig(block);
+  const sources = typeof window.getDatabaseCalloutSources === "function" ? window.getDatabaseCalloutSources() : [];
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown typing-drill-picker fill-blank-picker";
+  picker.dataset.uiId = "topbarDropdown";
+  picker.innerHTML = `
+    <div class="typing-drill-picker-tabs">
+      <button type="button" class="active" data-fill-blank-tab="setup">Basic</button>
+      <button type="button" data-fill-blank-tab="session">Session</button>
+      <button type="button" data-fill-blank-tab="advanced">Advanced</button>
+      <button type="button" data-fill-blank-tab="style">Style</button>
+    </div>
+    <div class="typing-drill-picker-panel active" data-fill-blank-panel="setup">
+      <label class="typing-drill-picker-field"><span>Title</span><input type="text" data-fill-blank-setting="title" /></label>
+      <details class="typing-drill-picker-section" open>
+        <summary>Source</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Database</span><select data-fill-blank-setting="source"></select></label>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section" open>
+        <summary>Fields</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Prompt Template</span><select data-fill-blank-setting="prompt"></select></label>
+          <div class="typing-drill-picker-grid">
+            <label class="typing-drill-picker-field"><span>Answer</span><select data-fill-blank-setting="answer"></select></label>
+            <label class="typing-drill-picker-field"><span>Hint</span><select data-fill-blank-setting="hint"></select></label>
+          </div>
+          <div class="typing-drill-picker-help">Place blanks in the prompt with {{blank}} or named blanks like {{term}}.</div>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-fill-blank-panel="session">
+      <details class="typing-drill-picker-section" open>
+        <summary>Session</summary>
+        <div class="typing-drill-picker-section-body">
+          <div class="typing-drill-picker-grid">
+            <label class="typing-drill-picker-field"><span>Number of items</span><input type="number" min="1" max="100" data-fill-blank-setting="limit" /></label>
+            <label class="typing-drill-picker-field"><span>Order</span><select data-fill-blank-setting="order"><option value="random">Random</option><option value="ordered">Ordered</option></select></label>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-fill-blank-panel="advanced">
+      <details class="typing-drill-picker-section" open>
+        <summary>Answer checking</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Mode</span><select data-fill-blank-setting="mode"><option value="exact">Exact</option><option value="loose">Loose</option><option value="accepted">Also Accept</option><option value="contains">Keywords</option><option value="manual">Manual</option><option value="ai">AI</option></select></label>
+          <div class="typing-drill-picker-help" data-fill-blank-mode-help></div>
+          <label class="typing-drill-picker-field" data-fill-blank-mode-panel="accepted"><span>Also Accept Field</span><select data-fill-blank-setting="accepted"></select></label>
+          <label class="typing-drill-picker-field" data-fill-blank-mode-panel="contains"><span>Required keywords</span><input type="text" data-fill-blank-setting="keywords" placeholder="function, return" /></label>
+          <div class="typing-drill-picker-toggles" data-fill-blank-mode-panel="loose"><label><input type="checkbox" data-fill-blank-setting="ignoreSpaces" /> Ignore spaces</label><label><input type="checkbox" data-fill-blank-setting="ignorePunctuation" /> Ignore punctuation</label><label><input type="checkbox" data-fill-blank-setting="caseSensitive" /> Case sensitive</label></div>
+          <div class="typing-drill-picker-toggles" data-fill-blank-mode-panel="manual ai"><span>Show correct answer after submit</span><span>Self-grade buttons</span></div>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section">
+        <summary>Notes / Extra</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Notes / Extra Field</span><select data-fill-blank-setting="extra"></select></label>
+        </div>
+      </details>
+    </div>
+    <div class="typing-drill-picker-panel" data-fill-blank-panel="style">
+      <details class="typing-drill-picker-section" open>
+        <summary>Display</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Display size</span><select data-fill-blank-setting="size"><option value="compact">Compact</option><option value="standard">Standard</option><option value="wide">Wide</option></select></label>
+        </div>
+      </details>
+    </div>
+  `;
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  picker.addEventListener("click", (event) => event.stopPropagation());
+  document.body.appendChild(picker);
+
+  const anchorTarget = anchorEl || block.querySelector(".typing-drill-config-btn") || block;
+  positionTypingDrillPicker(picker, block, anchorTarget);
+
+  const titleInput = picker.querySelector('[data-fill-blank-setting="title"]');
+  const sourceSelect = picker.querySelector('[data-fill-blank-setting="source"]');
+  const promptSelect = picker.querySelector('[data-fill-blank-setting="prompt"]');
+  const answerSelect = picker.querySelector('[data-fill-blank-setting="answer"]');
+  const hintSelect = picker.querySelector('[data-fill-blank-setting="hint"]');
+  const extraSelect = picker.querySelector('[data-fill-blank-setting="extra"]');
+  const acceptedSelect = picker.querySelector('[data-fill-blank-setting="accepted"]');
+  const modeSelect = picker.querySelector('[data-fill-blank-setting="mode"]');
+  const keywordInput = picker.querySelector('[data-fill-blank-setting="keywords"]');
+  const modeHelp = picker.querySelector("[data-fill-blank-mode-help]");
+  const ignoreSpacesInput = picker.querySelector('[data-fill-blank-setting="ignoreSpaces"]');
+  const ignorePunctuationInput = picker.querySelector('[data-fill-blank-setting="ignorePunctuation"]');
+  const caseSensitiveInput = picker.querySelector('[data-fill-blank-setting="caseSensitive"]');
+  const limitInput = picker.querySelector('[data-fill-blank-setting="limit"]');
+  const orderSelect = picker.querySelector('[data-fill-blank-setting="order"]');
+  const sizeSelect = picker.querySelector('[data-fill-blank-setting="size"]');
+  const sourceKey = (source) => `${source.kind}:${source.pageId}:${source.blockId || ""}`;
+  const selectedSource = () => sources.find((source) => sourceKey(source) === (sourceSelect?.value || "")) || null;
+  const fillPropertySelect = (selectEl, properties, selectedValue, includeTitle = true) => {
+    if (!selectEl) return;
+    const options = [{ value: "", label: "None" }];
+    if (includeTitle) options.push({ value: "__title__", label: "Row title" });
+    (properties || []).forEach((property) => options.push({ value: property.id, label: property.name || "Property" }));
+    selectEl.innerHTML = options.map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`).join("");
+    selectEl.value = selectedValue || "";
+    if (selectEl.value !== (selectedValue || "")) selectEl.value = "";
+  };
+
+  function setFillBlankPickerTab(tabName = "setup") {
+    const safeTab = ["setup", "session", "advanced", "style"].includes(tabName) ? tabName : "setup";
+    picker.querySelectorAll("[data-fill-blank-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.fillBlankTab === safeTab);
+    });
+    picker.querySelectorAll("[data-fill-blank-panel]").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.fillBlankPanel === safeTab);
+    });
+  }
+
+  picker.querySelector(".typing-drill-picker-tabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-fill-blank-tab]");
+    if (!button) return;
+    event.preventDefault();
+    setFillBlankPickerTab(button.dataset.fillBlankTab || "setup");
+  });
+
+  function getWorkingFillBlankConfig() {
+    const base = readFillBlankConfig(block);
+    const src = selectedSource();
+    const selectValue = (selectEl, fallback = "") => {
+      if (!selectEl || !selectEl.options || selectEl.options.length === 0) return fallback;
+      return selectEl.value;
+    };
+    return normalizeFillBlankConfig({
+      ...base,
+      title: titleInput?.value || base.title,
+      sourceKind: src?.kind || base.sourceKind,
+      sourcePageId: src?.pageId || base.sourcePageId,
+      sourceBlockId: src?.blockId || base.sourceBlockId,
+      promptFieldId: selectValue(promptSelect, base.promptFieldId),
+      answerFieldId: selectValue(answerSelect, base.answerFieldId),
+      hintFieldId: selectValue(hintSelect, base.hintFieldId),
+      extraFieldId: selectValue(extraSelect, base.extraFieldId),
+      acceptedFieldId: selectValue(acceptedSelect, base.acceptedFieldId),
+      checkMode: modeSelect?.value || base.checkMode,
+      ignoreSpaces: !!ignoreSpacesInput?.checked,
+      ignorePunctuation: !!ignorePunctuationInput?.checked,
+      caseSensitive: !!caseSensitiveInput?.checked,
+      keywordText: keywordInput?.value || "",
+      sessionLimit: limitInput?.value || base.sessionLimit,
+      order: orderSelect?.value || base.order,
+      displaySize: sizeSelect?.value || base.displaySize,
+      answers: [],
+      resultState: "idle",
+      showHint: false,
+      seenRowIds: [],
+      scoreCorrect: 0,
+      scoreTried: 0,
+      scoreSkipped: 0,
+      feedbackState: "reset",
+      feedbackText: "Settings updated. Session reset."
+    });
+  }
+
+  function saveFillBlankConfig() {
+    const previousConfig = readFillBlankConfig(block);
+    const nextConfig = getWorkingFillBlankConfig();
+    writeFillBlankConfig(block, nextConfig);
+    if (nextConfig.displaySize !== previousConfig.displaySize) {
+      applyFillBlankDisplaySize(block, nextConfig.displaySize);
+      window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
+    }
+    renderFillBlankBlock(block);
+    if (typeof saveState === "function") saveState();
+    return nextConfig;
+  }
+
+  function syncModePanels() {
+    const mode = normalizeTypingDrillCheckMode(modeSelect?.value || "loose");
+    const helpText = {
+      exact: "Answer must match exactly.",
+      loose: "Ignores small formatting differences like spaces and punctuation.",
+      accepted: "Checks the answer plus anything in the Also Accept field.",
+      contains: "Answer must include the required keywords.",
+      manual: "User checks their own answer after seeing the correct one.",
+      ai: "Uses AI to judge flexible or open-ended answers."
+    };
+    if (modeHelp) modeHelp.textContent = helpText[mode] || helpText.loose;
+    picker.querySelectorAll("[data-fill-blank-mode-panel]").forEach((panel) => {
+      const modes = String(panel.dataset.fillBlankModePanel || "").split(/\s+/).filter(Boolean);
+      panel.hidden = !modes.includes(mode);
+    });
+  }
+
+  function syncPicker() {
+    const working = getWorkingFillBlankConfig();
+    const sourceData = getFillBlankSourceData(working);
+    const properties = sourceData?.database?.properties || [];
+    const inferred = inferFillBlankFields(properties, working);
+    fillPropertySelect(promptSelect, properties, inferred.promptFieldId);
+    fillPropertySelect(answerSelect, properties, inferred.answerFieldId);
+    fillPropertySelect(hintSelect, properties, inferred.hintFieldId);
+    fillPropertySelect(extraSelect, properties, inferred.extraFieldId);
+    fillPropertySelect(acceptedSelect, properties, working.acceptedFieldId);
+    syncModePanels();
+  }
+
+  sourceSelect.innerHTML = sources.map((source) => `<option value="${escapeHTML(sourceKey(source))}">${escapeHTML(source.label || source.title || "Database")}</option>`).join("");
+  const currentSourceValue = `${config.sourceKind}:${config.sourcePageId}:${config.sourceBlockId || ""}`;
+  if (sourceSelect.querySelector(`option[value="${CSS.escape(currentSourceValue)}"]`)) sourceSelect.value = currentSourceValue;
+  else if (sources[0]) sourceSelect.value = sourceKey(sources[0]);
+  if (titleInput) titleInput.value = config.title;
+  if (modeSelect) modeSelect.value = config.checkMode;
+  if (keywordInput) keywordInput.value = config.keywordText;
+  if (ignoreSpacesInput) ignoreSpacesInput.checked = !!config.ignoreSpaces;
+  if (ignorePunctuationInput) ignorePunctuationInput.checked = !!config.ignorePunctuation;
+  if (caseSensitiveInput) caseSensitiveInput.checked = !!config.caseSensitive;
+  if (limitInput) limitInput.value = String(config.sessionLimit || 10);
+  if (orderSelect) orderSelect.value = config.order;
+  if (sizeSelect) sizeSelect.value = config.displaySize || "standard";
+  syncPicker();
+
+  picker.addEventListener("change", () => {
+    saveFillBlankConfig();
+    syncPicker();
+  });
+  picker.addEventListener("input", (event) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    saveFillBlankConfig();
+    syncPicker();
+  });
+}
+
+function resetFillBlankCardState(config) {
+  config.answers = [];
+  config.showHint = false;
+  config.resultState = "idle";
+  return config;
+}
+
+function advanceFillBlank(block, options = {}) {
+  const config = readFillBlankConfig(block);
+  const { rows } = getFillBlankItems(config);
+  if (!rows.length) return config;
+  const currentRow = rows[Math.max(0, Math.min(config.currentIndex || 0, rows.length - 1))] || null;
+  if (currentRow?.id && !config.seenRowIds.includes(currentRow.id)) config.seenRowIds.push(currentRow.id);
+  if (config.order === "random") {
+    let candidates = rows.map((row, index) => ({ row, index })).filter((entry) => entry.index !== config.currentIndex && !config.seenRowIds.includes(entry.row.id));
+    if (!candidates.length) {
+      config.seenRowIds = currentRow?.id ? [currentRow.id] : [];
+      candidates = rows.map((row, index) => ({ row, index })).filter((entry) => entry.index !== config.currentIndex);
+    }
+    const fallbackIndex = rows.length > 1 ? (config.currentIndex + 1) % rows.length : 0;
+    const picked = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : { index: fallbackIndex };
+    config.currentIndex = picked.index;
+  } else {
+    config.currentIndex = (config.currentIndex + 1) % rows.length;
+  }
+  resetFillBlankCardState(config);
+  config.feedbackState = options.feedbackState || "";
+  config.feedbackText = options.feedbackText || "";
+  return config;
+}
+
+function moveFillBlankBack(block) {
+  const config = readFillBlankConfig(block);
+  const { rows } = getFillBlankItems(config);
+  if (!rows.length) return config;
+  config.currentIndex = (config.currentIndex - 1 + rows.length) % rows.length;
+  resetFillBlankCardState(config);
+  config.feedbackState = "";
+  config.feedbackText = "";
+  return config;
+}
+
+function resetFillBlank(block) {
+  const config = readFillBlankConfig(block);
+  config.currentIndex = 0;
+  config.seenRowIds = [];
+  resetFillBlankCardState(config);
+  config.feedbackState = "reset";
+  config.feedbackText = "Session reset.";
+  config.scoreCorrect = 0;
+  config.scoreTried = 0;
+  config.scoreSkipped = 0;
+  return config;
+}
+
+function submitFillBlankAnswer(block) {
+  const config = readFillBlankConfig(block);
+  if (config.resultState === "correct") return advanceFillBlank(block);
+  if (config.resultState === "wrong") return config;
+  const answers = Array.from(block.querySelectorAll(".fill-blank-input")).map((input) => input.value || "");
+  if (!answers.some((answer) => String(answer || "").trim())) return config;
+  config.answers = answers;
+  const { row } = getFillBlankCurrent(config);
+  const check = checkFillBlankAnswers(row, config);
+  config.resultState = check.correct ? "correct" : "wrong";
+  config.feedbackState = check.correct ? "correct" : "wrong";
+  config.feedbackText = "";
+  config.scoreTried += 1;
+  if (check.correct) config.scoreCorrect += 1;
+  return config;
+}
+
+window.mountFillBlankBlock = function mountFillBlankBlock(block, options = {}) {
+  if (!block || block.dataset.type !== "fill-blank") return null;
+  if (!block.dataset.fillBlankConfig) {
+    writeFillBlankConfig(block, normalizeFillBlankConfig({}));
+  }
+  renderFillBlankBlock(block);
+  if (options.openPicker) {
+    const anchor = block.querySelector(".typing-drill-config-btn") || block;
+    openFillBlankPicker(block, anchor);
+  }
+  return block;
+};
+
 window.addEventListener("sanctum:database-updated", () => {
   window.requestAnimationFrame(() => {
     document.querySelectorAll('.block[data-type="flashcards"]').forEach((block) => {
       renderFlashcardDeckBlock(block);
+    });
+    document.querySelectorAll('.block[data-type="typing-drill"]').forEach((block) => {
+      renderTypingDrillBlock(block);
+    });
+    document.querySelectorAll('.block[data-type="fill-blank"]').forEach((block) => {
+      renderFillBlankBlock(block);
     });
   });
 });
@@ -6992,6 +8386,8 @@ function serializeBlockElement(b) {
     dataCalloutShowIcon: blockType === "data-callout" ? (b.dataset.dataCalloutShowIcon || "") : "",
     dataCalloutIcon: blockType === "data-callout" ? (b.dataset.dataCalloutIcon || "") : "",
     flashcardsConfig: blockType === "flashcards" ? (b.dataset.flashcardsConfig || "") : "",
+    typingDrillConfig: blockType === "typing-drill" ? (b.dataset.typingDrillConfig || "") : "",
+    fillBlankConfig: blockType === "fill-blank" ? (b.dataset.fillBlankConfig || "") : "",
     progressTitle: blockType === "progress" ? (b.dataset.progressTitle || "") : "",
     progressSourceType: blockType === "progress" ? (b.dataset.progressSourceType || "") : "",
     progressSourceKind: blockType === "progress" ? (b.dataset.progressSourceKind || "") : "",
@@ -7077,6 +8473,159 @@ gridEl.addEventListener("click", (e) => {
   if (!document.body.classList.contains("editing")) return;
   openFlashcardDeckPicker(block, configButton);
 });
+
+gridEl.addEventListener("click", (e) => {
+  const configButton = e.target.closest('[data-typing-drill-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="typing-drill"]');
+  if (!block) return;
+  if (!document.body.classList.contains("editing")) return;
+  openTypingDrillPicker(block, configButton);
+});
+
+gridEl.addEventListener("input", (e) => {
+  const input = e.target.closest?.('[data-typing-drill-input="answer"]');
+  if (!input) return;
+  const block = input.closest('.block[data-type="typing-drill"]');
+  if (!block) return;
+  const config = readTypingDrillConfig(block);
+  config.userAnswer = input.value || "";
+  config.resultState = "idle";
+  config.lastCorrect = false;
+  config.feedbackState = "";
+  config.feedbackText = "";
+  writeTypingDrillConfig(block, config);
+  if (typeof saveState === "function") saveState();
+}, true);
+
+gridEl.addEventListener("keydown", (e) => {
+  const input = e.target.closest?.('[data-typing-drill-input="answer"]');
+  if (!input || e.key !== "Enter") return;
+  const block = input.closest('.block[data-type="typing-drill"]');
+  if (!block) return;
+  e.preventDefault();
+  const config = submitTypingDrillAnswer(block, input.value || "");
+  writeTypingDrillConfig(block, config);
+  renderTypingDrillBlock(block);
+  if (typeof saveState === "function") saveState();
+}, true);
+
+gridEl.addEventListener("click", (e) => {
+  const actionEl = e.target.closest('[data-typing-drill-action]');
+  if (!actionEl) return;
+  const action = actionEl.dataset.typingDrillAction || "";
+  if (!["check", "hint", "skip", "back", "reset"].includes(action)) return;
+  const block = actionEl.closest('.block[data-type="typing-drill"]');
+  if (!block) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  let config = readTypingDrillConfig(block);
+  const answerInput = block.querySelector('[data-typing-drill-input="answer"]');
+  if (answerInput) config.userAnswer = answerInput.value || "";
+
+  if (action === "check") {
+    config = submitTypingDrillAnswer(block, config.userAnswer);
+  } else if (action === "hint") {
+    config.showHint = !config.showHint;
+  } else if (action === "back") {
+    config = moveTypingDrillBack(block);
+  } else if (action === "reset") {
+    config = resetTypingDrill(block);
+  } else {
+    config.scoreSkipped += 1;
+    writeTypingDrillConfig(block, config);
+    config = advanceTypingDrill(block, {
+      feedbackState: "skipped",
+      feedbackText: "Skipped. Next prompt."
+    });
+  }
+
+  writeTypingDrillConfig(block, config);
+  renderTypingDrillBlock(block);
+  if (typeof saveState === "function") saveState();
+}, true);
+
+gridEl.addEventListener("click", (e) => {
+  const configButton = e.target.closest('[data-fill-blank-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="fill-blank"]');
+  if (!block) return;
+  if (!document.body.classList.contains("editing")) return;
+  openFillBlankPicker(block, configButton);
+});
+
+gridEl.addEventListener("input", (e) => {
+  const input = e.target.closest?.(".fill-blank-input");
+  if (!input) return;
+  const block = input.closest('.block[data-type="fill-blank"]');
+  if (!block) return;
+  const config = readFillBlankConfig(block);
+  const inputs = Array.from(block.querySelectorAll(".fill-blank-input"));
+  config.answers = inputs.map((inputEl) => inputEl.value || "");
+  config.resultState = "idle";
+  config.feedbackState = "";
+  config.feedbackText = "";
+  writeFillBlankConfig(block, config);
+  if (typeof saveState === "function") saveState();
+}, true);
+
+gridEl.addEventListener("keydown", (e) => {
+  const input = e.target.closest?.(".fill-blank-input");
+  if (!input || e.key !== "Enter") return;
+  const block = input.closest('.block[data-type="fill-blank"]');
+  if (!block) return;
+  e.preventDefault();
+  const config = submitFillBlankAnswer(block);
+  writeFillBlankConfig(block, config);
+  renderFillBlankBlock(block);
+  if (typeof saveState === "function") saveState();
+}, true);
+
+gridEl.addEventListener("click", (e) => {
+  const actionEl = e.target.closest('[data-fill-blank-action]');
+  if (!actionEl) return;
+  const action = actionEl.dataset.fillBlankAction || "";
+  if (!["check", "hint", "skip", "back", "reset"].includes(action)) return;
+  const block = actionEl.closest('.block[data-type="fill-blank"]');
+  if (!block) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  let config = readFillBlankConfig(block);
+  config.answers = Array.from(block.querySelectorAll(".fill-blank-input")).map((input) => input.value || "");
+
+  if (action === "check") {
+    config = submitFillBlankAnswer(block);
+  } else if (action === "hint") {
+    config.showHint = !config.showHint;
+  } else if (action === "back") {
+    config = moveFillBlankBack(block);
+  } else if (action === "reset") {
+    config = resetFillBlank(block);
+  } else {
+    config.scoreSkipped += 1;
+    writeFillBlankConfig(block, config);
+    config = advanceFillBlank(block, {
+      feedbackState: "skipped",
+      feedbackText: "Skipped. Next prompt."
+    });
+  }
+
+  writeFillBlankConfig(block, config);
+  renderFillBlankBlock(block);
+  if (typeof saveState === "function") saveState();
+}, true);
 
 gridEl.addEventListener("click", (e) => {
   const actionEl = e.target.closest('[data-flashcards-action]');
@@ -7456,6 +9005,14 @@ gridEl.addEventListener("mousedown", (e) => {
     window.mountFlashcardDeckBlock?.(real, { openPicker: true });
   }
 
+  if (placePreset === "typing-drill") {
+    window.mountTypingDrillBlock?.(real, { openPicker: true });
+  }
+
+  if (placePreset === "fill-blank") {
+    window.mountFillBlankBlock?.(real, { openPicker: true });
+  }
+
   const shouldOpenClockPicker = placePreset === "clock";
 
   if (typeof autoGrowBlock === "function") autoGrowBlock(real);
@@ -7537,7 +9094,7 @@ function selectBlock(block) {
     if (type !== "table" && tableSelectionMode) {
       setTableSelectionMode(false);
     }
-    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || isDividerType(type)) document.body.classList.add("block-type-text");
+    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || type === "typing-drill" || type === "fill-blank" || isDividerType(type)) document.body.classList.add("block-type-text");
     if (type === "list") document.body.classList.add("block-type-list");
     if (type === "image") document.body.classList.add("block-type-image");
     if (type === "container") document.body.classList.add("block-type-container");
