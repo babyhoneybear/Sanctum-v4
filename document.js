@@ -2710,6 +2710,8 @@ function openDocEditor(pageId) {
 
   document.getElementById("docEditor").classList.add("active");
   document.getElementById("pageCanvas").style.display = "none";
+  const _pbs = document.getElementById("pageBoardSurface");
+  if (_pbs) _pbs.style.display = "none";
 
   loadThreads(pageId);
   loadAnchors(pageId);
@@ -2743,6 +2745,8 @@ function closeDocEditor() {
 
   document.getElementById("docEditor").classList.remove("active");
   document.getElementById("pageCanvas").style.display = "";
+  const _pbs2 = document.getElementById("pageBoardSurface");
+  if (_pbs2) _pbs2.style.display = "";
   docPageId = null;
 
   resetDocUIState();

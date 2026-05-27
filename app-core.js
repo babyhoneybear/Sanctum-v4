@@ -3406,49 +3406,74 @@ function renderData() {
     return legacy && typeof legacy === "object" && !Array.isArray(legacy) ? legacy : {};
   };
 
+  const buildBackupData = () => ({
+    settings: sanctumSettings,
+    domains: userDomains,
+    pages: userPages,
+    blocks: readStorageJSON(STORAGE_KEYS.pageBlocks, {}),
+    pageSettings: readStorageJSON(STORAGE_KEYS.pageSettings, {}),
+    pageActivity: readStorageJSON(STORAGE_KEYS.pageActivity, {}),
+    documents: readStorageJSON(STORAGE_KEYS.documents, {}),
+    docSettings: readStorageJSON(STORAGE_KEYS.docSettings, {}),
+    pageDatabases: readPageDatabasesForExport(),
+    chronicles: readStorageJSON(STORAGE_KEYS.chronicles, []),
+    trash: readStorageJSON(STORAGE_KEYS.trash, []),
+    pins: readStorageJSON(STORAGE_KEYS.pins, []),
+    bookmarks: readStorageJSON(STORAGE_KEYS.bookmarks, []),
+    stickers: readStorageJSON(STORAGE_KEYS.stickers, {}),
+    customStickers: readStorageJSON(STORAGE_KEYS.customStickers, []),
+    recentColors: readStorageJSON(STORAGE_KEYS.recentColors, []),
+    colorPalette: readStorageJSON(STORAGE_KEYS.colorPalette, []),
+    threads: readStorageJSON("sanctum_threads", {}),
+    anchors: readStorageJSON("sanctum_anchors", {}),
+    annotations: readStorageJSON("sanctum_annotations", {}),
+    notesVault: readStorageJSON(STORAGE_KEYS.notesVault, []),
+    noteShelves: readStorageJSON(STORAGE_KEYS.noteShelves, []),
+    helperInbox: readStorageJSON(STORAGE_KEYS.helperInbox, []),
+    helperActionLog: readStorageJSON(STORAGE_KEYS.helperActionLog, []),
+    helperChatLog: readStorageJSON(STORAGE_KEYS.helperChatLog, []),
+    helperUserProfile: readStorageJSON(STORAGE_KEYS.helperUserProfile, {}),
+    helperMemoryProfile: readStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(readStorageJSON(STORAGE_KEYS.helperUserProfile, {}).id || "primary-user")}`, {}),
+  });
+
+  const hasBackupContent = (data) => {
+    return (data.domains?.length || 0) > 0
+      || (data.pages?.length || 0) > 0
+      || Object.keys(data.blocks || {}).length > 0
+      || Object.keys(data.documents || {}).length > 0
+      || Object.keys(data.pageDatabases || {}).length > 0
+      || (data.notesVault?.length || 0) > 0;
+  };
+
+  const downloadBackupData = (filename, options = {}) => {
+    const data = buildBackupData();
+    if (options.onlyWhenPopulated && !hasBackupContent(data)) return false;
+    const blob = new Blob([JSON.stringify(data, null, options.pretty ? 2 : 0)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
+  };
+
+  const recoveryFilename = (reason) => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return `sanctum-recovery-${reason}-${stamp}.json`;
+  };
+
   settingsRight.innerHTML = `
     <div class="settings-section-title">Data</div>
     ${settingsField("Storage Used", "", `<span style="color:var(--muted2);font-size:13px;">${usedKB} KB</span>`)}
     ${settingsField("Export Sanctum Data", "Download everything as JSON", `<button class="settings-btn" id="exportBtn">Export</button>`)}
     ${settingsField("Import Sanctum Data", "Restore from a backup file", `<button class="settings-btn" id="importBtn">Import</button>`)}
+    ${settingsField("Automatic Safety Copy", "Downloads a recovery file before Import or Reset. It does not duplicate data inside your vault.", `<span style="color:var(--muted2);font-size:13px;">On</span>`)}
     ${settingsField("Reset Vault", "Permanently clears all data", `<button class="settings-btn danger" id="resetBtn">Reset Vault</button>`)}
   `;
 
   document.getElementById("exportBtn").addEventListener("click", () => {
-    const data = {
-      settings: sanctumSettings,
-      domains: userDomains,
-      pages: userPages,
-      blocks: readStorageJSON(STORAGE_KEYS.pageBlocks, {}),
-      pageSettings: readStorageJSON(STORAGE_KEYS.pageSettings, {}),
-      pageActivity: readStorageJSON(STORAGE_KEYS.pageActivity, {}),
-      documents: readStorageJSON(STORAGE_KEYS.documents, {}),
-      docSettings: readStorageJSON(STORAGE_KEYS.docSettings, {}),
-      pageDatabases: readPageDatabasesForExport(),
-      chronicles: readStorageJSON(STORAGE_KEYS.chronicles, []),
-      trash: readStorageJSON(STORAGE_KEYS.trash, []),
-      pins: readStorageJSON(STORAGE_KEYS.pins, []),
-      bookmarks: readStorageJSON(STORAGE_KEYS.bookmarks, []),
-      stickers: readStorageJSON(STORAGE_KEYS.stickers, {}),
-      customStickers: readStorageJSON(STORAGE_KEYS.customStickers, []),
-      recentColors: readStorageJSON(STORAGE_KEYS.recentColors, []),
-      colorPalette: readStorageJSON(STORAGE_KEYS.colorPalette, []),
-      threads: readStorageJSON("sanctum_threads", {}),
-      anchors: readStorageJSON("sanctum_anchors", {}),
-      annotations: readStorageJSON("sanctum_annotations", {}),
-      notesVault: readStorageJSON(STORAGE_KEYS.notesVault, []),
-      noteShelves: readStorageJSON(STORAGE_KEYS.noteShelves, []),
-      helperInbox: readStorageJSON(STORAGE_KEYS.helperInbox, []),
-      helperActionLog: readStorageJSON(STORAGE_KEYS.helperActionLog, []),
-      helperChatLog: readStorageJSON(STORAGE_KEYS.helperChatLog, []),
-      helperUserProfile: readStorageJSON(STORAGE_KEYS.helperUserProfile, {}),
-      helperMemoryProfile: readStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(readStorageJSON(STORAGE_KEYS.helperUserProfile, {}).id || 'primary-user')}`, {}),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "sanctum-backup.json";
-    a.click();
+    downloadBackupData("sanctum-backup.json", { pretty: true });
   });
 
   document.getElementById("importBtn").addEventListener("click", () => {
@@ -3462,6 +3487,7 @@ function renderData() {
       reader.onload = (e) => {
         try {
           const data = JSON.parse(e.target.result);
+          downloadBackupData(recoveryFilename("before-import"), { onlyWhenPopulated: true });
           if (data.settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings)); }
           if (data.domains) { writeStorageJSON(STORAGE_KEYS.domains, data.domains); }
           if (data.pages) { writeStorageJSON(STORAGE_KEYS.pagesRegistry, data.pages); }
@@ -3506,10 +3532,14 @@ function renderData() {
     input.click();
   });
 
-  document.getElementById("resetBtn").addEventListener("click", () => {
+  document.getElementById("resetBtn").addEventListener("click", async () => {
     const confirmed = confirm("This will permanently delete all your Sanctum data. Are you sure?");
     if (!confirmed) return;
+    downloadBackupData(recoveryFilename("before-reset"), { onlyWhenPopulated: true });
     localStorage.clear();
+    if (window.SanctumStorage?.flush) {
+      await window.SanctumStorage.flush();
+    }
     location.reload();
   });
 }
@@ -3792,8 +3822,8 @@ loadPins();
 renderSidebarDomains();
 renderSidebarPins();
 renderSidebarBookmarks();
-openPage("home");
+openPage(typeof window.getRecentSessionPageId === "function" ? window.getRecentSessionPageId() : "home");
 pushHistory();
-updateTopbarContext("home");
-renderBreadcrumbs("home");
+updateTopbarContext(currentPageId);
+renderBreadcrumbs(currentPageId);
 window.getCurrentPageId = () => currentPageId;

@@ -22,9 +22,26 @@
   let pendingDeletes = new Set();
   let clearPending = false;
   let ready = false;
+  let storageMode = 'initializing';
+  let initializationError = '';
 
   function isManagedKey(key) {
     return typeof key === 'string' && (key.startsWith(MANAGED_PREFIX) || MANAGED_EXACT.has(key));
+  }
+
+  function readLegacyNativeEntries() {
+    const entries = new Map();
+    for (let i = 0; i < native.length; i += 1) {
+      const key = native.key(i);
+      if (!isManagedKey(key)) continue;
+      const value = native.getItem(key);
+      if (value != null) entries.set(key, value);
+    }
+    return entries;
+  }
+
+  function getReadableEntries() {
+    return storageMode === 'localstorage-fallback' ? readLegacyNativeEntries() : cache;
   }
 
   function scheduleFlush() {
@@ -128,6 +145,7 @@
   function openDb() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled = false;
       req.onupgradeneeded = () => {
         const nextDb = req.result;
         if (!nextDb.objectStoreNames.contains(STORE_NAME)) {
@@ -137,8 +155,27 @@
           nextDb.createObjectStore(BLOB_STORE_NAME);
         }
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error('IndexedDB unavailable'));
+      req.onblocked = () => {
+        if (settled) return;
+        settled = true;
+        const err = new Error('Sanctum vault upgrade is blocked by another open tab or window.');
+        err.code = 'SANCTUM_STORAGE_BLOCKED';
+        reject(err);
+      };
+      req.onsuccess = () => {
+        if (settled) {
+          req.result.close();
+          return;
+        }
+        settled = true;
+        req.result.onversionchange = () => req.result.close();
+        resolve(req.result);
+      };
+      req.onerror = () => {
+        if (settled) return;
+        settled = true;
+        reject(req.error || new Error('IndexedDB unavailable'));
+      };
     });
   }
 
@@ -234,13 +271,7 @@
       return;
     }
 
-    const legacy = new Map();
-    for (let i = 0; i < native.length; i += 1) {
-      const key = native.key(i);
-      if (!isManagedKey(key)) continue;
-      const value = native.getItem(key);
-      if (value != null) legacy.set(key, value);
-    }
+    const legacy = readLegacyNativeEntries();
 
     if (!legacy.size) return;
 
@@ -290,7 +321,7 @@
 
   function getUsageBytes() {
     let total = 0;
-    cache.forEach((value, key) => {
+    getReadableEntries().forEach((value, key) => {
       total += key.length + String(value).length;
     });
     return total;
@@ -336,6 +367,8 @@
 
   window.SanctumStorage = {
     get ready() { return ready; },
+    get mode() { return storageMode; },
+    get initializationError() { return initializationError; },
     readJSON,
     writeJSON,
     putBlob,
@@ -343,24 +376,33 @@
     removeBlob,
     getUsageBytes,
     flush: forceFlush,
-    getManagedKeys() { return Array.from(cache.keys()).sort(); },
+    getManagedKeys() { return Array.from(getReadableEntries().keys()).sort(); },
     exportManagedRaw() {
       const out = {};
-      cache.forEach((value, key) => { out[key] = value; });
+      getReadableEntries().forEach((value, key) => { out[key] = value; });
       return out;
     }
   };
 
-  patchLocalStorage();
-
   window.SanctumStorageReady = primeCache()
     .then(() => {
+      patchLocalStorage();
+      storageMode = 'indexeddb';
       ready = true;
       window.dispatchEvent(new CustomEvent('sanctum-storage-ready'));
     })
     .catch((err) => {
-      console.warn('Sanctum storage init failed; falling back to native localStorage', err);
-      ready = true;
-      window.dispatchEvent(new CustomEvent('sanctum-storage-ready'));
+      initializationError = String(err?.message || err || 'Unknown storage error');
+      const legacyEntries = readLegacyNativeEntries();
+      if (legacyEntries.size > 0 && err?.code !== 'SANCTUM_STORAGE_BLOCKED') {
+        storageMode = 'localstorage-fallback';
+        ready = true;
+        console.warn('Sanctum IndexedDB unavailable; using existing localStorage vault data for this session.', err);
+        window.dispatchEvent(new CustomEvent('sanctum-storage-ready'));
+        return;
+      }
+      storageMode = 'failed';
+      console.error('Sanctum refused to open an empty vault because storage could not be read.', err);
+      throw err;
     });
 })();

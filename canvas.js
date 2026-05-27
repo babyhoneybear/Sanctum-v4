@@ -1310,7 +1310,7 @@ function getDefaultBlockDimensions(type = "text") {
   }
 
   if (type === "match-pairs") {
-    return { width: snap(GRID_SIZE * 20), height: snap(GRID_SIZE * 14) };
+    return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 8) };
   }
 
   if (isVerticalDividerType(type)) {
@@ -1521,6 +1521,15 @@ function getMinResizeDimensionsForBlock(block, widthOverride = 0) {
     return {
       width: minWidth,
       height: getGalleryCardMinHeight(block, resolvedWidth)
+    };
+  }
+
+  if (type === "match-pairs") {
+    const config = readMatchPairsConfig(block);
+    const layout = getActiveMatchPairsLayout(config);
+    return {
+      width: snap(GRID_SIZE * (layout === "focus" ? 14 : layout === "columns" ? 10 : 9)),
+      height: getMinHeightForBlock(block)
     };
   }
 
@@ -5797,6 +5806,7 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
 
   const anchorTarget = anchorEl || block.querySelector(".flashcard-deck-config-btn") || block;
   positionTypingDrillPicker(picker, block, anchorTarget);
+  watchStudyToolPickerPosition(picker, block, anchorTarget);
 
   const titleInput = picker.querySelector('[data-flashcards-input="title"]');
   const sourceTypeSelect = picker.querySelector('[data-flashcards-input="sourceType"]');
@@ -5980,6 +5990,7 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
     picker.querySelectorAll("[data-flashcards-panel]").forEach((panel) => {
       panel.classList.toggle("active", panel.dataset.flashcardsPanel === safeTab);
     });
+    window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
   }
 
   tabsEl.addEventListener("click", (event) => {
@@ -6769,7 +6780,20 @@ function positionTypingDrillPicker(picker, block, anchorEl = null) {
   if (top < viewportPadding) top = viewportPadding;
 
   picker.style.left = `${Math.round(left)}px`;
-  picker.style.top = `${Math.round(top)}px`;
+  picker.style.top = `${Math.floor(top)}px`;
+  const fittedRect = picker.getBoundingClientRect();
+  if (fittedRect.bottom > window.innerHeight - viewportPadding) {
+    picker.style.top = `${Math.floor(Math.max(viewportPadding, window.innerHeight - viewportPadding - fittedRect.height))}px`;
+  }
+}
+
+function watchStudyToolPickerPosition(picker, block, anchorEl = null) {
+  if (!picker || !block) return;
+  picker.querySelectorAll("details").forEach((detailsEl) => {
+    detailsEl.addEventListener("toggle", () => {
+      window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorEl));
+    });
+  });
 }
 
 function getTypingDrillDisplayDimensions(size = "standard") {
@@ -6888,6 +6912,7 @@ function openTypingDrillPicker(block, anchorEl = null) {
 
   const anchorTarget = anchorEl || block.querySelector(".typing-drill-config-btn") || block;
   positionTypingDrillPicker(picker, block, anchorTarget);
+  watchStudyToolPickerPosition(picker, block, anchorTarget);
 
   const titleInput = picker.querySelector('[data-typing-drill-setting="title"]');
   const sourceSelect = picker.querySelector('[data-typing-drill-setting="source"]');
@@ -6927,6 +6952,7 @@ function openTypingDrillPicker(block, anchorEl = null) {
     picker.querySelectorAll("[data-typing-drill-panel]").forEach((panel) => {
       panel.classList.toggle("active", panel.dataset.typingDrillPanel === safeTab);
     });
+    window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
   }
 
   picker.querySelector(".typing-drill-picker-tabs")?.addEventListener("click", (event) => {
@@ -7519,6 +7545,7 @@ function openFillBlankPicker(block, anchorEl = null) {
 
   const anchorTarget = anchorEl || block.querySelector(".typing-drill-config-btn") || block;
   positionTypingDrillPicker(picker, block, anchorTarget);
+  watchStudyToolPickerPosition(picker, block, anchorTarget);
 
   const titleInput = picker.querySelector('[data-fill-blank-setting="title"]');
   const sourceSelect = picker.querySelector('[data-fill-blank-setting="source"]');
@@ -7556,6 +7583,7 @@ function openFillBlankPicker(block, anchorEl = null) {
     picker.querySelectorAll("[data-fill-blank-panel]").forEach((panel) => {
       panel.classList.toggle("active", panel.dataset.fillBlankPanel === safeTab);
     });
+    window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
   }
 
   picker.querySelector(".typing-drill-picker-tabs")?.addEventListener("click", (event) => {
@@ -7758,7 +7786,27 @@ window.mountFillBlankBlock = function mountFillBlankBlock(block, options = {}) {
 };
 
 function normalizeMatchPairsMode(value = "columns") {
+  return ["columns", "focus", "chips", "mixed"].includes(value) ? value : "columns";
+}
+
+function normalizeMatchPairsLayout(value = "columns") {
   return ["columns", "focus", "chips"].includes(value) ? value : "columns";
+}
+
+function chooseMixedMatchPairsLayout(seed = Date.now(), step = 0) {
+  const layouts = ["columns", "focus", "chips"];
+  return layouts[matchPairsHash(`${seed}:mixed-layout:${step}`) % layouts.length];
+}
+
+function getActiveMatchPairsLayout(config) {
+  if (config?.layoutMode !== "mixed") return normalizeMatchPairsLayout(config?.layoutMode);
+  return normalizeMatchPairsLayout(config.mixedLayout);
+}
+
+function advanceMixedMatchPairsLayout(config) {
+  if (config?.layoutMode !== "mixed") return;
+  config.mixedStep = Math.max(0, Number(config.mixedStep || 0) || 0) + 1;
+  config.mixedLayout = chooseMixedMatchPairsLayout(config.sessionSeed, config.mixedStep);
 }
 
 function normalizeMatchPairsAccent(value = "") {
@@ -7770,8 +7818,21 @@ function normalizeMatchPairsSurface(value = "soft") {
   return ["soft", "tinted", "outline"].includes(value) ? value : "soft";
 }
 
+function normalizeMatchPairsPromptSize(value = "lg") {
+  return ["sm", "md", "lg", "xl"].includes(value) ? value : "lg";
+}
+
+function normalizeMatchPairsAnswerSize(value = "md") {
+  return ["sm", "md", "lg"].includes(value) ? value : "md";
+}
+
+function normalizeMatchPairsPromptHeight(value = "standard") {
+  return ["compact", "standard", "tall"].includes(value) ? value : "standard";
+}
+
 function normalizeMatchPairsConfig(raw = {}) {
-  const allowedModes = Array.from(new Set((Array.isArray(raw.allowedModes) ? raw.allowedModes : ["columns", "focus", "chips"])
+  const sessionSeed = Math.max(1, Number(raw.sessionSeed || Date.now()) || Date.now());
+  const allowedModes = Array.from(new Set((Array.isArray(raw.allowedModes) ? raw.allowedModes : ["columns", "focus", "chips", "mixed"])
     .map(normalizeMatchPairsMode)));
   const modes = allowedModes.length ? allowedModes : ["columns"];
   const defaultMode = modes.includes(raw.defaultMode) ? raw.defaultMode : modes[0];
@@ -7788,16 +7849,24 @@ function normalizeMatchPairsConfig(raw = {}) {
     pairLimit: Math.max(2, Math.min(30, Number(raw.pairLimit || 6) || 6)),
     shuffle: raw.shuffle !== false,
     layoutMode,
+    mixedLayout: normalizeMatchPairsLayout(raw.mixedLayout || chooseMixedMatchPairsLayout(sessionSeed, raw.mixedStep)),
     allowedModes: modes,
     defaultMode,
     allowModeSwitch: raw.allowModeSwitch !== false,
     accentColor: normalizeMatchPairsAccent(raw.accentColor),
     surfaceStyle: normalizeMatchPairsSurface(raw.surfaceStyle),
-    sessionSeed: Math.max(1, Number(raw.sessionSeed || Date.now()) || Date.now()),
+    promptSize: normalizeMatchPairsPromptSize(raw.promptSize),
+    answerSize: normalizeMatchPairsAnswerSize(raw.answerSize),
+    promptHeight: normalizeMatchPairsPromptHeight(raw.promptHeight),
+    backgroundImage: String(raw.backgroundImage || "").trim(),
+    sessionSeed,
+    mixedStep: Math.max(0, Number(raw.mixedStep || 0) || 0),
+    mixedRoundRowIds: Array.isArray(raw.mixedRoundRowIds) ? raw.mixedRoundRowIds.map((id) => String(id)).filter(Boolean) : [],
     matchedRowIds: Array.isArray(raw.matchedRowIds) ? raw.matchedRowIds.map((id) => String(id)).filter(Boolean) : [],
     selectedLeftId: String(raw.selectedLeftId || ""),
     selectedRightId: String(raw.selectedRightId || ""),
     focusCursor: Math.max(0, Number(raw.focusCursor || 0) || 0),
+    focusResultId: String(raw.focusResultId || ""),
     hintRowId: String(raw.hintRowId || ""),
     wrongRowId: String(raw.wrongRowId || ""),
     feedbackState: ["", "correct", "wrong", "reset", "hint"].includes(raw.feedbackState) ? raw.feedbackState : "",
@@ -7880,7 +7949,11 @@ function getMatchPairsItems(config) {
     }))
     .filter((item) => item.left && item.right);
   const ordered = getMatchPairsDisplayOrder(items, config, "session");
-  return { sourceData, properties, items: ordered.slice(0, config.pairLimit) };
+  return {
+    sourceData,
+    properties,
+    items: config.layoutMode === "mixed" ? ordered : ordered.slice(0, config.pairLimit)
+  };
 }
 
 function getMatchPairsFilterLabel(config, properties = []) {
@@ -7906,27 +7979,97 @@ function buildMatchPairsChoice(item, side, config, options = {}) {
   return `<button type="button" class="${classes.join(" ")}" data-match-pairs-choice="${side}" data-row-id="${escapeHTML(item.id)}" ${matched ? "disabled" : ""}>${escapeHTML(value)}${matched ? '<span class="match-pairs-check">✓</span>' : ""}</button>`;
 }
 
+function renderMatchPairsBoardProgress(config, items) {
+  const completed = items.filter((item) => config.matchedRowIds.includes(item.id)).length;
+  const percent = items.length ? Math.round((completed / items.length) * 100) : 0;
+  return `
+    <div class="match-pairs-board-progress">
+      <span>${completed} / ${items.length}</span>
+      <span class="match-pairs-focus-track"><span style="width:${percent}%"></span></span>
+      <span>${percent}%</span>
+    </div>`;
+}
+
+function syncMixedMatchPairsRound(config, items) {
+  if (config.layoutMode !== "mixed") return;
+  const layout = getActiveMatchPairsLayout(config);
+  if (layout === "focus") {
+    config.mixedRoundRowIds = [];
+    return;
+  }
+  const availableIds = new Set(items.map((item) => item.id));
+  config.mixedRoundRowIds = config.mixedRoundRowIds.filter((id) => availableIds.has(id));
+  if (config.mixedRoundRowIds.length) return;
+  config.mixedRoundRowIds = items
+    .filter((item) => !config.matchedRowIds.includes(item.id))
+    .slice(0, config.pairLimit)
+    .map((item) => item.id);
+}
+
+function getVisibleMatchPairsItems(config, items) {
+  if (config.layoutMode !== "mixed" || getActiveMatchPairsLayout(config) === "focus") return items;
+  const roundIds = new Set(config.mixedRoundRowIds);
+  return items.filter((item) => roundIds.has(item.id));
+}
+
 function renderMatchPairsStage(config, items) {
   const unmatched = items.filter((item) => !config.matchedRowIds.includes(item.id));
+  const layout = getActiveMatchPairsLayout(config);
   if (!items.length) return '<div class="match-pairs-empty">Choose a database and two fields to begin.</div>';
-  if (config.layoutMode === "focus") {
-    if (!unmatched.length) return '<div class="match-pairs-complete">Complete. Reset to play again.</div>';
-    const focus = unmatched[config.focusCursor % unmatched.length];
-    const choices = getMatchPairsDisplayOrder(unmatched, config, `focus-answers-${focus.id}`);
+  if (config.layoutMode === "mixed" && !unmatched.length && !config.focusResultId) {
+    return '<div class="match-pairs-complete"><span>Complete.</span><button type="button" data-match-pairs-action="reset">Reset to play again</button></div>';
+  }
+  if (layout === "focus") {
+    const answered = items.find((item) => item.id === config.focusResultId) || null;
+    if (!unmatched.length && !answered) return '<div class="match-pairs-complete"><span>Complete.</span><button type="button" data-match-pairs-action="reset">Reset to play again</button></div>';
+    const focus = answered || unmatched[config.focusCursor % unmatched.length];
+    const distractors = getMatchPairsDisplayOrder(
+      items.filter((item) => item.id !== focus.id),
+      config,
+      `focus-distractors-${focus.id}`
+    ).slice(0, 3);
+    const choices = getMatchPairsDisplayOrder(
+      [focus, ...distractors],
+      config,
+      `focus-answers-${focus.id}`
+    );
+    const focusChoiceConfig = {
+      ...config,
+      matchedRowIds: answered ? [answered.id] : [],
+      selectedRightId: "",
+      wrongRowId: answered ? "" : config.wrongRowId
+    };
+    const progressIndex = Math.min(items.length, config.matchedRowIds.length + (answered ? 0 : 1));
+    const percent = items.length ? Math.round((config.matchedRowIds.length / items.length) * 100) : 0;
     return `
       <div class="match-pairs-focus">
-        <div class="match-pairs-label">Match this</div>
-        <div class="match-pairs-focus-prompt">${escapeHTML(focus.left)}</div>
-        <div class="match-pairs-label">Choose the pair</div>
-        <div class="match-pairs-focus-choices">${choices.map((item) => buildMatchPairsChoice(item, "right", { ...config, selectedRightId: config.selectedRightId === item.id ? item.id : "", wrongRowId: config.wrongRowId }, {})).join("")}</div>
+        <div class="match-pairs-focus-head">
+          <span class="match-pairs-focus-question">Question ${progressIndex}</span>
+          <span class="match-pairs-focus-track"><span style="width:${percent}%"></span></span>
+          <span class="match-pairs-focus-percent">${percent}%</span>
+        </div>
+        <div class="match-pairs-focus-card" data-prompt-size="${escapeHTML(config.promptSize)}">
+          <div class="match-pairs-focus-prompt">${escapeHTML(focus.left)}</div>
+        </div>
+        <div class="match-pairs-focus-question-copy">Choose the match.</div>
+        <div class="match-pairs-focus-choices">${choices.map((item) => buildMatchPairsChoice(item, "right", focusChoiceConfig, {})).join("")}</div>
+        <div class="match-pairs-focus-feedback" data-state="${escapeHTML(config.feedbackState)}">${escapeHTML(config.feedbackText || "")}</div>
+        <div class="match-pairs-focus-footer">
+          <button type="button" data-match-pairs-action="reset">Reset</button>
+          <button type="button" data-match-pairs-action="hint">Hint</button>
+          <button type="button" data-match-pairs-action="skip">Skip</button>
+          <button type="button" class="match-pairs-focus-next" data-match-pairs-action="next" ${answered ? "" : "disabled"}>Next <span aria-hidden="true">→</span></button>
+        </div>
       </div>`;
   }
-  if (config.layoutMode === "chips") {
+  const progress = renderMatchPairsBoardProgress(config, items);
+  if (layout === "chips") {
     const completed = items.filter((item) => config.matchedRowIds.includes(item.id));
     const leftItems = getMatchPairsDisplayOrder(unmatched, config, "chips-left");
     const rightOrder = getMatchPairsDisplayOrder(unmatched, config, "chips-right");
     const rightItems = config.shuffle ? avoidIdenticalMatchPairsColumns(leftItems, rightOrder) : rightOrder;
     return `
+      ${progress}
       <div class="match-pairs-chip-group"><div class="match-pairs-label">Left</div><div class="match-pairs-chip-grid">${leftItems.map((item) => buildMatchPairsChoice(item, "left", config, { chip: true })).join("")}</div></div>
       <div class="match-pairs-chip-group"><div class="match-pairs-label">Right</div><div class="match-pairs-chip-grid">${rightItems.map((item) => buildMatchPairsChoice(item, "right", config, { chip: true })).join("")}</div></div>
       ${completed.length ? `<div class="match-pairs-matched"><div class="match-pairs-label">Matched (${completed.length})</div>${completed.map((item) => `<div class="match-pairs-match"><span>${escapeHTML(item.left)}</span><span>${escapeHTML(item.right)}</span><span>✓</span></div>`).join("")}</div>` : ""}`;
@@ -7935,6 +8078,7 @@ function renderMatchPairsStage(config, items) {
   const rightOrder = getMatchPairsDisplayOrder(items, config, "columns-right");
   const rightItems = config.shuffle ? avoidIdenticalMatchPairsColumns(leftItems, rightOrder) : rightOrder;
   return `
+    ${progress}
     <div class="match-pairs-columns">
       <div class="match-pairs-column"><div class="match-pairs-label">Left</div>${leftItems.map((item) => buildMatchPairsChoice(item, "left", config)).join("")}</div>
       <div class="match-pairs-column"><div class="match-pairs-label">Right</div>${rightItems.map((item) => buildMatchPairsChoice(item, "right", config)).join("")}</div>
@@ -7950,6 +8094,14 @@ function renderMatchPairsBlock(block) {
     config.matchedRowIds = matched;
     writeMatchPairsConfig(block, config);
   }
+  if (config.focusResultId && !items.some((item) => item.id === config.focusResultId)) {
+    config.focusResultId = "";
+    writeMatchPairsConfig(block, config);
+  }
+  syncMixedMatchPairsRound(config, items);
+  const visibleItems = getVisibleMatchPairsItems(config, items);
+  const stageItems = config.layoutMode === "mixed" && items.length && matched.length === items.length ? items : visibleItems;
+  writeMatchPairsConfig(block, config);
   const completed = matched.length;
   const percent = items.length ? Math.round((completed / items.length) * 100) : 0;
   const titleEl = block.querySelector(".match-pairs-title");
@@ -7962,30 +8114,40 @@ function renderMatchPairsBlock(block) {
   const statusEl = block.querySelector(".match-pairs-status");
   const instructionEl = block.querySelector(".match-pairs-instruction");
   const shellEl = block.querySelector(".match-pairs-shell");
+  const layout = getActiveMatchPairsLayout(config);
   if (shellEl) {
     if (config.accentColor) shellEl.style.setProperty("--match-accent", config.accentColor);
     else shellEl.style.removeProperty("--match-accent");
     shellEl.dataset.surface = config.surfaceStyle;
+    shellEl.dataset.layout = layout;
+    shellEl.dataset.mode = config.layoutMode;
+    shellEl.dataset.answerSize = config.answerSize;
+    shellEl.dataset.promptHeight = config.promptHeight;
+    shellEl.style.setProperty("--match-bg-image", config.backgroundImage ? `url("${config.backgroundImage.replace(/"/g, "%22")}")` : "none");
+    shellEl.classList.toggle("has-background-image", !!config.backgroundImage);
   }
   if (titleEl) titleEl.textContent = config.title;
   if (countEl) countEl.textContent = items.length ? `${completed} / ${items.length} matched` : "0 pairs";
   if (progressEl) progressEl.textContent = items.length ? `${completed} / ${items.length} · ${percent}%` : "0 / 0";
   if (databaseChip) databaseChip.textContent = sourceData?.database?.title || "No database";
   if (filterChip) filterChip.textContent = getMatchPairsFilterLabel(config, properties);
-  if (instructionEl) instructionEl.textContent = config.layoutMode === "focus" ? "Choose the matching answer." : "Tap one item from each side to make a match.";
+  if (instructionEl) instructionEl.textContent = layout === "focus" ? "Choose the matching answer." : "Tap one item from each side to make a match.";
   if (switchEl) {
     const showModes = config.allowModeSwitch && config.allowedModes.length > 1;
     switchEl.hidden = !showModes;
-    switchEl.innerHTML = showModes ? config.allowedModes.map((mode) => `<button type="button" data-match-pairs-action="mode" data-mode="${mode}" class="${mode === config.layoutMode ? "active" : ""}">${{ columns: "Two Column", focus: "Focus One", chips: "Chip Board" }[mode]}</button>`).join("") : "";
+    switchEl.innerHTML = showModes ? config.allowedModes.map((mode) => `<button type="button" data-match-pairs-action="mode" data-mode="${mode}" class="${mode === config.layoutMode ? "active" : ""}">${{ columns: "Two Column", focus: "Focus One", chips: "Chip Board", mixed: "Practice Mix" }[mode]}</button>`).join("") : "";
   }
-  if (stageEl) stageEl.innerHTML = renderMatchPairsStage(config, items);
+  if (stageEl) stageEl.innerHTML = renderMatchPairsStage(config, stageItems);
   if (statusEl) {
     const hintedItem = items.find((item) => item.id === config.hintRowId);
     const hintText = config.feedbackState === "hint" && hintedItem?.hint ? `Hint: ${hintedItem.hint}` : "";
-    statusEl.textContent = hintText || config.feedbackText || "";
+    const statusText = hintText || config.feedbackText || "";
+    statusEl.textContent = statusText || "\u00a0";
     statusEl.dataset.state = config.feedbackState || "";
-    statusEl.hidden = !statusEl.textContent;
+    statusEl.classList.toggle("is-empty", !statusText);
+    statusEl.hidden = layout === "focus";
   }
+  block.classList.toggle("match-pairs-focus-mode", layout === "focus");
   const minDims = getMinResizeDimensionsForBlock(block);
   const currentWidth = parseInt(block.style.width || block.getBoundingClientRect().width || "0", 10);
   if (currentWidth < minDims.width) block.style.width = `${minDims.width}px`;
@@ -7999,10 +8161,14 @@ function resetMatchPairsSession(block) {
   config.selectedLeftId = "";
   config.selectedRightId = "";
   config.focusCursor = 0;
+  config.focusResultId = "";
   config.hintRowId = "";
   config.wrongRowId = "";
   config.layoutMode = config.defaultMode;
   config.sessionSeed = Date.now();
+  config.mixedStep = 0;
+  config.mixedLayout = chooseMixedMatchPairsLayout(config.sessionSeed, config.mixedStep);
+  config.mixedRoundRowIds = [];
   config.feedbackState = "reset";
   config.feedbackText = "Session reset.";
   return config;
@@ -8011,13 +8177,14 @@ function resetMatchPairsSession(block) {
 function chooseMatchPairsItem(block, side, rowId) {
   const config = readMatchPairsConfig(block);
   if (config.matchedRowIds.includes(rowId)) return config;
-  if (config.layoutMode === "focus") {
+  if (getActiveMatchPairsLayout(config) === "focus") {
     const { items } = getMatchPairsItems(config);
     const unmatched = items.filter((item) => !config.matchedRowIds.includes(item.id));
     const focus = unmatched[config.focusCursor % Math.max(unmatched.length, 1)];
-    if (!focus || side !== "right") return config;
+    if (!focus || side !== "right" || config.focusResultId) return config;
     if (rowId === focus.id) {
       config.matchedRowIds.push(rowId);
+      config.focusResultId = rowId;
       config.selectedRightId = "";
       config.wrongRowId = "";
       config.feedbackState = "correct";
@@ -8039,6 +8206,16 @@ function chooseMatchPairsItem(block, side, rowId) {
     config.matchedRowIds.push(config.selectedLeftId);
     config.feedbackState = "correct";
     config.feedbackText = "Correct match.";
+    if (config.layoutMode === "mixed") {
+      const { items } = getMatchPairsItems(config);
+      const roundItems = getVisibleMatchPairsItems(config, items);
+      const roundComplete = roundItems.length > 0
+        && roundItems.every((item) => config.matchedRowIds.includes(item.id));
+      if (roundComplete) {
+        config.mixedRoundRowIds = [];
+        advanceMixedMatchPairsLayout(config);
+      }
+    }
   } else {
     config.wrongRowId = config.selectedRightId;
     config.feedbackState = "wrong";
@@ -8079,7 +8256,7 @@ function openMatchPairsPicker(block, anchorEl = null) {
     </div>
     <div class="typing-drill-picker-panel" data-match-pairs-panel="session">
       <div class="typing-drill-picker-grid">
-        <label class="typing-drill-picker-field"><span>Number of pairs</span><input type="number" min="2" max="30" data-match-pairs-setting="limit" /></label>
+        <label class="typing-drill-picker-field"><span>Pairs loaded at once</span><input type="number" min="2" max="30" data-match-pairs-setting="limit" /></label>
         <label class="match-pairs-toggle"><input type="checkbox" data-match-pairs-setting="shuffle" /> Shuffle</label>
       </div>
       <details class="typing-drill-picker-section" open>
@@ -8102,15 +8279,27 @@ function openMatchPairsPicker(block, anchorEl = null) {
             <label><input type="checkbox" value="columns" data-match-pairs-allowed /> Two Column</label>
             <label><input type="checkbox" value="focus" data-match-pairs-allowed /> Focus One</label>
             <label><input type="checkbox" value="chips" data-match-pairs-allowed /> Chip Board</label>
+            <label><input type="checkbox" value="mixed" data-match-pairs-allowed /> Practice Mix</label>
           </div>
-          <label class="typing-drill-picker-field"><span>Default Mode</span><select data-match-pairs-setting="default-mode"><option value="columns">Two Column</option><option value="focus">Focus One</option><option value="chips">Chip Board</option></select></label>
+          <label class="typing-drill-picker-field"><span>Default Mode</span><select data-match-pairs-setting="default-mode"><option value="columns">Two Column</option><option value="focus">Focus One</option><option value="chips">Chip Board</option><option value="mixed">Practice Mix</option></select></label>
           <label class="match-pairs-toggle"><input type="checkbox" data-match-pairs-setting="switch" /> Allow switching while studying</label>
+          <div class="match-pairs-picker-note">Practice Mix switches after each Focus question, or after completing the full Two Column / Chip Board batch.</div>
         </div>
       </details>
     </div>
     <div class="typing-drill-picker-panel" data-match-pairs-panel="style">
-      <label class="typing-drill-picker-field"><span>Current Layout</span><select data-match-pairs-setting="layout"><option value="columns">Two Column</option><option value="focus">Focus One</option><option value="chips">Chip Board</option></select></label>
-      <label class="typing-drill-picker-field"><span>Card Treatment</span><select data-match-pairs-setting="surface"><option value="soft">Soft</option><option value="tinted">Tinted</option><option value="outline">Outline</option></select></label>
+      <details class="typing-drill-picker-section" open>
+        <summary>Display</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="typing-drill-picker-field"><span>Current Layout</span><select data-match-pairs-setting="layout"><option value="columns">Two Column</option><option value="focus">Focus One</option><option value="chips">Chip Board</option><option value="mixed">Practice Mix</option></select></label>
+          <label class="typing-drill-picker-field"><span>Card Treatment</span><select data-match-pairs-setting="surface"><option value="soft">Soft</option><option value="tinted">Tinted</option><option value="outline">Outline</option></select></label>
+          <div class="typing-drill-picker-grid">
+            <label class="typing-drill-picker-field"><span>Prompt size</span><select data-match-pairs-setting="prompt-size"><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option><option value="xl">XL</option></select></label>
+            <label class="typing-drill-picker-field"><span>Answer size</span><select data-match-pairs-setting="answer-size"><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label>
+          </div>
+          <label class="typing-drill-picker-field"><span>Focus card height</span><select data-match-pairs-setting="prompt-height"><option value="compact">Compact</option><option value="standard">Standard</option><option value="tall">Tall</option></select></label>
+        </div>
+      </details>
       <details class="typing-drill-picker-section" open>
         <summary>Color</summary>
         <div class="typing-drill-picker-section-body">
@@ -8119,13 +8308,26 @@ function openMatchPairsPicker(block, anchorEl = null) {
           <div class="match-pairs-picker-note">Leave custom accent off to follow this page's theme color.</div>
         </div>
       </details>
-      <div class="match-pairs-picker-note">Layout and color change the display only. Your database pairing stays the same.</div>
+      <details class="typing-drill-picker-section">
+        <summary>Background theme</summary>
+        <div class="typing-drill-picker-section-body">
+          <div class="match-pairs-upload-row">
+            <button type="button" class="topbar-dropdown-btn" data-match-pairs-action="upload-bg">Upload image</button>
+            <button type="button" class="topbar-dropdown-btn" data-match-pairs-action="clear-bg">Clear</button>
+            <input type="file" data-match-pairs-setting="background-upload" accept="image/*" hidden />
+          </div>
+          <div class="match-pairs-picker-note">Used behind the focus card, or behind the matching board in other layouts.</div>
+        </div>
+      </details>
+      <div class="match-pairs-picker-note">These settings only change how this block looks. Your pairs and database mapping stay the same.</div>
     </div>`;
   picker.addEventListener("mousedown", (event) => event.stopPropagation());
   picker.addEventListener("click", (event) => event.stopPropagation());
   document.body.appendChild(picker);
   if (config.accentColor) picker.style.setProperty("--accent", config.accentColor);
-  positionTypingDrillPicker(picker, block, anchorEl || block.querySelector(".match-pairs-config-btn") || block);
+  const anchorTarget = anchorEl || block.querySelector(".match-pairs-config-btn") || block;
+  positionTypingDrillPicker(picker, block, anchorTarget);
+  watchStudyToolPickerPosition(picker, block, anchorTarget);
 
   const get = (key) => picker.querySelector(`[data-match-pairs-setting="${key}"]`);
   const titleInput = get("title");
@@ -8142,8 +8344,12 @@ function openMatchPairsPicker(block, anchorEl = null) {
   const switchInput = get("switch");
   const layoutSelect = get("layout");
   const surfaceSelect = get("surface");
+  const promptSizeSelect = get("prompt-size");
+  const answerSizeSelect = get("answer-size");
+  const promptHeightSelect = get("prompt-height");
   const customAccentInput = get("custom-accent");
   const accentInput = get("accent");
+  const backgroundUploadInput = get("background-upload");
   const sourceKey = (source) => `${source.kind}:${source.pageId}:${source.blockId || ""}`;
   const selectedSource = () => sources.find((source) => sourceKey(source) === sourceSelect.value) || null;
   const fillFieldSelect = (select, properties, value, includeNone = true) => {
@@ -8157,6 +8363,7 @@ function openMatchPairsPicker(block, anchorEl = null) {
   function setTab(name) {
     picker.querySelectorAll("[data-match-pairs-tab]").forEach((button) => button.classList.toggle("active", button.dataset.matchPairsTab === name));
     picker.querySelectorAll("[data-match-pairs-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.matchPairsPanel === name));
+    window.requestAnimationFrame(() => positionTypingDrillPicker(picker, block, anchorTarget));
   }
 
   function workingConfig(resetSession = false) {
@@ -8181,18 +8388,27 @@ function openMatchPairsPicker(block, anchorEl = null) {
       layoutMode: layoutSelect.value,
       allowModeSwitch: switchInput.checked,
       surfaceStyle: surfaceSelect.value,
-      accentColor: customAccentInput.checked ? accentInput.value : ""
+      promptSize: promptSizeSelect.value,
+      answerSize: answerSizeSelect.value,
+      promptHeight: promptHeightSelect.value,
+      accentColor: customAccentInput.checked ? accentInput.value : "",
+      backgroundImage: base.backgroundImage
     });
     if (!resetSession) return next;
+    const sessionSeed = Date.now();
     return normalizeMatchPairsConfig({
       ...next,
       matchedRowIds: [],
       selectedLeftId: "",
       selectedRightId: "",
       focusCursor: 0,
+      focusResultId: "",
       hintRowId: "",
       wrongRowId: "",
-      sessionSeed: Date.now(),
+      sessionSeed,
+      mixedStep: 0,
+      mixedLayout: chooseMixedMatchPairsLayout(sessionSeed, 0),
+      mixedRoundRowIds: [],
       feedbackState: "reset",
       feedbackText: "New matching set ready."
     });
@@ -8230,6 +8446,9 @@ function openMatchPairsPicker(block, anchorEl = null) {
     defaultSelect.value = next.defaultMode;
     layoutSelect.value = next.layoutMode;
     surfaceSelect.value = next.surfaceStyle;
+    promptSizeSelect.value = next.promptSize;
+    answerSizeSelect.value = next.answerSize;
+    promptHeightSelect.value = next.promptHeight;
     customAccentInput.checked = !!next.accentColor;
     accentInput.disabled = !customAccentInput.checked;
     if (next.accentColor) picker.style.setProperty("--accent", next.accentColor);
@@ -8251,6 +8470,9 @@ function openMatchPairsPicker(block, anchorEl = null) {
   switchInput.checked = config.allowModeSwitch;
   layoutSelect.value = config.layoutMode;
   surfaceSelect.value = config.surfaceStyle;
+  promptSizeSelect.value = config.promptSize;
+  answerSizeSelect.value = config.answerSize;
+  promptHeightSelect.value = config.promptHeight;
   customAccentInput.checked = !!config.accentColor;
   accentInput.value = config.accentColor || "#7b9cff";
   accentInput.disabled = !customAccentInput.checked;
@@ -8271,6 +8493,42 @@ function openMatchPairsPicker(block, anchorEl = null) {
   picker.addEventListener("change", saveSettings);
   picker.addEventListener("input", (event) => {
     if (event.target.matches('input[type="text"], input[type="number"]')) saveSettings(event);
+  });
+
+  function readMatchPairsImageFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) {
+        resolve("");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  picker.querySelector('[data-match-pairs-action="upload-bg"]')?.addEventListener("click", () => {
+    backgroundUploadInput?.click();
+  });
+
+  picker.querySelector('[data-match-pairs-action="clear-bg"]')?.addEventListener("click", () => {
+    const next = readMatchPairsConfig(block);
+    next.backgroundImage = "";
+    writeMatchPairsConfig(block, next);
+    renderMatchPairsBlock(block);
+    if (typeof saveState === "function") saveState();
+  });
+
+  backgroundUploadInput?.addEventListener("change", async () => {
+    const file = backgroundUploadInput.files?.[0] || null;
+    if (!file) return;
+    const next = readMatchPairsConfig(block);
+    next.backgroundImage = await readMatchPairsImageFile(file);
+    writeMatchPairsConfig(block, next);
+    renderMatchPairsBlock(block);
+    if (typeof saveState === "function") saveState();
+    backgroundUploadInput.value = "";
   });
 }
 
@@ -9244,7 +9502,7 @@ gridEl.addEventListener("click", (e) => {
   const actionEl = e.target.closest("[data-match-pairs-action]");
   if (!actionEl) return;
   const action = actionEl.dataset.matchPairsAction || "";
-  if (!["mode", "reset", "hint", "skip"].includes(action)) return;
+  if (!["mode", "reset", "hint", "skip", "next"].includes(action)) return;
   const block = actionEl.closest('.block[data-type="match-pairs"]');
   if (!block) return;
   e.preventDefault();
@@ -9254,27 +9512,45 @@ gridEl.addEventListener("click", (e) => {
   const unmatched = items.filter((item) => !config.matchedRowIds.includes(item.id));
   if (action === "mode") {
     const mode = normalizeMatchPairsMode(actionEl.dataset.mode || "");
-    if (config.allowedModes.includes(mode)) config.layoutMode = mode;
+    if (config.allowedModes.includes(mode)) {
+      config.layoutMode = mode;
+      if (mode === "mixed") {
+        config.sessionSeed = Date.now();
+        config.mixedStep = 0;
+        config.mixedLayout = chooseMixedMatchPairsLayout(config.sessionSeed, config.mixedStep);
+        config.mixedRoundRowIds = [];
+      }
+    }
     config.selectedLeftId = "";
     config.selectedRightId = "";
     config.wrongRowId = "";
+    config.focusResultId = "";
   } else if (action === "reset") {
     config = resetMatchPairsSession(block);
   } else if (action === "hint") {
-    const target = config.layoutMode === "focus"
+    const target = getActiveMatchPairsLayout(config) === "focus"
       ? unmatched[config.focusCursor % Math.max(unmatched.length, 1)]
       : unmatched.find((item) => item.id === config.selectedLeftId) || unmatched[0];
     config.hintRowId = target?.id || "";
     config.feedbackState = target?.hint ? "hint" : "";
     config.feedbackText = target && !target.hint ? "No hint is mapped for this pair." : "";
+  } else if (action === "next" && getActiveMatchPairsLayout(config) === "focus" && config.focusResultId) {
+    config.focusResultId = "";
+    config.hintRowId = "";
+    config.wrongRowId = "";
+    config.feedbackState = "";
+    config.feedbackText = "";
+    config.mixedRoundRowIds = [];
+    advanceMixedMatchPairsLayout(config);
   } else if (action === "skip" && unmatched.length) {
     config.selectedLeftId = "";
     config.selectedRightId = "";
+    config.focusResultId = "";
     config.hintRowId = "";
     config.wrongRowId = "";
     config.focusCursor = (config.focusCursor + 1) % unmatched.length;
     config.feedbackState = "";
-    config.feedbackText = config.layoutMode === "focus" ? "Skipped to another pair." : "Select another pair to continue.";
+    config.feedbackText = getActiveMatchPairsLayout(config) === "focus" ? "Skipped to another pair." : "Select another pair to continue.";
   }
   writeMatchPairsConfig(block, config);
   renderMatchPairsBlock(block);
@@ -11043,6 +11319,11 @@ function autoGrowBlock(block, options = {}) {
   const allowShrink = !!options.allowShrink;
   const minH = block?.dataset?.type === "text" ? GRID_SIZE : 48;
   const currentH = parseInt(block.style.height || "0", 10);
+
+  if (block?.dataset?.type === "match-pairs") {
+    enforceMinHeight(block);
+    return;
+  }
 
   if (isDividerType(block.dataset.type)) {
     const dividerHeight = getDefaultBlockDimensions(block.dataset.type || "divider").height;

@@ -375,13 +375,14 @@ function getMinHeightForBlock(block) {
     const shell = block.querySelector(".match-pairs-shell");
     const stage = block.querySelector(".match-pairs-stage");
     if (!shell) return GRID_SIZE * 8;
+    const layout = String(shell.dataset.layout || "columns");
     const shellGap = parseFloat(window.getComputedStyle(shell).gap) || 0;
-    const visibleChildren = Array.from(shell.children).filter((child) => !child.hidden);
+    const visibleChildren = Array.from(shell.children).filter((child) => !child.hidden && window.getComputedStyle(child).display !== "none");
     const fixedHeight = visibleChildren
       .filter((child) => child !== stage)
       .reduce((height, child) => height + child.getBoundingClientRect().height, 0);
-    let stageHeight = GRID_SIZE * 5;
-    if (stage) {
+    let stageHeight = GRID_SIZE * (layout === "focus" ? 5 : 2);
+    if (stage && layout === "focus") {
       const stageStyle = window.getComputedStyle(stage);
       const stagePadding = (parseFloat(stageStyle.paddingTop) || 0) + (parseFloat(stageStyle.paddingBottom) || 0);
       const stageBorders = (parseFloat(stageStyle.borderTopWidth) || 0) + (parseFloat(stageStyle.borderBottomWidth) || 0);
@@ -391,7 +392,7 @@ function getMinHeightForBlock(block) {
       stageHeight = Math.max(GRID_SIZE * 5, stageContentHeight + stagePadding + stageBorders);
     }
     const naturalHeight = paddingTop + fixedHeight + stageHeight + (Math.max(0, visibleChildren.length - 1) * shellGap) + paddingBottom + 4;
-    return Math.max(GRID_SIZE * 8, Math.ceil(naturalHeight / GRID_SIZE) * GRID_SIZE);
+    return Math.max(GRID_SIZE * (layout === "focus" ? 8 : 5), Math.ceil(naturalHeight / GRID_SIZE) * GRID_SIZE);
   }
 
   const title = block.querySelector(".block-title");

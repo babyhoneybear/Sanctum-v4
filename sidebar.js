@@ -627,7 +627,72 @@ function createDomain(title) {
 }
 
 let currentPageId = "home";
+const PAGE_RESUME_SESSION_KEY = "sanctum_active_page_session_v1";
+const PAGE_RESUME_HISTORY_KEY = "sanctumActivePageSession";
+const PAGE_RESUME_WINDOW_MS = 60 * 60 * 1000;
+let lastPageResumeTouch = 0;
 let hasOpenedPage = false;
+
+function rememberActivePageForSession(pageId) {
+  const visitedAt = Date.now();
+  const resumeState = {
+    pageId: String(pageId || "home"),
+    visitedAt
+  };
+  lastPageResumeTouch = visitedAt;
+  try {
+    sessionStorage.setItem(PAGE_RESUME_SESSION_KEY, JSON.stringify(resumeState));
+  } catch (err) {
+    console.warn("Could not save Sanctum's recent page tab memory.", err);
+  }
+  try {
+    const currentHistoryState = history.state && typeof history.state === "object" ? history.state : {};
+    history.replaceState({ ...currentHistoryState, [PAGE_RESUME_HISTORY_KEY]: resumeState }, "");
+  } catch (err) {
+    console.warn("Could not save Sanctum's recent page reload hint.", err);
+  }
+}
+
+function touchActivePageSession() {
+  const now = Date.now();
+  if (now - lastPageResumeTouch < 60 * 1000) return;
+  rememberActivePageForSession(currentPageId);
+}
+
+function getRecentSessionPageId() {
+  try {
+    const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
+    if (navigationEntry?.type !== "reload") return "home";
+    const raw = sessionStorage.getItem(PAGE_RESUME_SESSION_KEY);
+    const storedPage = raw ? JSON.parse(raw) : null;
+    const historyPage = history.state?.[PAGE_RESUME_HISTORY_KEY] || null;
+    const saved = Number(historyPage?.visitedAt || 0) > Number(storedPage?.visitedAt || 0)
+      ? historyPage
+      : storedPage;
+    if (!saved) return "home";
+    const pageId = String(saved?.pageId || "home");
+    const visitedAt = Number(saved?.visitedAt || 0);
+    const isRecent = visitedAt > 0 && Date.now() - visitedAt <= PAGE_RESUME_WINDOW_MS;
+    const isAvailable = pageId === "home"
+      || ["search", "inbox", "notes"].includes(pageId)
+      || userDomains.some((domain) => domain.id === pageId)
+      || userPages.some((page) => page.id === pageId);
+    if (!isRecent || !isAvailable) {
+      sessionStorage.removeItem(PAGE_RESUME_SESSION_KEY);
+      const currentHistoryState = history.state && typeof history.state === "object" ? { ...history.state } : {};
+      delete currentHistoryState[PAGE_RESUME_HISTORY_KEY];
+      history.replaceState(currentHistoryState, "");
+      return "home";
+    }
+    return pageId;
+  } catch (err) {
+    console.warn("Could not restore the recent Sanctum page.", err);
+    return "home";
+  }
+}
+
+document.addEventListener("pointerdown", touchActivePageSession, { passive: true });
+document.addEventListener("keydown", touchActivePageSession);
 
 function openPage(pageId, options = {}) {
   const { revealSidebarPath = true } = options;
@@ -642,6 +707,7 @@ function openPage(pageId, options = {}) {
   }
 
   currentPageId = pageId;
+  rememberActivePageForSession(pageId);
   if (typeof applyResolvedTheme === "function") {
     applyResolvedTheme(pageId);
   }
@@ -846,6 +912,7 @@ function saveCurrentPageBlocks() {
 
 window.saveCurrentPageBlocks = saveCurrentPageBlocks;
 window.createPage = createPage;
+window.getRecentSessionPageId = getRecentSessionPageId;
 
 function loadPageBlocks(pageId) {
   const blocks = getPageBlocks(pageId);

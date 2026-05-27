@@ -963,7 +963,11 @@
       .then(() => scriptQueue.reduce((p, src) => p.then(() => loadScript(src)), Promise.resolve()))
       .catch((err) => {
         console.error("Sanctum failed to boot", err);
-        alert("Sanctum couldn't finish loading its storage layer.");
+        if (err?.code === "SANCTUM_STORAGE_BLOCKED") {
+          alert("Sanctum could not open your vault because another Sanctum tab or window is holding storage open. Close other Sanctum tabs, then reload. Your vault has not been replaced with an empty one.");
+          return;
+        }
+        alert("Sanctum could not safely read your vault. It has stopped instead of opening an empty vault. Do not reset or import yet; reload once, and use your backup only if the vault still cannot be recovered.");
       });
   })();
 </script>
