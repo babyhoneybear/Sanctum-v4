@@ -2500,7 +2500,7 @@ function normalizeDocSection(section = {}, index = 0) {
     title: typeof section.title === "string" && section.title.trim()
       ? section.title
       : `Section ${index + 1}`,
-    content: typeof section.content === "string" ? section.content : "",
+    content: sanitizeDocReadableTextColor(typeof section.content === "string" ? section.content : ""),
     styleKit: typeof section.styleKit === "string" ? section.styleKit : "",
     meta: {
       status: ["brainstorming", "draft", "editing", "final"].includes(meta.status) ? meta.status : "draft",
@@ -2519,6 +2519,29 @@ function normalizeDocSection(section = {}, index = 0) {
       ? section.suggestedChanges.map(normalizeDocSuggestedChange)
       : []
   };
+}
+
+function sanitizeDocReadableTextColor(html = "") {
+  const raw = String(html || "");
+  if (!/color\s*:\s*(#000|#000000|black|rgb\s*\(\s*0\s*,\s*0\s*,\s*0\s*\))/i.test(raw)) {
+    return raw;
+  }
+  if (typeof document === "undefined") {
+    return raw.replace(/color\s*:\s*(#000000|#000|black|rgb\s*\(\s*0\s*,\s*0\s*,\s*0\s*\))\s*;?/gi, "");
+  }
+
+  const host = document.createElement("div");
+  host.innerHTML = raw;
+  host.querySelectorAll("[style]").forEach((el) => {
+    const color = String(el.style.color || "").replace(/\s+/g, "").toLowerCase();
+    if (color === "black" || color === "#000" || color === "#000000" || color === "rgb(0,0,0)") {
+      el.style.removeProperty("color");
+    }
+    if (!el.getAttribute("style")?.trim()) {
+      el.removeAttribute("style");
+    }
+  });
+  return host.innerHTML;
 }
 
 function normalizeDocData(data = {}) {
@@ -2710,6 +2733,10 @@ function openDocEditor(pageId) {
 
   document.getElementById("docEditor").classList.add("active");
   document.getElementById("pageCanvas").style.display = "none";
+  const _sd = document.getElementById("splitDivider");
+  if (_sd) _sd.style.display = "none";
+  const _sp = document.getElementById("splitPane");
+  if (_sp) _sp.style.display = "none";
   const _pbs = document.getElementById("pageBoardSurface");
   if (_pbs) _pbs.style.display = "none";
 
@@ -2745,6 +2772,10 @@ function closeDocEditor() {
 
   document.getElementById("docEditor").classList.remove("active");
   document.getElementById("pageCanvas").style.display = "";
+  const _sd2 = document.getElementById("splitDivider");
+  if (_sd2) _sd2.style.display = "";
+  const _sp2 = document.getElementById("splitPane");
+  if (_sp2) _sp2.style.display = "";
   const _pbs2 = document.getElementById("pageBoardSurface");
   if (_pbs2) _pbs2.style.display = "";
   docPageId = null;
@@ -2778,6 +2809,30 @@ function saveCurrentDocSection() {
   }
   persistActiveDocData();
 }
+
+window.SanctumAssistantDocumentStore = {
+  read() {
+    saveCurrentDocSection();
+    const all = readAllDocuments();
+    return typeof structuredClone === "function"
+      ? structuredClone(all)
+      : JSON.parse(JSON.stringify(all));
+  },
+  write(nextDocuments) {
+    const next = nextDocuments && typeof nextDocuments === "object" ? nextDocuments : {};
+    writeAllDocuments(next);
+    if (docPageId && next[docPageId]) {
+      const activeSectionId = docSections[activeSectionIndex]?.id || "";
+      docData = normalizeDocData(next[docPageId]);
+      docSections = docData.sections;
+      const nextIndex = Math.max(0, docSections.findIndex((section) => section.id === activeSectionId));
+      activeSectionIndex = nextIndex;
+      renderDocSections();
+      loadDocSection(activeSectionIndex);
+    }
+    return true;
+  },
+};
 
 function loadDocSection(index) {
   activeSectionIndex = index;
@@ -4201,7 +4256,7 @@ function buildColorDropdown(dropdownEl, onColorSelect, options = {}) {
   removeBtn.textContent = includeTransparent ? "Remove Color" : "Reset Color";
   removeBtn.addEventListener("mousedown", (e) => {
     e.preventDefault();
-    onColorSelect(includeTransparent ? "transparent" : "#000000");
+    onColorSelect(includeTransparent ? "transparent" : "");
     dropdownEl.classList.remove("open");
   });
   advanced.appendChild(removeBtn);
@@ -4301,6 +4356,100 @@ function _docApplyHighlight(range, color) {
   }
 }
 
+function _docRangeCoversContent(range, content) {
+  if (!range || !content) return false;
+  const fullRange = document.createRange();
+  fullRange.selectNodeContents(content);
+  return (
+    range.compareBoundaryPoints(Range.START_TO_START, fullRange) <= 0 &&
+    range.compareBoundaryPoints(Range.END_TO_END, fullRange) >= 0
+  );
+}
+
+function _docCleanupEmptyInlineSpans(root) {
+  root.querySelectorAll("span[style]").forEach((span) => {
+    if (!span.getAttribute("style")?.trim()) {
+      span.replaceWith(...span.childNodes);
+    }
+  });
+}
+
+function _docRemoveTextColorFromElement(el) {
+  if (!el?.style) return;
+  el.style.removeProperty("color");
+  if (!el.getAttribute("style")?.trim()) {
+    el.removeAttribute("style");
+  }
+}
+
+function _docApplyTextColor(range, color) {
+  const content = document.getElementById("docContent");
+  if (!range || range.collapsed || !content) return;
+
+  const removing = !color || color === "inherit" || color === "transparent";
+  const fullDocument = _docRangeCoversContent(range, content);
+
+  if (fullDocument) {
+    const blocks = content.querySelectorAll("p,h1,h2,h3,h4,li,blockquote,td,th,figcaption,div");
+    content.querySelectorAll("[style]").forEach((el) => _docRemoveTextColorFromElement(el));
+    _docCleanupEmptyInlineSpans(content);
+
+    if (removing) {
+      _docRemoveTextColorFromElement(content);
+      return;
+    }
+
+    content.style.color = color;
+    blocks.forEach((block) => {
+      block.style.color = color;
+    });
+    return;
+  }
+
+  const segments = [];
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null);
+  let tn;
+  while ((tn = walker.nextNode())) {
+    let inside = false;
+    try { inside = range.intersectsNode(tn); } catch { inside = false; }
+    if (!inside) continue;
+    const s = tn === range.startContainer ? range.startOffset : 0;
+    const e = tn === range.endContainer ? range.endOffset : tn.length;
+    if (s < e) segments.push({ tn, s, e });
+  }
+
+  if (removing) {
+    segments.forEach(({ tn: node }) => {
+      let el = node.parentElement;
+      while (el && el !== content) {
+        if (el.style?.color) {
+          _docRemoveTextColorFromElement(el);
+          break;
+        }
+        el = el.parentElement;
+      }
+    });
+    _docCleanupEmptyInlineSpans(content);
+    return;
+  }
+
+  for (let i = segments.length - 1; i >= 0; i--) {
+    let { tn: target, s, e } = segments[i];
+    if (e < target.length) target.splitText(e);
+    if (s > 0) target = target.splitText(s);
+
+    const par = target.parentElement;
+    if (par && par !== content && par.tagName === "SPAN" && par.childNodes.length === 1 && par.style.color) {
+      par.style.color = color;
+    } else {
+      const span = document.createElement("span");
+      span.style.color = color;
+      par.insertBefore(span, target);
+      span.appendChild(target);
+    }
+  }
+}
+
 ensureDocColorDropdowns();
 
 // highlight button — save selection on mousedown so the dropdown click doesn't lose it
@@ -4378,18 +4527,26 @@ document.getElementById("docTextColorBtn")?.addEventListener("click", (e) => {
   buildColorDropdown(dropdown, (color) => {
     const content = document.getElementById("docContent");
     if (!content) return;
-    if (_savedTextColorRange) {
+    const savedRange = _savedTextColorRange;
+    _savedTextColorRange = null;
+    if (savedRange) {
       content.focus();
       const sel = window.getSelection();
       sel.removeAllRanges();
-      sel.addRange(_savedTextColorRange);
-      _savedTextColorRange = null;
+      sel.addRange(savedRange);
     }
     const docMain = document.getElementById("docMain");
     const savedScroll = docMain ? docMain.scrollTop : 0;
-    document.execCommand("foreColor", false, color);
-    document.getElementById("docTextColorPreview")?.style.setProperty("background", color);
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : savedRange;
+    _docApplyTextColor(range, color);
+    const preview = document.getElementById("docTextColorPreview");
+    if (preview) {
+      if (color) preview.style.setProperty("background", color);
+      else preview.style.removeProperty("background");
+    }
     if (docMain) docMain.scrollTop = savedScroll;
+    saveCurrentDocSection();
     content.focus();
   }, { includeTransparent: false });
 
@@ -5573,7 +5730,11 @@ function createInspectorLinkedPage(type) {
 
   if (typeof createPage !== "function") return;
 
-  const newPage = createPage(name, parentId, "board-canvas", category);
+  const newPage = createPage(name, parentId, "board-canvas", category, "page", {
+    reuseExisting: true,
+    currentPageId: docPageId,
+    includeCurrentPage: true
+  });
 
   if (typeof ensureParentLinkCard === "function") {
     ensureParentLinkCard(newPage);
@@ -5923,7 +6084,11 @@ document.getElementById("docExportNewCanvas")?.addEventListener("click", (e) => 
       picker.remove();
 
       if (typeof createPage === "function") {
-        const newPage = createPage(title, parent.id, "board-canvas", "none");
+        const newPage = createPage(title, parent.id, "board-canvas", "none", "page", {
+          reuseExisting: true,
+          currentPageId: docPageId,
+          includeCurrentPage: true
+        });
 
         if (typeof addParentLinkCardForPage === "function") {
           addParentLinkCardForPage(newPage, parent.id);

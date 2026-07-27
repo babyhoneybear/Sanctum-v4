@@ -615,6 +615,9 @@ function createDomain(title) {
     id:    `domain-${Date.now()}`,
     title: title.trim(),
     type:  "domain",
+    isScopeBoundary: true,
+    recordKind: "space",
+    canonicalId: "",
   };
   userDomains.push(domain);
   saveSanctumRegistry();
@@ -622,6 +625,7 @@ function createDomain(title) {
     renderSidebarDomains();
     renderSidebarPins();
     renderSidebarBookmarks();
+    renderTabBar();
   }, 0);
   return domain;
 }
@@ -632,6 +636,505 @@ const PAGE_RESUME_HISTORY_KEY = "sanctumActivePageSession";
 const PAGE_RESUME_WINDOW_MS = 60 * 60 * 1000;
 let lastPageResumeTouch = 0;
 let hasOpenedPage = false;
+
+// == Tabs & Per-Tab Navigation ==
+const tabs = [];
+let activeTabId = null;
+let isNavHistoryTravel = false;
+const TABS_LAYOUT_KEY = (window.STORAGE_KEYS && window.STORAGE_KEYS.tabsLayout) || "sanctum_tabs_layout_v1";
+
+function _genTabId() {
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function createTab(startPageId = "home") {
+  const tab = {
+    id: _genTabId(),
+    history: [],
+    historyIndex: -1,
+    pageId: startPageId,
+  };
+  tabs.push(tab);
+  return tab;
+}
+
+function readTabsLayoutState() {
+  if (typeof readStorageJSON === "function") {
+    const raw = readStorageJSON(TABS_LAYOUT_KEY, null);
+    return raw && typeof raw === "object" ? raw : null;
+  }
+  try {
+    const raw = JSON.parse(localStorage.getItem(TABS_LAYOUT_KEY) || "null");
+    return raw && typeof raw === "object" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTabsLayout() {
+  const payload = {
+    tabs: tabs.map((tab) => ({
+      id: tab.id,
+      pageId: tab.pageId,
+      history: Array.isArray(tab.history) ? [...tab.history] : [],
+      historyIndex: Number.isFinite(tab.historyIndex) ? tab.historyIndex : -1,
+    })),
+    activeTabId: activeTabId || "",
+  };
+  if (typeof writeStorageJSON === "function") {
+    writeStorageJSON(TABS_LAYOUT_KEY, payload);
+  } else {
+    try { localStorage.setItem(TABS_LAYOUT_KEY, JSON.stringify(payload)); } catch (_error) {}
+  }
+}
+
+function restoreTabsLayoutIfSaved() {
+  const saved = readTabsLayoutState();
+  if (!saved?.tabs?.length) return null;
+
+  const allPages = getTabPageLookup();
+  const restored = [];
+
+  saved.tabs.forEach((raw) => {
+    const history = Array.isArray(raw.history) ? raw.history.filter((id) => allPages[id]) : [];
+    let pageId = allPages[raw.pageId] ? raw.pageId : "";
+    if (!pageId && history.length) pageId = history[history.length - 1];
+    if (!pageId || !allPages[pageId]) pageId = "home";
+    if (!history.length) history.push(pageId);
+
+    let historyIndex = Number.isFinite(raw.historyIndex) ? raw.historyIndex : history.length - 1;
+    historyIndex = Math.max(0, Math.min(historyIndex, history.length - 1));
+
+    restored.push({
+      id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : _genTabId(),
+      pageId: history[historyIndex] || pageId,
+      history,
+      historyIndex,
+    });
+  });
+
+  if (!restored.length) return null;
+
+  tabs.length = 0;
+  restored.forEach((tab) => tabs.push(tab));
+
+  activeTabId = saved.activeTabId && tabs.some((tab) => tab.id === saved.activeTabId)
+    ? saved.activeTabId
+    : tabs[0].id;
+
+  renderTabBar();
+  updateNavHistoryBtns();
+  return getActiveTab()?.pageId || "home";
+}
+
+function getActiveTab() {
+  return tabs.find(t => t.id === activeTabId) || null;
+}
+
+function pushTabHistory(pageId) {
+  const tab = getActiveTab();
+  if (!tab) return;
+  tab.history.splice(tab.historyIndex + 1);
+  tab.history.push(pageId);
+  if (tab.history.length > 100) tab.history.shift();
+  tab.historyIndex = tab.history.length - 1;
+  tab.pageId = pageId;
+}
+
+function updateNavHistoryBtns() {
+  const tab = getActiveTab();
+  const backBtn = document.getElementById("navBackBtn");
+  const fwdBtn = document.getElementById("navFwdBtn");
+  if (backBtn) backBtn.disabled = !tab || tab.historyIndex <= 0;
+  if (fwdBtn) fwdBtn.disabled = !tab || tab.historyIndex >= tab.history.length - 1;
+}
+
+function navBack() {
+  const tab = getActiveTab();
+  if (!tab || tab.historyIndex <= 0) return;
+  tab.historyIndex--;
+  tab.pageId = tab.history[tab.historyIndex];
+  isNavHistoryTravel = true;
+  openPage(tab.pageId);
+  isNavHistoryTravel = false;
+}
+
+function navFwd() {
+  const tab = getActiveTab();
+  if (!tab || tab.historyIndex >= tab.history.length - 1) return;
+  tab.historyIndex++;
+  tab.pageId = tab.history[tab.historyIndex];
+  isNavHistoryTravel = true;
+  openPage(tab.pageId);
+  isNavHistoryTravel = false;
+}
+
+function switchToTab(tabId) {
+  if (activeTabId === tabId) return;
+  activeTabId = tabId;
+  const tab = getActiveTab();
+  if (!tab) return;
+  isNavHistoryTravel = true;
+  openPage(tab.pageId);
+  isNavHistoryTravel = false;
+  saveTabsLayout();
+}
+
+function openNewTab(startPageId = "home") {
+  const tab = createTab(startPageId);
+  activeTabId = tab.id;
+  openPage(startPageId);
+  saveTabsLayout();
+}
+
+function closeTab(tabId) {
+  const idx = tabs.findIndex(t => t.id === tabId);
+  if (idx === -1) return;
+  const wasActive = activeTabId === tabId;
+  const shouldCloseSplit = splitOwnerTabId === tabId && document.body.classList.contains("split-active");
+  tabs.splice(idx, 1);
+  if (shouldCloseSplit) closeSplitPane();
+  if (tabs.length === 0) {
+    const newTab = createTab("home");
+    activeTabId = newTab.id;
+    openPage("home");
+    saveTabsLayout();
+    return;
+  }
+  if (wasActive) {
+    const nextTab = tabs[Math.min(idx, tabs.length - 1)];
+    switchToTab(nextTab.id);
+  } else {
+    renderTabBar();
+    updateNavHistoryBtns();
+    saveTabsLayout();
+  }
+}
+
+function moveTab(fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+  if (fromIndex >= tabs.length || toIndex >= tabs.length) return;
+  const [tab] = tabs.splice(fromIndex, 1);
+  tabs.splice(toIndex, 0, tab);
+  renderTabBar();
+  saveTabsLayout();
+}
+
+function reorderTabInBar(tabId, toIndex) {
+  const fromIndex = tabs.findIndex((t) => t.id === tabId);
+  if (fromIndex === -1 || toIndex < 0 || toIndex >= tabs.length || fromIndex === toIndex) return;
+
+  const [tab] = tabs.splice(fromIndex, 1);
+  tabs.splice(toIndex, 0, tab);
+
+  const bar = document.getElementById("tabBar");
+  const el = bar?.querySelector(`[data-tab-id="${tabId}"]`);
+  const newBtn = document.getElementById("tabNewBtn");
+  const siblings = bar ? [...bar.querySelectorAll(".tab-item[data-tab-id]")] : [];
+  const target = siblings[toIndex];
+
+  if (el && bar) {
+    if (target && target !== el) {
+      bar.insertBefore(el, fromIndex < toIndex ? target.nextSibling : target);
+    } else if (newBtn) {
+      bar.insertBefore(el, newBtn);
+    }
+  }
+
+  saveTabsLayout();
+}
+
+function closeOtherTabs(keepTabId) {
+  const keep = tabs.find(t => t.id === keepTabId);
+  if (!keep) return;
+  if (splitOwnerTabId && splitOwnerTabId !== keepTabId && document.body.classList.contains("split-active")) {
+    closeSplitPane();
+  }
+  tabs.length = 0;
+  tabs.push(keep);
+  if (activeTabId !== keepTabId) switchToTab(keepTabId);
+  else {
+    renderTabBar();
+    saveTabsLayout();
+  }
+}
+
+function closeTabsToRight(fromTabId) {
+  const idx = tabs.findIndex(t => t.id === fromTabId);
+  if (idx === -1) return;
+  const removed = tabs.splice(idx + 1);
+  if (!removed.length) return;
+  if (removed.some((tab) => tab.id === splitOwnerTabId) && document.body.classList.contains("split-active")) {
+    closeSplitPane();
+  }
+  if (!tabs.some(t => t.id === activeTabId)) {
+    switchToTab(fromTabId);
+  } else {
+    renderTabBar();
+    updateNavHistoryBtns();
+    saveTabsLayout();
+  }
+}
+
+function duplicateTab(tabId) {
+  const source = tabs.find(t => t.id === tabId);
+  if (!source) return;
+  openNewTab(source.pageId || "home");
+}
+
+function cycleTabs(direction = 1) {
+  if (tabs.length < 2) return;
+  const idx = tabs.findIndex(t => t.id === activeTabId);
+  const next = (idx + direction + tabs.length) % tabs.length;
+  switchToTab(tabs[next].id);
+}
+
+function jumpToTab(index) {
+  if (index < 0 || index >= tabs.length) return;
+  switchToTab(tabs[index].id);
+}
+
+function getTabDropIndex(clientX) {
+  const bar = document.getElementById("tabBar");
+  if (!bar) return 0;
+  const items = [...bar.querySelectorAll(".tab-item[data-tab-id]")];
+  if (!items.length) return 0;
+  for (let i = 0; i < items.length; i++) {
+    const rect = items[i].getBoundingClientRect();
+    if (clientX < rect.left + rect.width / 2) return i;
+  }
+  return items.length - 1;
+}
+
+function clearTabDropHints() {
+  document.querySelectorAll(".tab-item.tab-drop-before").forEach((el) => el.classList.remove("tab-drop-before"));
+}
+
+function getTabPageLookup() {
+  const allPages = { ...SYSTEM_PAGES };
+  userDomains.forEach(d => { allPages[d.id] = d; });
+  userPages.forEach(p => { allPages[p.id] = p; });
+  return allPages;
+}
+
+function renderTabBar() {
+  const bar = document.getElementById("tabBar");
+  if (!bar) return;
+  bar.style.display = "flex";
+
+  const allPages = getTabPageLookup();
+
+  bar.innerHTML = tabs.map(tab => {
+    const page = allPages[tab.pageId] || { id: tab.pageId, title: "Untitled", type: "page" };
+    const isActive = tab.id === activeTabId;
+    const isSplit = !!splitOwnerTabId && tab.id === splitOwnerTabId && document.body.classList.contains("split-active");
+    const cls = ["tab-item", isActive ? "active" : "", isSplit ? "split-view" : ""].filter(Boolean).join(" ");
+    return `<div class="${cls}" data-tab-id="${escapeHTML(tab.id)}"><span class="tab-item-label">${escapeHTML(page.title || "Untitled")}</span><button class="tab-close" data-tab-close="${escapeHTML(tab.id)}" aria-label="Close tab">×</button></div>`;
+  }).join("") + `<button class="tab-new-btn" id="tabNewBtn" aria-label="New tab" title="New tab"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>`;
+}
+
+function syncTabsWithRegistry(removedIds = []) {
+  const removed = new Set(Array.isArray(removedIds) ? removedIds.filter(Boolean) : []);
+  const allPages = getTabPageLookup();
+  let activeNeedsNav = false;
+  let fallbackPageId = "home";
+
+  tabs.forEach((tab) => {
+    tab.history = tab.history.filter((id) => allPages[id]);
+    if (tab.historyIndex >= tab.history.length) {
+      tab.historyIndex = Math.max(0, tab.history.length - 1);
+    }
+
+    if (!allPages[tab.pageId] || removed.has(tab.pageId)) {
+      const historyId = tab.history[tab.historyIndex];
+      tab.pageId = allPages[historyId] ? historyId : "home";
+      if (!allPages[tab.pageId]) {
+        tab.pageId = "home";
+        tab.history = ["home"];
+        tab.historyIndex = 0;
+      }
+    }
+
+    if (tab.id === activeTabId && (!allPages[currentPageId] || removed.has(currentPageId))) {
+      activeNeedsNav = true;
+      fallbackPageId = tab.pageId;
+    }
+  });
+
+  if (activeNeedsNav) {
+    isNavHistoryTravel = true;
+    openPage(fallbackPageId);
+    isNavHistoryTravel = false;
+    return;
+  }
+
+  renderTabBar();
+  updateNavHistoryBtns();
+  saveTabsLayout();
+}
+
+// Create the first tab on load; restoreTabsLayoutIfSaved() may replace this
+(function initTabs() {
+  const initialTab = createTab("home");
+  activeTabId = initialTab.id;
+}());
+
+let suppressTabClick = false;
+
+document.getElementById("tabBar")?.addEventListener("click", (e) => {
+  if (suppressTabClick) {
+    suppressTabClick = false;
+    return;
+  }
+  const closeBtn = e.target.closest("[data-tab-close]");
+  if (closeBtn) {
+    e.stopPropagation();
+    closeTab(closeBtn.dataset.tabClose);
+    return;
+  }
+  if (e.target.closest("#tabNewBtn")) {
+    openNewTab("home");
+    return;
+  }
+  const tabItem = e.target.closest("[data-tab-id]");
+  if (tabItem?.dataset.tabId) {
+    switchToTab(tabItem.dataset.tabId);
+  }
+});
+
+document.getElementById("tabBar")?.addEventListener("auxclick", (e) => {
+  if (e.button !== 1) return;
+  const closeBtn = e.target.closest("[data-tab-close]");
+  if (closeBtn) {
+    e.preventDefault();
+    closeTab(closeBtn.dataset.tabClose);
+    return;
+  }
+  const tabItem = e.target.closest(".tab-item[data-tab-id]");
+  if (tabItem?.dataset.tabId) {
+    e.preventDefault();
+    closeTab(tabItem.dataset.tabId);
+  }
+});
+
+(function initTabDragReorder() {
+  const bar = document.getElementById("tabBar");
+  if (!bar) return;
+
+  let drag = null;
+
+  const endDrag = () => {
+    if (!drag) return;
+    drag.el?.classList.remove("tab-dragging");
+    clearTabDropHints();
+    document.body.classList.remove("tab-reorder-active");
+    drag = null;
+  };
+
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const tabEl = e.target.closest(".tab-item[data-tab-id]");
+    if (!tabEl || e.target.closest("[data-tab-close]")) return;
+
+    const tabId = tabEl.dataset.tabId;
+    if (tabs.findIndex((t) => t.id === tabId) === -1) return;
+
+    drag = {
+      tabId,
+      startX: e.clientX,
+      dragged: false,
+      el: tabEl,
+      pointerId: e.pointerId,
+    };
+
+    const onMove = (ev) => {
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      if (!drag.dragged && Math.abs(ev.clientX - drag.startX) > 4) {
+        drag.dragged = true;
+        drag.el.classList.add("tab-dragging");
+        document.body.classList.add("tab-reorder-active");
+        try { drag.el.setPointerCapture(ev.pointerId); } catch (_error) {}
+      }
+      if (!drag.dragged) return;
+
+      ev.preventDefault();
+      const toIdx = getTabDropIndex(ev.clientX);
+      reorderTabInBar(drag.tabId, toIdx);
+
+      clearTabDropHints();
+      const items = [...bar.querySelectorAll(".tab-item[data-tab-id]")];
+      const currentIdx = tabs.findIndex((t) => t.id === drag.tabId);
+      if (items[currentIdx]) items[currentIdx].classList.add("tab-drop-before");
+    };
+
+    const onUp = (ev) => {
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      if (drag.dragged) suppressTabClick = true;
+      try { drag.el.releasePointerCapture(ev.pointerId); } catch (_error) {}
+      endDrag();
+      bar.removeEventListener("pointermove", onMove);
+      bar.removeEventListener("pointerup", onUp);
+      bar.removeEventListener("pointercancel", onUp);
+    };
+
+    bar.addEventListener("pointermove", onMove);
+    bar.addEventListener("pointerup", onUp);
+    bar.addEventListener("pointercancel", onUp);
+  });
+})();
+
+(function initTabKeyboardShortcuts() {
+  function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    return !!el.isContentEditable;
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (isTypingTarget(document.activeElement)) return;
+    if (!e.ctrlKey && !e.metaKey) return;
+
+    const key = e.key.toLowerCase();
+
+    if (key === "t") {
+      e.preventDefault();
+      openNewTab("home");
+      return;
+    }
+
+    if (key === "w") {
+      if (tabs.length <= 1) return;
+      e.preventDefault();
+      closeTab(activeTabId);
+      return;
+    }
+
+    if (key === "tab") {
+      e.preventDefault();
+      cycleTabs(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    const num = Number(key);
+    if (Number.isInteger(num) && num >= 1 && num <= 9) {
+      e.preventDefault();
+      jumpToTab(num - 1);
+    }
+  });
+})();
+
+document.getElementById("navBackBtn")?.addEventListener("click", navBack);
+document.getElementById("navFwdBtn")?.addEventListener("click", navFwd);
+
+document.getElementById("tabToggleBtn")?.addEventListener("click", () => {
+  const inner = document.getElementById("tabBarInner");
+  const wrap = document.getElementById("tabBarWrap");
+  const btn = document.getElementById("tabToggleBtn");
+  if (!wrap) return;
+  const collapsed = wrap.classList.toggle("tabs-collapsed");
+  if (btn) btn.classList.toggle("active", !collapsed);
+});
 
 function rememberActivePageForSession(pageId) {
   const visitedAt = Date.now();
@@ -695,7 +1198,9 @@ document.addEventListener("pointerdown", touchActivePageSession, { passive: true
 document.addEventListener("keydown", touchActivePageSession);
 
 function openPage(pageId, options = {}) {
-  const { revealSidebarPath = true } = options;
+  const { revealSidebarPath = true, skipTabHistory = false } = options;
+
+  if (!isNavHistoryTravel && !skipTabHistory) pushTabHistory(pageId);
 
   if (pageId !== "search" && typeof closeSearch === "function") {
     closeSearch();
@@ -724,11 +1229,37 @@ function openPage(pageId, options = {}) {
   const page = allPages[pageId];
   if (page && pageTitle) pageTitle.textContent = page.title;
   document.body.classList.toggle("sheet-page", page?.layout === "sheet");
+  document.body.classList.toggle("profile-page", page?.layout === "profile");
   document.body.classList.toggle("infinite-canvas-page", page?.layout === "infinite-canvas");
+  document.body.classList.toggle("journal-page", page?.layout === "journal");
+
+  // page properties strip
+  if (typeof window.openPageProps === "function") {
+    if (page?.category && page.category !== "none") {
+      window.openPageProps(pageId);
+    } else {
+      window.closePageProps?.();
+    }
+  }
 
   // clear grid and load this page's blocks
   clearGrid();
-  loadPageBlocks(pageId);
+  if (page?.layout === "journal") {
+    const pageContent = document.getElementById("pageContent");
+    if (pageContent) {
+      pageContent.className = "journal-root";
+      pageContent.style.display = "block";
+      pageContent.dataset.surfaceType = "journal";
+      pageContent.innerHTML = `
+        <section class="journal-proto-shell">
+          <div class="journal-proto-loading">Loading journal prototype...</div>
+        </section>
+      `;
+    }
+  } else {
+    window.closeJournalPage?.();
+    loadPageBlocks(pageId);
+  }
 
   // update ALL nav highlights — clear everything first
   document.querySelectorAll(".item, .nav-item").forEach(i => i.classList.remove("active", "active-ancestor"));
@@ -758,8 +1289,8 @@ function openPage(pageId, options = {}) {
   loadStickers(pageId);
 
   // check if this is a document layout page
-  const pageObj = userPages.find(p => p.id === pageId);
-  if (pageObj && pageObj.layout === "document") {
+  const pageObj = page;
+  if (pageObj && pageObj.layout === "profile") {
     document.body.classList.remove(
       "editing",
       "block-selected",
@@ -769,19 +1300,62 @@ function openPage(pageId, options = {}) {
       "block-type-container",
       "block-type-table"
     );
+    closeDocEditor();
+    if (typeof window.openProfileEditor === "function") window.openProfileEditor(pageId);
+  } else if (pageObj && pageObj.layout === "document") {
+    document.body.classList.remove(
+      "editing",
+      "block-selected",
+      "block-type-text",
+      "block-type-list",
+      "block-type-image",
+      "block-type-container",
+      "block-type-table"
+    );
+    if (typeof window.closeProfileEditor === "function") window.closeProfileEditor();
     openDocEditor(pageId);
   } else {
+    if (typeof window.closeProfileEditor === "function") window.closeProfileEditor();
     closeDocEditor();
   }
 
   applyPageFontPreset(pageId);
   window.syncInfiniteCanvasPage?.(pageId);
 
+  if (page?.layout === "journal") {
+    if (typeof window.renderJournalPage === "function") {
+      window.renderJournalPage(pageId);
+    } else {
+      window.setTimeout(() => {
+        if (currentPageId === pageId && typeof window.renderJournalPage === "function") {
+          window.renderJournalPage(pageId);
+        }
+      }, 0);
+    }
+  }
+
   hasOpenedPage = true;
 
-  if (typeof window.onSanctumPageOpen === "function") {
+  renderTabBar();
+  updateNavHistoryBtns();
+
+  // keep tab toggle btn in sync
+  const tabToggleBtn = document.getElementById("tabToggleBtn");
+  const tabBarWrap = document.getElementById("tabBarWrap");
+  if (tabToggleBtn && tabBarWrap) {
+    tabToggleBtn.classList.toggle("active", !tabBarWrap.classList.contains("tabs-collapsed"));
+    tabToggleBtn.setAttribute("aria-pressed", !tabBarWrap.classList.contains("tabs-collapsed"));
+  }
+
+  if (page?.layout !== "journal" && typeof window.onSanctumPageOpen === "function") {
     window.onSanctumPageOpen(pageId);
   }
+
+  if (typeof window.resetHistoryForCurrentPage === "function") {
+    window.resetHistoryForCurrentPage();
+  }
+
+  saveTabsLayout();
 }
 
 // == Breadcrumbs ==
@@ -816,41 +1390,66 @@ function renderBreadcrumbs(pageId) {
   if (!bar) return;
 
   const path = getBreadcrumbPath(pageId);
-  const titleEl = document.getElementById("pageTitle");
 
   // don't show breadcrumbs on system pages
   if (["home", "search", "inbox", "notes"].includes(pageId)) {
     bar.style.display = "none";
+    const titleEl = document.getElementById("pageTitle");
     if (titleEl) titleEl.style.display = "";
     return;
   }
 
-  bar.style.display = "flex";
+  const titleEl = document.getElementById("pageTitle");
   if (titleEl) titleEl.style.display = "none";
+  bar.style.display = "flex";
   bar.innerHTML = "";
 
-  path.forEach((page, i) => {
+  // Collapse middle segments when path is deep: show first / ⋯ / parent / current
+  const MAX_VISIBLE = 5;
+  let visible;
+  let collapsed = [];
+  if (path.length > MAX_VISIBLE) {
+    collapsed = path.slice(1, path.length - 2);
+    visible = [path[0], null, path[path.length - 2], path[path.length - 1]];
+  } else {
+    visible = path;
+  }
+
+  function appendSep() {
+    const sep = document.createElement("span");
+    sep.className = "breadcrumb-sep";
+    sep.textContent = "/";
+    bar.appendChild(sep);
+  }
+
+  function appendSeg(page, isCurrent) {
     const seg = document.createElement("span");
     seg.className = "breadcrumb-seg";
     seg.innerHTML = page.icon
       ? `${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "breadcrumb-icon")}<span>${escapeHTML(page.title)}</span>`
       : `<span>${escapeHTML(page.title)}</span>`;
-
-    if (i < path.length - 1) {
+    if (isCurrent) {
+      seg.classList.add("breadcrumb-current");
+    } else {
       seg.classList.add("breadcrumb-link");
       seg.addEventListener("click", () => openPage(page.id));
-    } else {
-      seg.classList.add("breadcrumb-current");
     }
-
     bar.appendChild(seg);
+  }
 
-    if (i < path.length - 1) {
-      const sep = document.createElement("span");
-      sep.className = "breadcrumb-sep";
-      sep.textContent = "/";
-      bar.appendChild(sep);
+  visible.forEach((page, i) => {
+    if (page === null) {
+      // ellipsis placeholder
+      const ell = document.createElement("span");
+      ell.className = "breadcrumb-seg breadcrumb-ellipsis";
+      ell.textContent = "⋯";
+      ell.title = collapsed.map(p => p.title).join(" / ");
+      bar.appendChild(ell);
+    } else {
+      const isCurrent = i === visible.length - 1;
+      appendSeg(page, isCurrent);
     }
+    if (i < visible.length - 1) appendSep();
   });
 }
 
@@ -910,9 +1509,722 @@ function saveCurrentPageBlocks() {
   setPageBlocks(currentPageId, serializeBlocks());
 }
 
+// ==============================
+// == Split Pane               ==
+// ==============================
+let splitPageId = null;
+let splitOwnerTabId = null;
+let splitHistory = [];
+let splitHistoryIndex = -1;
+let isSplitNavTravel = false;
+
+const SPLIT_LAYOUT_KEY = (window.STORAGE_KEYS && window.STORAGE_KEYS.splitLayout) || "sanctum_split_layout_v1";
+const SPLIT_MIN_WIDTH = 240;
+const SPLIT_MAX_RATIO = 0.68;
+const SPLIT_DEFAULT_WIDTH = 420;
+
+function readSplitLayoutState() {
+  const fallback = { open: false, pageId: "", ownerTabId: "", width: SPLIT_DEFAULT_WIDTH };
+  if (typeof readStorageJSON === "function") {
+    const raw = readStorageJSON(SPLIT_LAYOUT_KEY, fallback);
+    return raw && typeof raw === "object" ? raw : fallback;
+  }
+  try {
+    const raw = JSON.parse(localStorage.getItem(SPLIT_LAYOUT_KEY) || "{}");
+    return raw && typeof raw === "object" ? { ...fallback, ...raw } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSplitLayoutState(patch = {}) {
+  const current = readSplitLayoutState();
+  const width = Number(patch.width ?? current.width);
+  const next = {
+    open: "open" in patch ? !!patch.open : !!current.open,
+    pageId: typeof (patch.pageId ?? current.pageId) === "string" ? (patch.pageId ?? current.pageId) : "",
+    ownerTabId: typeof (patch.ownerTabId ?? current.ownerTabId) === "string" ? (patch.ownerTabId ?? current.ownerTabId) : "",
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : SPLIT_DEFAULT_WIDTH,
+  };
+  if (typeof writeStorageJSON === "function") {
+    writeStorageJSON(SPLIT_LAYOUT_KEY, next);
+  } else {
+    try { localStorage.setItem(SPLIT_LAYOUT_KEY, JSON.stringify(next)); } catch (_error) {}
+  }
+}
+
+function clampSplitWidth(width) {
+  const max = Math.max(SPLIT_MIN_WIDTH, Math.floor(window.innerWidth * SPLIT_MAX_RATIO));
+  return Math.max(SPLIT_MIN_WIDTH, Math.min(max, Math.round(width)));
+}
+
+function applySplitWidth(width) {
+  const pane = document.getElementById("splitPane");
+  if (!pane) return SPLIT_DEFAULT_WIDTH;
+  const next = clampSplitWidth(width);
+  pane.style.width = `${next}px`;
+  document.documentElement.style.setProperty("--split-pane-width", `${next}px`);
+  writeSplitLayoutState({ width: next });
+  return next;
+}
+
+function promoteSplitPageToMain() {
+  if (!splitPageId) return;
+  openPage(splitPageId);
+}
+
+function swapSplitWithMain() {
+  if (!document.body.classList.contains("split-active") || !splitPageId) return;
+
+  const mainPageId = currentPageId;
+  const refPageId = splitPageId;
+  if (mainPageId === refPageId) return;
+
+  if (hasOpenedPage) {
+    window.persistInfiniteCanvasView?.(currentPageId, { immediate: true });
+    saveCurrentPageBlocks();
+  }
+
+  isNavHistoryTravel = true;
+  openPage(refPageId);
+  isNavHistoryTravel = false;
+
+  isSplitNavTravel = true;
+  navigateSplitTo(mainPageId);
+  isSplitNavTravel = false;
+
+  splitOwnerTabId = activeTabId;
+  writeSplitLayoutState({
+    open: true,
+    pageId: mainPageId,
+    ownerTabId: splitOwnerTabId,
+  });
+  saveTabsLayout();
+}
+function pushSplitHistory(pageId) {
+  splitHistory.splice(splitHistoryIndex + 1);
+  splitHistory.push(pageId);
+  if (splitHistory.length > 50) splitHistory.shift();
+  splitHistoryIndex = splitHistory.length - 1;
+}
+
+function updateSplitNavBtns() {
+  const back = document.getElementById("splitBackBtn");
+  const fwd = document.getElementById("splitFwdBtn");
+  if (back) back.disabled = splitHistoryIndex <= 0;
+  if (fwd) fwd.disabled = splitHistoryIndex >= splitHistory.length - 1;
+}
+
+function loadSplitBlocks(pageId) {
+  const grid = document.getElementById("splitGrid");
+  const canvas = document.getElementById("splitCanvas");
+  if (!grid || !canvas) return;
+
+  const allPages = { ...SYSTEM_PAGES };
+  userDomains.forEach(d => allPages[d.id] = d);
+  userPages.forEach(p => allPages[p.id] = p);
+  const page = allPages[pageId];
+  const layout = page?.layout;
+
+  // Page types that need their own full renderer — show a prompt to open in main
+  const specialLayouts = ["sheet", "infinite-canvas", "journal", "document", "profile"];
+  if (layout && specialLayouts.includes(layout)) {
+    const label = layout === "sheet" ? "database" : layout.replace("-", " ");
+    canvas.innerHTML = `<div class="split-unsupported"><p>This is a <strong>${label}</strong> page.</p><button class="split-open-main-btn" id="splitUnsupportedOpenMain">Open in main</button></div>`;
+    document.getElementById("splitUnsupportedOpenMain")?.addEventListener("click", () => {
+      promoteSplitPageToMain();
+    });
+    return;
+  }
+
+  canvas.innerHTML = `<div class="grid split-grid" id="splitGrid"></div>`;
+  const newGrid = document.getElementById("splitGrid");
+  getPageBlocks(pageId).forEach(data => newGrid.appendChild(buildBlockFromData(data)));
+}
+
+function renderSplitTopbar(pageId) {
+  const allPages = { ...SYSTEM_PAGES };
+  userDomains.forEach(d => allPages[d.id] = d);
+  userPages.forEach(p => allPages[p.id] = p);
+  const page = allPages[pageId];
+  const titleEl = document.getElementById("splitPageTitle");
+  const breadcrumbEl = document.getElementById("splitBreadcrumbBar");
+  if (!titleEl) return;
+
+  const isSystem = ["home","search","inbox","notes"].includes(pageId);
+  if (isSystem || !page) {
+    titleEl.textContent = page?.title || "Home";
+    titleEl.style.display = "";
+    if (breadcrumbEl) { breadcrumbEl.style.display = "none"; breadcrumbEl.innerHTML = ""; }
+    return;
+  }
+
+  const path = typeof getBreadcrumbPath === "function" ? getBreadcrumbPath(pageId) : [];
+  if (path.length <= 1) {
+    titleEl.textContent = page.title || "Untitled";
+    titleEl.style.display = "";
+    if (breadcrumbEl) { breadcrumbEl.style.display = "none"; breadcrumbEl.innerHTML = ""; }
+    return;
+  }
+
+  // Show breadcrumbs instead of bare title when there's a path
+  titleEl.style.display = "none";
+  if (!breadcrumbEl) return;
+  breadcrumbEl.style.display = "flex";
+  const MAX = 4;
+  const visible = path.length > MAX ? [path[0], null, ...path.slice(-2)] : path;
+  breadcrumbEl.innerHTML = visible.map((p, i) => {
+    const sep = i > 0 ? `<span class="breadcrumb-sep">/</span>` : "";
+    if (p === null) return sep + `<span class="breadcrumb-seg breadcrumb-ellipsis">⋯</span>`;
+    const isCurrent = i === visible.length - 1;
+    return sep + `<span class="breadcrumb-seg${isCurrent ? " breadcrumb-current" : " breadcrumb-link"}" data-split-nav-page="${escapeHTML(p.id)}">${escapeHTML(p.title || "Untitled")}</span>`;
+  }).join("");
+  breadcrumbEl.querySelectorAll(".breadcrumb-link").forEach(el => {
+    el.addEventListener("click", () => navigateSplitTo(el.dataset.splitNavPage));
+  });
+}
+
+function renderSplitHero(pageId) {
+  const container = document.getElementById("splitPageHero");
+  if (!container) return;
+  const allPages = { ...SYSTEM_PAGES };
+  userDomains.forEach(d => allPages[d.id] = d);
+  userPages.forEach(p => allPages[p.id] = p);
+  const page = allPages[pageId];
+  const isSystem = ["home","search","inbox","notes"].includes(pageId);
+  const settings = typeof getPageSettings === "function" ? getPageSettings(pageId) : {};
+  const noHero = isSystem || !page || page.layout === "sheet" || page.layout === "infinite-canvas" || page.layout === "journal";
+
+  if (noHero) {
+    container.style.display = "none";
+    container.innerHTML = "";
+    return;
+  }
+
+  const sizes = { sm: 148, md: 196, lg: 244, xl: 300 };
+  const pos = typeof normalizeHeaderPos === "function" ? normalizeHeaderPos(settings.headerPos) : (typeof settings.headerPos === "number" ? settings.headerPos : 50);
+  const showBanner = settings.showHeader && settings.headerSrc;
+  const showBelow = settings.showTitle || settings.showIcon;
+
+  if (!showBanner && !showBelow) {
+    container.style.display = "none";
+    container.innerHTML = "";
+    return;
+  }
+
+  container.style.display = "";
+  const h = sizes[settings.headerSize] || 196;
+
+  let html = "";
+  if (showBanner) {
+    html += `<div class="page-hero-img-wrap" data-has-header="true" data-hero-size="${settings.headerSize || "md"}" style="height:${h}px; --hero-pos:${pos}%"><img class="page-hero-img" src="${settings.headerSrc}" alt="" /></div>`;
+  }
+  if (showBelow) {
+    const iconFallback = page.type === "domain" ? "⌂" : "📄";
+    html += `<div class="page-hero-below">`;
+    if (settings.showIcon !== false) {
+      html += `<div class="page-hero-icon split-hero-icon" data-page-icon-id="${escapeHTML(pageId)}"></div>`;
+    }
+    if (settings.showTitle !== false) {
+      html += `<div class="page-hero-title">${escapeHTML(page.title || "")}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  container.innerHTML = html;
+
+  // Set icon content using the same helper as main pane
+  if (settings.showIcon !== false) {
+    const iconEl = container.querySelector(".split-hero-icon");
+    if (iconEl) setIconElementContent(iconEl, page.icon, page.type === "domain" ? "⌂" : "📄");
+  }
+}
+
+function navigateSplitTo(pageId) {
+  splitPageId = pageId;
+  if (!isSplitNavTravel) pushSplitHistory(pageId);
+  loadSplitBlocks(pageId);
+  renderSplitHero(pageId);
+  renderSplitTopbar(pageId);
+  updateSplitNavBtns();
+  renderTabBar();
+  if (document.body.classList.contains("split-active")) {
+    writeSplitLayoutState({ open: true, pageId, ownerTabId: splitOwnerTabId || "" });
+  }
+}
+
+function splitBack() {
+  if (splitHistoryIndex <= 0) return;
+  splitHistoryIndex--;
+  splitPageId = splitHistory[splitHistoryIndex];
+  isSplitNavTravel = true;
+  navigateSplitTo(splitPageId);
+  isSplitNavTravel = false;
+}
+
+function splitFwd() {
+  if (splitHistoryIndex >= splitHistory.length - 1) return;
+  splitHistoryIndex++;
+  splitPageId = splitHistory[splitHistoryIndex];
+  isSplitNavTravel = true;
+  navigateSplitTo(splitPageId);
+  isSplitNavTravel = false;
+}
+
+function openSplitPane(pageId, options = {}) {
+  const safePageId = pageId || currentPageId;
+  const ownerTabId = typeof options.ownerTabId === "string" && options.ownerTabId.trim()
+    ? options.ownerTabId.trim()
+    : activeTabId;
+  splitOwnerTabId = tabs.some((tab) => tab.id === ownerTabId) ? ownerTabId : activeTabId;
+  splitPageId = safePageId;
+  splitHistory = [];
+  splitHistoryIndex = -1;
+  const saved = readSplitLayoutState();
+  applySplitWidth(saved.width || SPLIT_DEFAULT_WIDTH);
+  document.body.classList.add("split-active");
+  navigateSplitTo(splitPageId);
+}
+
+function closeSplitPane() {
+  const pane = document.getElementById("splitPane");
+  const width = pane?.offsetWidth || readSplitLayoutState().width || SPLIT_DEFAULT_WIDTH;
+  writeSplitLayoutState({ open: false, pageId: "", ownerTabId: "", width });
+  document.body.classList.remove("split-active");
+  splitPageId = null;
+  splitOwnerTabId = null;
+  splitHistory = [];
+  splitHistoryIndex = -1;
+  const grid = document.getElementById("splitGrid");
+  if (grid) grid.innerHTML = "";
+  renderTabBar();
+}
+
+function restoreSplitLayoutIfSaved() {
+  const saved = readSplitLayoutState();
+  if (!saved.open || !saved.pageId) return;
+  if (!getTabPageLookup()[saved.pageId]) {
+    writeSplitLayoutState({ open: false, pageId: "", ownerTabId: "" });
+    return;
+  }
+
+  let ownerTabId = saved.ownerTabId && tabs.some((tab) => tab.id === saved.ownerTabId)
+    ? saved.ownerTabId
+    : tabs.find((tab) => tab.pageId === saved.pageId)?.id || "";
+
+  if (!ownerTabId) {
+    writeSplitLayoutState({ open: false, pageId: "", ownerTabId: "" });
+    return;
+  }
+
+  applySplitWidth(saved.width || SPLIT_DEFAULT_WIDTH);
+  openSplitPane(saved.pageId, { ownerTabId });
+}
+
+// Page-card links inside split navigate within split
+document.getElementById("splitGrid")?.addEventListener("click", (e) => {
+  const card = e.target.closest("[data-linked-page-id]");
+  if (card?.dataset.linkedPageId) { e.stopPropagation(); navigateSplitTo(card.dataset.linkedPageId); }
+});
+
+document.getElementById("splitCloseBtn")?.addEventListener("click", closeSplitPane);
+document.getElementById("splitBackBtn")?.addEventListener("click", splitBack);
+document.getElementById("splitFwdBtn")?.addEventListener("click", splitFwd);
+document.getElementById("splitOpenMainBtn")?.addEventListener("click", () => {
+  promoteSplitPageToMain();
+});
+
+document.getElementById("splitSwapBtn")?.addEventListener("click", () => {
+  swapSplitWithMain();
+});
+
+// Drag-to-resize
+(function initSplitResize() {
+  const divider = document.getElementById("splitDivider");
+  if (!divider) return;
+
+  applySplitWidth(readSplitLayoutState().width || SPLIT_DEFAULT_WIDTH);
+  if (!document.documentElement.style.getPropertyValue("--split-pane-width")) {
+    document.documentElement.style.setProperty("--split-pane-width", `${SPLIT_DEFAULT_WIDTH}px`);
+  }
+
+  let startX = 0;
+  let startWidth = 0;
+
+  function onDrag(e) {
+    applySplitWidth(startWidth + (startX - e.clientX));
+  }
+
+  function stopDrag() {
+    document.body.classList.remove("split-resizing");
+    document.removeEventListener("mousemove", onDrag);
+    document.removeEventListener("mouseup", stopDrag);
+    window.removeEventListener("blur", stopDrag);
+  }
+
+  divider.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startWidth = document.getElementById("splitPane")?.offsetWidth || SPLIT_DEFAULT_WIDTH;
+    document.body.classList.add("split-resizing");
+    document.addEventListener("mousemove", onDrag);
+    document.addEventListener("mouseup", stopDrag);
+    window.addEventListener("blur", stopDrag);
+  });
+
+  divider.setAttribute("role", "separator");
+  divider.setAttribute("aria-orientation", "vertical");
+  divider.setAttribute("aria-label", "Resize split pane");
+  divider.tabIndex = 0;
+
+  divider.addEventListener("keydown", (e) => {
+    if (!document.body.classList.contains("split-active")) return;
+    const pane = document.getElementById("splitPane");
+    if (!pane) return;
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      applySplitWidth(pane.offsetWidth + step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      applySplitWidth(pane.offsetWidth - step);
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    const pane = document.getElementById("splitPane");
+    if (!pane || !document.body.classList.contains("split-active")) return;
+    applySplitWidth(pane.offsetWidth);
+  });
+}());
+
+window.restoreSplitLayoutIfSaved = restoreSplitLayoutIfSaved;
+window.restoreTabsLayoutIfSaved = restoreTabsLayoutIfSaved;
+window.swapSplitWithMain = swapSplitWithMain;
+
+// Right-click context menu on tabs
+(function initTabContextMenu() {
+  const menu = document.getElementById("tabContextMenu");
+  if (!menu) return;
+  let ctxTabId = null;
+  let justOpened = false;
+
+  document.getElementById("tabBar")?.addEventListener("contextmenu", (e) => {
+    const tabItem = e.target.closest(".tab-item[data-tab-id]");
+    if (!tabItem) return;
+    e.preventDefault();
+    ctxTabId = tabItem.dataset.tabId;
+    justOpened = true;
+    const swapBtn = menu.querySelector("[data-action='swap-split']");
+    const splitOpen = document.body.classList.contains("split-active") && !!splitPageId;
+    if (swapBtn) swapBtn.style.display = splitOpen ? "" : "none";
+    const menuW = 190;
+    const menuH = splitOpen ? 240 : 210;
+    menu.style.left = `${Math.min(e.clientX, window.innerWidth - menuW)}px`;
+    menu.style.top = `${Math.min(e.clientY, window.innerHeight - menuH)}px`;
+    menu.classList.add("visible");
+    requestAnimationFrame(() => { justOpened = false; });
+  });
+
+  menu.querySelector("[data-action='open-split']")?.addEventListener("click", () => {
+    const tab = tabs.find(t => t.id === ctxTabId);
+    if (tab) openSplitPane(tab.pageId, { ownerTabId: tab.id });
+    menu.classList.remove("visible");
+  });
+
+  menu.querySelector("[data-action='swap-split']")?.addEventListener("click", () => {
+    swapSplitWithMain();
+    menu.classList.remove("visible");
+  });
+
+  menu.querySelector("[data-action='duplicate-tab']")?.addEventListener("click", () => {
+    if (ctxTabId) duplicateTab(ctxTabId);
+    menu.classList.remove("visible");
+  });
+
+  menu.querySelector("[data-action='close-tab']")?.addEventListener("click", () => {
+    if (ctxTabId) closeTab(ctxTabId);
+    menu.classList.remove("visible");
+  });
+
+  menu.querySelector("[data-action='close-other-tabs']")?.addEventListener("click", () => {
+    if (ctxTabId) closeOtherTabs(ctxTabId);
+    menu.classList.remove("visible");
+  });
+
+  menu.querySelector("[data-action='close-tabs-right']")?.addEventListener("click", () => {
+    if (ctxTabId) closeTabsToRight(ctxTabId);
+    menu.classList.remove("visible");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (justOpened) return;
+    if (!menu.contains(e.target)) menu.classList.remove("visible");
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.remove("visible"); });
+}());
+
+window.openSplitPane = openSplitPane;
+window.closeSplitPane = closeSplitPane;
+window.navigateSplitTo = navigateSplitTo;
+
 window.saveCurrentPageBlocks = saveCurrentPageBlocks;
 window.createPage = createPage;
 window.getRecentSessionPageId = getRecentSessionPageId;
+window.openPage = openPage;
+window.renderTabBar = renderTabBar;
+window.syncTabsWithRegistry = syncTabsWithRegistry;
+window.renderSidebarDomains = renderSidebarDomains;
+window.renderSidebarPins = renderSidebarPins;
+window.renderSidebarBookmarks = renderSidebarBookmarks;
+
+window.SanctumAssistantPageBlockStore = {
+  read() {
+    if (hasOpenedPage) saveCurrentPageBlocks();
+    return typeof structuredClone === "function"
+      ? structuredClone(readAllPageBlocks())
+      : JSON.parse(JSON.stringify(readAllPageBlocks()));
+  },
+  write(nextBlocks) {
+    writeAllPageBlocks(nextBlocks && typeof nextBlocks === "object" ? nextBlocks : {});
+    const page = userPages.find((entry) => entry.id === currentPageId)
+      || userDomains.find((entry) => entry.id === currentPageId);
+    if (hasOpenedPage && page?.layout !== "document" && page?.layout !== "journal") {
+      clearGrid();
+      loadPageBlocks(currentPageId);
+    }
+    return true;
+  },
+  hasPage(pageId) {
+    return userPages.some((entry) => entry.id === pageId)
+      || userDomains.some((entry) => entry.id === pageId);
+  },
+  getPage(pageId) {
+    const page = userPages.find((entry) => entry.id === pageId)
+      || userDomains.find((entry) => entry.id === pageId);
+    return page ? { ...page } : null;
+  },
+};
+
+window.SanctumAssistantPageRegistryStore = {
+  read() {
+    return typeof structuredClone === "function"
+      ? structuredClone(userPages)
+      : JSON.parse(JSON.stringify(userPages));
+  },
+  get(pageId) {
+    const page = userPages.find((entry) => entry.id === pageId);
+    return page ? { ...page } : null;
+  },
+  getParent(parentId) {
+    if (parentId === "home") return { id: "home", title: "Home", kind: "home" };
+    const page = userPages.find((entry) => entry.id === parentId);
+    if (page) return { ...page, kind: "page" };
+    const domain = userDomains.find((entry) => entry.id === parentId);
+    return domain ? { ...domain, kind: "domain" } : null;
+  },
+  create(config = {}) {
+    const page = createPage(
+      String(config.title || "").trim(),
+      String(config.parentId || "").trim(),
+      config.layout || "board-canvas",
+      config.category || "none",
+      config.containerType || "page",
+      {
+        pageId: String(config.pageId || "").trim(),
+        recordKind: config.recordKind || "",
+        reuseExisting: false,
+      }
+    );
+    const allBlocks = readAllPageBlocks();
+    if (page?.id && !Object.prototype.hasOwnProperty.call(allBlocks, page.id)) {
+      allBlocks[page.id] = [];
+      writeAllPageBlocks(allBlocks);
+    }
+    return page ? { ...page } : null;
+  },
+  ensureDatabasePage(config = {}) {
+    const pageId = String(config.pageId || "").trim();
+    const parentId = String(config.parentId || "").trim();
+    if (!pageId) return null;
+
+    let page = userPages.find((entry) => entry.id === pageId) || null;
+    if (!page) {
+      if (!parentId) return null;
+      return this.create({
+        pageId,
+        title: String(config.title || "").trim() || "Database",
+        parentId,
+        layout: "sheet",
+        category: "none",
+        containerType: "page",
+        recordKind: "view"
+      });
+    }
+
+    let changed = false;
+    if (!String(page.title || "").trim() && String(config.title || "").trim()) {
+      page.title = String(config.title || "").trim();
+      changed = true;
+    }
+    if (!String(page.parent || "").trim() && parentId) {
+      page.parent = parentId;
+      changed = true;
+    }
+    if (page.layout !== "sheet") {
+      page.layout = "sheet";
+      changed = true;
+    }
+    if (page.category !== "none") {
+      page.category = "none";
+      changed = true;
+    }
+    if (page.containerType !== "page") {
+      page.containerType = "page";
+      changed = true;
+    }
+    if (page.recordKind !== "view") {
+      page.recordKind = "view";
+      changed = true;
+    }
+    if (page.hiddenInSidebar === true) {
+      page.hiddenInSidebar = false;
+      changed = true;
+    }
+
+    const allBlocks = readAllPageBlocks();
+    if (!Object.prototype.hasOwnProperty.call(allBlocks, page.id)) {
+      allBlocks[page.id] = [];
+      writeAllPageBlocks(allBlocks);
+    }
+    if (changed) {
+      saveSanctumRegistry();
+      setTimeout(() => {
+        renderSidebarDomains();
+        renderSidebarPins();
+        renderSidebarBookmarks();
+        renderTabBar();
+      }, 0);
+    }
+    return { ...page };
+  },
+  createDatabaseRowPages(items = []) {
+    const requested = Array.isArray(items) ? items : [];
+    const seenIds = new Set();
+    const existingIds = new Set(userPages.map((page) => page.id));
+    const normalized = requested.map((item) => {
+      const id = String(item?.id || "").trim();
+      const parentId = String(item?.parentId || "").trim();
+      const sourcePageId = String(item?.sourcePageId || parentId).trim();
+      const sourceKind = item?.sourceKind === "page" ? "page" : "block";
+      const sourceBlockId = String(item?.sourceBlockId || "").trim();
+      const rowId = String(item?.rowId || "").trim();
+      const title = String(item?.title || "").trim() || "Untitled row";
+      if (
+        !id
+        || !parentId
+        || !sourcePageId
+        || (sourceKind === "block" && !sourceBlockId)
+        || !rowId
+        || existingIds.has(id)
+        || seenIds.has(id)
+      ) {
+        throw new Error("A generated database row page is invalid or already exists.");
+      }
+      seenIds.add(id);
+      return { id, parentId, sourceKind, sourcePageId, sourceBlockId, rowId, title };
+    });
+
+    const allBlocks = readAllPageBlocks();
+    const created = normalized.map((item) => {
+      const page = {
+        id: item.id,
+        title: item.title,
+        parent: item.parentId,
+        layout: "document",
+        category: "database-row",
+        containerType: "database-row",
+        openBehavior: "peek",
+        icon: "",
+        summary: "",
+        tags: [],
+        hiddenInSidebar: true,
+        databaseRowRef: {
+          sourceKind: item.sourceKind,
+          sourcePageId: item.sourcePageId,
+          sourceBlockId: item.sourceKind === "block" ? item.sourceBlockId : "",
+          rowId: item.rowId,
+        },
+      };
+      userPages.push(page);
+      if (!Object.prototype.hasOwnProperty.call(allBlocks, page.id)) allBlocks[page.id] = [];
+      return { ...page, databaseRowRef: { ...page.databaseRowRef } };
+    });
+
+    if (created.length) {
+      saveSanctumRegistry();
+      writeAllPageBlocks(allBlocks);
+      setTimeout(() => {
+        renderSidebarDomains();
+        renderSidebarPins();
+        renderSidebarBookmarks();
+        renderTabBar();
+      }, 0);
+    }
+    return created;
+  },
+  retargetDatabaseRowPages(config = {}) {
+    const pageIds = new Set((Array.isArray(config.pageIds) ? config.pageIds : [])
+      .map((pageId) => String(pageId || "").trim())
+      .filter(Boolean));
+    const parentId = String(config.parentId || "").trim();
+    const sourceKind = config.sourceKind === "block" ? "block" : "page";
+    const sourcePageId = String(config.sourcePageId || parentId).trim();
+    const sourceBlockId = sourceKind === "block" ? String(config.sourceBlockId || "").trim() : "";
+    if (!pageIds.size || !parentId || !sourcePageId || (sourceKind === "block" && !sourceBlockId)) return false;
+
+    let changed = false;
+    userPages.forEach((page) => {
+      if (!pageIds.has(page.id)) return;
+      page.parent = parentId;
+      page.databaseRowRef = {
+        sourceKind,
+        sourcePageId,
+        sourceBlockId,
+        rowId: String(page.databaseRowRef?.rowId || "").trim()
+      };
+      changed = true;
+    });
+    if (!changed) return false;
+
+    saveSanctumRegistry();
+    setTimeout(() => {
+      renderSidebarDomains();
+      renderSidebarPins();
+      renderSidebarBookmarks();
+      renderTabBar();
+    }, 0);
+    return true;
+  },
+  deleteMany(pageIds = []) {
+    const ids = [...new Set((Array.isArray(pageIds) ? pageIds : [])
+      .map((pageId) => String(pageId || "").trim())
+      .filter((pageId) => userPages.some((page) => page.id === pageId)))];
+    if (!ids.length) return true;
+    if (typeof deletePagesAndStoredData !== "function") return false;
+    deletePagesAndStoredData(ids);
+    return ids.every((pageId) => !userPages.some((page) => page.id === pageId));
+  },
+  delete(pageId) {
+    const safePageId = String(pageId || "").trim();
+    if (!safePageId) return false;
+    if (!userPages.some((entry) => entry.id === safePageId)) return true;
+    if (typeof deletePagesAndStoredData !== "function") return false;
+    deletePagesAndStoredData([safePageId]);
+    return !userPages.some((entry) => entry.id === safePageId);
+  },
+};
 
 function loadPageBlocks(pageId) {
   const blocks = getPageBlocks(pageId);
@@ -941,25 +2253,71 @@ function getCardStyle(layout, category, containerType) {
   return detailCategories.includes(category) ? "detail" : "hub";
 }
 
-function createPage(title, parentId, layout = "board-canvas", category = "none", containerType = "page") {
+function createPage(title, parentId, layout = "board-canvas", category = "none", containerType = "page", options = {}) {
+  const createOptions = options && typeof options === "object" ? options : {};
+  if (layout === "journal") {
+    containerType = "page";
+    category = "none";
+  }
+
+  if (createOptions.reuseExisting === true && typeof window.findExistingVaultPageForCreate === "function") {
+    const existing = window.findExistingVaultPageForCreate({
+      title,
+      parentId,
+      layout,
+      category,
+      containerType,
+      currentPageId: createOptions.currentPageId || (typeof currentPageId === "string" ? currentPageId : ""),
+      scopeId: createOptions.scopeId || "",
+      includeCurrentPage: createOptions.includeCurrentPage !== false
+    });
+    if (existing?.id) {
+      return userPages.find((page) => page.id === existing.id) || existing;
+    }
+  }
+
+  const requestedPageId = String(createOptions.pageId || "").trim();
+  if (requestedPageId && (
+    userPages.some((page) => page.id === requestedPageId)
+    || userDomains.some((domain) => domain.id === requestedPageId)
+  )) {
+    throw new Error("A page with that ID already exists.");
+  }
+  const pageId = requestedPageId || `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const canonicalId = String(createOptions.canonicalId || "").trim();
+  const defaultRecordKind = typeof window.getDefaultVaultRecordKind === "function"
+    ? window.getDefaultVaultRecordKind({ layout, category, containerType })
+    : (containerType === "hub" || containerType === "project" ? "space" : containerType === "detail" ? "record" : layout === "sheet" ? "view" : "record");
+  const recordKind = typeof window.normalizeVaultRecordKind === "function"
+    ? window.normalizeVaultRecordKind(createOptions.recordKind || "", defaultRecordKind)
+    : (createOptions.recordKind || defaultRecordKind);
   const page = {
-    id:            `page-${Date.now()}`,
+    id:            pageId,
     title:         title.trim(),
     parent:        parentId,
     layout:        layout,
     category:      category,
     containerType: containerType,
-    openBehavior:  getDefaultOpenBehavior(category, containerType),
+    openBehavior:  layout === "journal" ? "open" : getDefaultOpenBehavior(category, containerType),
     icon:          "",
     summary:       "",
     tags:          [],
+    isScopeBoundary: containerType === "project",
+    recordKind:    recordKind,
+    canonicalId:   canonicalId && canonicalId !== pageId
+      ? canonicalId
+      : "",
   };
   userPages.push(page);
   saveSanctumRegistry();
+  if (typeof window.applyPageTemplate === "function") {
+    window.applyPageTemplate(page.id, category, layout);
+  }
   setTimeout(() => {
-    renderSidebarDomains();
-    renderSidebarPins();
-    renderSidebarBookmarks();
+  renderSidebarDomains();
+  renderSidebarPins();
+  renderSidebarBookmarks();
+    renderTabBar();
   }, 0);
   return page;
 }

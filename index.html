@@ -10,7 +10,9 @@
   <link rel="stylesheet" href="document.css">
   <link rel="stylesheet" href="canvas-rich-text.css">
   <link rel="stylesheet" href="infinite-canvas.css">
-  <title>Sanctum v3</title>
+  <link rel="stylesheet" href="profile.css">
+  <link rel="stylesheet" href="page-props.css">
+  <title>Sanctum</title>
 </head>
 
 <body>
@@ -82,22 +84,30 @@
 </aside>
 
 
-<!-- Pin Panel -->
-<div class="pin-panel" id="pinPanel">
-  <div class="pin-panel-header" id="pinPanelHeader">
-    <span class="pin-panel-title" id="pinPanelTitle">Pins</span>
-    <div class="pin-panel-header-right" id="pinPanelHeaderRight">
-        <button class="pin-panel-close" id="pinPanelClose">✕</button>
-    </div>
-</div>
-  <div class="pin-content" id="pinContent"></div>
-</div>
+
 
 
 <main class="main" id="main">
+    <div class="tab-bar-wrap" id="tabBarWrap">
+      <div class="tab-bar-inner" id="tabBarInner">
+        <button class="nav-history-btn" id="navBackBtn" aria-label="Go back" disabled>
+          <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M6 1L1 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="nav-history-btn" id="navFwdBtn" aria-label="Go forward" disabled>
+          <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="tab-bar" id="tabBar"></div>
+      </div>
+    </div>
+
+<div class="split-container" id="splitContainer">
+<div class="main-pane" id="mainPane">
     <div class="topbar">
     <div class="topbar-left">
         <button class="icon-btn" id="menuBtn" aria-label="Open menu">☰</button>
+        <button class="icon-btn tab-toggle-btn" id="tabToggleBtn" aria-label="Toggle tabs" title="Toggle tabs">
+          <svg width="15" height="11" viewBox="0 0 15 11" fill="none"><rect x="0.6" y="3.8" width="13.8" height="6.6" rx="1.4" stroke="currentColor" stroke-width="1.2"/><path d="M0.6 3.8V3.2A1.4 1.4 0 012 1.8h3.2A1.4 1.4 0 016.6 3.2v.6" stroke="currentColor" stroke-width="1.2"/><path d="M7.2 3.8V3.2A1.4 1.4 0 018.6 1.8h3.2A1.4 1.4 0 0113.2 3.2v.6" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
         <div class="page-title" id="pageTitle">Home</div>
         <div id="breadcrumbBar" class="breadcrumb-bar"></div>
     </div>
@@ -111,14 +121,13 @@
           <button class="doc-view-btn" data-view="view">View</button>
           <button class="doc-view-btn" data-view="annotate">Annotate</button>
         </div>
-        <button class="icon-btn" id="pinCurrentBtn" aria-label="Pin this page">📌</button>
-        <button class="icon-btn" id="PinsBtn" aria-label="Open pins">⎘</button>
         <button class="icon-btn" id="moreBtn" aria-label="More">⋯</button>
 
         <div class="edit-wrap"> 
             <button class="icon-btn" id="editToggle" aria-label="Toggle edit mode">✎</button>
 
             <aside class="edit-dock" id="editorDock">
+              <div class="dock-tools-scroll">
               <div class="dock-mode dock-mode-create">
                 <button class="dock-btn" id="addBlockBtn" aria-label="Add block" data-label="Add">+</button>
                 <button class="dock-btn" id="addUndoBtn" aria-label="Undo" data-label="Undo">↺</button>
@@ -130,18 +139,39 @@
                 <div class="dock-divider"></div>
                 <button class="dock-btn" id="toolPage" aria-label="Page card" data-label="Page">⊞</button>
                 <button class="dock-btn" id="toolDomain" aria-label="Domain card" data-label="Domain">⌂</button>
+                <button class="dock-btn" id="toolLine" aria-label="Line" data-label="Line">/</button>
                 <button class="dock-btn" id="toolDivider" aria-label="Divider tools" data-label="Dividers">┆</button>
                 <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame">▤</button>
                 <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table">⊞</button>
                 <button class="dock-btn" id="toolDataCallout" aria-label="Data callout" data-label="Data callout">≈</button>
                 <button class="dock-btn" id="toolProgress" aria-label="Progress bar" data-label="Progress">▰</button>
                 <button class="dock-btn" id="toolClock" aria-label="Clock widget" data-label="Clock">◴</button>
+                <button class="dock-btn" id="toolStudy" aria-label="Study tools" data-label="Study">S</button>
+                <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker">✦</button>
+                <button class="dock-btn" id="toolButton" aria-label="Button block" data-label="Button">▶</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" id="generateLayoutBtn" aria-label="Generate layout with AI" data-label="AI Layout">✦ AI</button>
+              </div>
+
+              <div class="dock-mode dock-mode-study">
+                <button class="dock-btn" id="toolStudyBack" aria-label="Back to tools" data-label="Back">‹</button>
+                <div class="dock-divider"></div>
                 <button class="dock-btn" id="toolTypingDrill" aria-label="Typing drill" data-label="Typing">⌨</button>
                 <button class="dock-btn" id="toolFillBlank" aria-label="Fill in the blank" data-label="Blank">▤</button>
                 <button class="dock-btn" id="toolMatchPairs" aria-label="Match pairs" data-label="Match">↔</button>
-                <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker">✦</button>
+                <button class="dock-btn" id="toolFlashcards" aria-label="Flashcard deck" data-label="Cards">S</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="generateLayoutBtn" aria-label="Generate layout with AI" data-label="AI Layout">✦ AI</button>
+                <button class="dock-btn" id="toolSessionProgress" aria-label="Session progress" data-label="Session">◔</button>
+                <button class="dock-btn" id="toolDailyStreak" aria-label="Daily streak" data-label="Streak">◍</button>
+                <button class="dock-btn" id="toolRecentAnswers" aria-label="Recent answers" data-label="Recent">⋯</button>
+              </div>
+
+              <div class="dock-mode dock-mode-layer">
+                <button class="dock-btn" id="layerSendBackBtn" aria-label="Send to back" data-label="Back">⇣</button>
+                <button class="dock-btn" id="layerBackwardBtn" aria-label="Send backward" data-label="Backward">↓</button>
+                <button class="dock-btn" id="layerForwardBtn" aria-label="Bring forward" data-label="Forward">↑</button>
+                <button class="dock-btn" id="layerBringFrontBtn" aria-label="Bring to front" data-label="Front">⇡</button>
+                <button class="dock-btn" id="layerIntoFrameBtn" aria-label="Move into frame" data-label="Into frame">↳</button>
               </div>
 
               <div class="dock-mode dock-mode-text">
@@ -164,6 +194,9 @@
 
               <div class="dock-mode dock-mode-image">
                 <button class="dock-btn" id="imageReplaceBtn" aria-label="Replace image" data-label="Replace">🖼</button>
+                <button class="dock-btn" id="imageCropBtn" aria-label="Crop shape" data-label="Shape">◖</button>
+                <button class="dock-btn" id="imageFrameBtn" aria-label="Image frame" data-label="Frame">▧</button>
+                <button class="dock-btn" id="imageDeleteBtn" aria-label="Delete image" data-label="Delete">🗑</button>
               </div>
               <div class="dock-mode dock-mode-table">
                 <button class="dock-btn" id="tableStructureBtn" aria-label="Rows and columns" data-label="Grid">▤</button>
@@ -177,6 +210,24 @@
                 <button class="dock-btn" id="containerBorderBtn" aria-label="Container border" data-label="Border">⬚</button>
                 <button class="dock-btn" id="containerRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
                 <button class="dock-btn" id="containerDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+              </div>
+              <div class="dock-mode dock-mode-button">
+                <button class="dock-btn" id="buttonBgBtn" aria-label="Button color" data-label="Color">▣</button>
+                <button class="dock-btn" id="buttonTextColorBtn" aria-label="Button text color" data-label="Text">A</button>
+                <button class="dock-btn" id="buttonBorderBtn" aria-label="Button border color" data-label="Border">⬚</button>
+                <button class="dock-btn" id="buttonRadiusBtn" aria-label="Button corners" data-label="Corners">◼︎</button>
+                <button class="dock-btn" id="buttonConfigBtn" aria-label="Configure button" data-label="Configure">⚙</button>
+                <button class="dock-btn" id="buttonDeleteBtn" aria-label="Delete button block" data-label="Delete">🗑</button>
+              </div>
+              </div><!-- /dock-tools-scroll -->
+              <div class="dock-zoom-section">
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
+                <button class="dock-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
+                <button class="dock-btn dock-zoom-label" id="infiniteCanvasZoomLabel" data-infinite-canvas-action="reset" aria-label="Reset zoom">100%</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-infinite-canvas-action="fit" aria-label="Fit to screen">⊞</button>
+                <button class="dock-btn" data-infinite-canvas-action="center" aria-label="Center">◎</button>
               </div>
             </aside>
             <div class="canvas-color-popover" id="canvasColorPopover" hidden></div>
@@ -621,18 +672,12 @@
 
 <div class="page-board-surface" id="pageBoardSurface">
   <div class="infinite-canvas-toolbar" id="infiniteCanvasToolbar" hidden>
-    <div class="infinite-canvas-toolbar-group">
-      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
-      <span class="infinite-canvas-toolbar-zoom" id="infiniteCanvasZoomLabel">100%</span>
-      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
-    </div>
-    <div class="infinite-canvas-toolbar-group">
-      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="fit">Fit</button>
-      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="center">Center</button>
-      <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="reset">Reset</button>
-    </div>
-    <div class="infinite-canvas-toolbar-spacer"></div>
-    <div class="infinite-canvas-toolbar-hint">Ctrl + wheel to zoom. Hold Space to pan.</div>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
+    <button type="button" class="infinite-canvas-toolbar-zoom" data-infinite-canvas-action="reset" aria-label="Reset zoom to 100%">100%</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
+    <div class="infinite-canvas-toolbar-sep"></div>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="fit" aria-label="Fit board to screen" title="Fit to screen">⊞</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="center" aria-label="Center view" title="Center">◎</button>
   </div>
   <div class="infinite-canvas-viewport" id="infiniteCanvasViewport">
     <div class="infinite-canvas-stage" id="infiniteCanvasStage">
@@ -664,12 +709,59 @@
             <div class="page-hero-title" id="pageHeroTitle" contenteditable="false" spellcheck="false"></div>
           </div>
         </div>
+        <div id="pagePropsStrip"></div>
         <div id="pageContent" class="hint"></div>
         <div class="grid" id="grid"></div>
       </section>
     </div>
   </div>
 </div>
+
+</div><!-- /main-pane -->
+
+<!-- Split pane divider + secondary pane -->
+<div class="split-divider" id="splitDivider"></div>
+<div class="split-pane" id="splitPane">
+  <div class="split-topbar" id="splitTopbar">
+    <div class="split-topbar-left">
+      <button class="nav-history-btn split-nav-btn" id="splitBackBtn" aria-label="Back" disabled>
+        <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M6 1L1 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="nav-history-btn split-nav-btn" id="splitFwdBtn" aria-label="Forward" disabled>
+        <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="split-page-title" id="splitPageTitle"></div>
+      <div class="split-breadcrumb-bar" id="splitBreadcrumbBar"></div>
+    </div>
+    <div class="split-topbar-right">
+      <button class="split-action-btn" id="splitSwapBtn" type="button" title="Swap with main">Swap</button>
+      <button class="split-header-btn" id="splitOpenMainBtn" aria-label="Open in main" title="Open in main">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 1h4v4M11 1L6 6M2 4H1v7h7V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="split-header-btn" id="splitCloseBtn" aria-label="Close split" title="Close split">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="split-pane-body">
+    <div class="split-page-hero" id="splitPageHero" style="display:none;"></div>
+    <div class="page-canvas split-canvas" id="splitCanvas">
+      <div class="grid split-grid" id="splitGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab right-click context menu -->
+<div class="tab-context-menu" id="tabContextMenu">
+  <button data-action="open-split">Open in split view</button>
+  <button data-action="swap-split">Swap with main</button>
+  <button data-action="duplicate-tab">Duplicate tab</button>
+  <button data-action="close-tab">Close tab</button>
+  <button data-action="close-other-tabs">Close other tabs</button>
+  <button data-action="close-tabs-right">Close tabs to the right</button>
+</div>
+
+</div><!-- end .split-container -->
 
 <!-- Search View -->
 <section class="search-view" id="searchView">
@@ -718,28 +810,41 @@
 
 <div class="soundbar" id="soundbar">
   <div class="soundbar-bar" id="soundbarBar">
-    <div class="soundbar-bar-left">
-      <button class="soundbar-btn" id="soundPrevBtn" title="Previous">⏮</button>
-      <button class="soundbar-btn soundbar-play-btn" id="soundPlayBtn" title="Play/Pause">▶</button>
-      <button class="soundbar-btn" id="soundNextBtn" title="Next">⏭</button>
-      <button class="soundbar-btn" id="soundLoopBtn" title="Loop">🔂</button>
-    </div>
     <div class="soundbar-track-info">
-      <span class="soundbar-track-name" id="soundbarTrackName">No track loaded</span>
-      <div class="soundbar-progress-wrap" id="soundbarProgressWrap">
-        <div class="soundbar-progress-bar" id="soundbarProgressBar"></div>
+      <div class="soundbar-cover" id="soundbarCover" aria-hidden="true">
+        <span>♪</span>
       </div>
+      <div class="soundbar-track-copy">
+        <span class="soundbar-track-name" id="soundbarTrackName">No track loaded</span>
+        <span class="soundbar-track-meta" id="soundbarTrackMeta">Your local music</span>
+      </div>
+    </div>
+    <div class="soundbar-controls">
+      <button class="soundbar-btn" id="soundPrevBtn" title="Previous" aria-label="Previous track">⏮</button>
+      <button class="soundbar-btn soundbar-play-btn" id="soundPlayBtn" title="Play/Pause" aria-label="Play">▶</button>
+      <button class="soundbar-btn" id="soundNextBtn" title="Next" aria-label="Next track">⏭</button>
     </div>
     <div class="soundbar-bar-right">
       <div class="soundbar-ambient-dots" id="soundbarAmbientDots"></div>
+      <button class="soundbar-btn" id="soundLoopBtn" title="Loop" aria-label="Loop track" aria-pressed="false">↺</button>
+      <span class="soundbar-volume-icon" aria-hidden="true">
+        <svg viewBox="0 0 14 12" focusable="false">
+          <path d="M1.25 4.25h2.2L7 1.45v9.1l-3.55-2.8h-2.2z"></path>
+          <path d="M9 4.05c.7.45 1.05 1.1 1.05 1.95S9.7 7.5 9 7.95"></path>
+          <path d="M10.75 2.45c1.15.9 1.75 2.08 1.75 3.55s-.6 2.65-1.75 3.55"></path>
+        </svg>
+      </span>
       <input type="range" class="soundbar-volume" id="soundbarVolume" min="0" max="1" step="0.02" value="0.8" title="Volume" />
-      <button class="soundbar-btn" id="soundbarToggleBtn" title="Expand">⌃</button>
+      <button class="soundbar-btn soundbar-expand-btn" id="soundbarToggleBtn" title="Expand" aria-label="Open music controls" aria-expanded="false">⌃</button>
+    </div>
+    <div class="soundbar-progress-wrap" id="soundbarProgressWrap">
+      <div class="soundbar-progress-bar" id="soundbarProgressBar"></div>
     </div>
   </div>
   <div class="soundbar-panel" id="soundbarPanel">
     <div class="soundbar-tabs">
-      <button class="soundbar-tab active" data-tab="music">🎵 Music</button>
-      <button class="soundbar-tab" data-tab="ambience">🌿 Ambience</button>
+      <button class="soundbar-tab active" data-tab="music">Music</button>
+      <button class="soundbar-tab" data-tab="ambience">Ambience</button>
     </div>
     <div class="soundbar-content" id="soundbarMusicTab">
       <div class="soundbar-upload-row">
@@ -822,7 +927,9 @@
       <button class="page-type-btn active" data-layout="board-canvas">Board Canvas</button>
       <button class="page-type-btn" data-layout="infinite-canvas">Infinite Board</button>
       <button class="page-type-btn" data-layout="document">Document</button>
+      <button class="page-type-btn" data-layout="profile">Profile</button>
       <button class="page-type-btn" data-layout="sheet">Database</button>
+      <button class="page-type-btn" data-layout="journal">Journal</button>
       <button class="page-type-btn page-type-future" data-layout="map" disabled>Map</button>
     </div>
 
@@ -865,7 +972,9 @@
         <option value="board-canvas">Board Canvas</option>
         <option value="infinite-canvas">Infinite Board</option>
         <option value="document">Document</option>
+        <option value="profile">Profile</option>
         <option value="sheet">Database</option>
+        <option value="journal">Journal</option>
         <option value="map">Map</option>
       </select>
     </div>
@@ -886,6 +995,16 @@
     <div class="page-details-row">
       <label>Summary</label>
       <textarea class="page-details-input page-details-textarea" id="pageDetailsSummary" placeholder="Short description..."></textarea>
+    </div>
+    <div class="page-details-row page-details-scope-row">
+      <label>Area</label>
+      <label class="page-details-check">
+        <input type="checkbox" id="pageDetailsScopeBoundary" />
+        <span>
+          <span class="page-details-check-title">Make this page an area</span>
+          <span class="page-details-check-help" id="pageDetailsScopeBoundaryHelp">Links made inside it will prefer pages from here.</span>
+        </span>
+      </label>
     </div>
     <div class="page-details-actions">
       <button class="page-details-cancel" id="pageDetailsCancel">Cancel</button>
@@ -936,23 +1055,35 @@
       "stickers.js",
       "document.js",
       "ui-core.js",
+      "backup-data.js",
+      "page-lifecycle.js",
       "sidebar.js",
       "infinite-canvas.js",
       "canvas.js",
       "history-state.js",
+      "journal.js",
       "app-core.js",
-      // Active knowledge/page-info drawer implementation.
-      // Legacy duplicate was archived at archive/knowledge-ui.legacy.js.
-      "page-info-ui.js",
+      "relationship-graph.js",
       "page-database.js",
+      "context-engine.js",
+      "assistant-operations.js",
+      "assistant-transactions.js",
       "canvas-rich-text.js",
-      "smart-notes.js"
+      "smart-notes.js",
+      "assistant-content-adapters.js",
+      "assistant-page-adapter.js",
+      "assistant-database-structure-adapter.js",
+      "profile.js",
+      "page-props.js",
+      "button-block.js",
+      "canvas-lines.js"
     ];
 
     function loadScript(src) {
       return new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = src;
+        const version = window.SANCTUM_ASSET_VERSION || String(Date.now());
+        script.src = `${src}?v=${encodeURIComponent(version)}`;
         script.onload = () => resolve();
         script.onerror = () => reject(new Error(`Failed to load ${src}`));
         document.body.appendChild(script);
@@ -961,6 +1092,9 @@
 
     window.SanctumStorageReady
       .then(() => scriptQueue.reduce((p, src) => p.then(() => loadScript(src)), Promise.resolve()))
+      .then(() => {
+        window.dispatchEvent(new CustomEvent("sanctum:scripts-ready"));
+      })
       .catch((err) => {
         console.error("Sanctum failed to boot", err);
         if (err?.code === "SANCTUM_STORAGE_BLOCKED") {

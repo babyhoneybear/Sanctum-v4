@@ -1,0 +1,290 @@
+/* =====================================================
+   Profile Layout — structured record page
+   ===================================================== */
+
+.profile-root {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg, #1a1a1a);
+  color: var(--text, #e8e8e8);
+}
+
+.profile-root.active {
+  display: flex;
+}
+
+/* ── Header ── */
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 32px 48px 20px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+}
+
+.profile-header-icon {
+  font-size: 36px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 48px;
+  text-align: center;
+}
+
+.profile-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-header-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-header-category {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim, rgba(255,255,255,0.4));
+}
+
+/* ── Edit toggle ── */
+.profile-edit-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: transparent;
+  color: var(--text-dim, rgba(255,255,255,0.5));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.profile-edit-btn:hover {
+  background: var(--hover, rgba(255,255,255,0.06));
+  color: var(--text, #e8e8e8);
+  border-color: var(--border-active, rgba(255,255,255,0.2));
+}
+
+.profile-root.editing .profile-edit-btn {
+  background: var(--accent, rgba(255,255,255,0.1));
+  color: var(--text, #e8e8e8);
+  border-color: var(--border-active, rgba(255,255,255,0.25));
+}
+
+/* ── Body ── */
+.profile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 48px 48px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Fields section ── */
+.profile-fields {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0 8px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  gap: 2px;
+}
+
+.profile-field {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 8px 0;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+
+.profile-field:hover {
+  background: var(--hover, rgba(255,255,255,0.03));
+}
+
+.profile-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim, rgba(255,255,255,0.4));
+  padding-top: 2px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.profile-field-value {
+  font-size: 14px;
+  color: var(--text, #e8e8e8);
+  line-height: 1.5;
+  min-height: 22px;
+}
+
+/* view mode — plain text, nothing editable */
+.profile-field-value[data-editable="false"] {
+  cursor: default;
+}
+
+/* edit mode — input fields */
+.profile-field-value input.profile-field-input {
+  width: 100%;
+  background: var(--input-bg, rgba(255,255,255,0.05));
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 5px;
+  color: var(--text, #e8e8e8);
+  font-size: 14px;
+  padding: 4px 8px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.profile-field-value input.profile-field-input:focus {
+  border-color: var(--border-active, rgba(255,255,255,0.3));
+}
+
+/* add field row */
+.profile-add-field {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition: color 0.15s;
+  width: 100%;
+  text-align: left;
+}
+
+.profile-add-field:hover {
+  color: var(--text, #e8e8e8);
+}
+
+.profile-root.editing .profile-add-field {
+  display: flex;
+}
+
+/* custom field delete btn */
+.profile-field-delete {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: none;
+  background: none;
+  color: var(--text-dim, rgba(255,255,255,0.3));
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  margin-left: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.profile-root.editing .profile-field-delete {
+  display: flex;
+}
+
+.profile-field-delete:hover {
+  color: #e06c6c;
+  background: rgba(224, 108, 108, 0.1);
+}
+
+/* label input in edit mode */
+.profile-field-label input.profile-label-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.15));
+  color: var(--text-dim, rgba(255,255,255,0.5));
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  outline: none;
+  width: 100%;
+  padding: 2px 0;
+}
+
+/* ── Notes section ── */
+.profile-notes-wrap {
+  padding: 28px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.profile-notes-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+}
+
+.profile-notes-area {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text, #e8e8e8);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  width: 100%;
+  min-height: 120px;
+  font-family: inherit;
+  flex: 1;
+  cursor: default;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.profile-root.editing .profile-notes-area {
+  cursor: text;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.1));
+}
+
+.profile-notes-placeholder {
+  color: var(--text-dim, rgba(255,255,255,0.2));
+  font-style: italic;
+  pointer-events: none;
+}
+
+/* ── Inline link chips (rendered in view mode) ── */
+.profile-field-value .inline-link {
+  color: var(--accent-text, rgba(180, 200, 255, 0.85));
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(180, 200, 255, 0.3);
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.profile-field-value .inline-link:hover {
+  color: #b4c8ff;
+  border-color: rgba(180, 200, 255, 0.7);
+}
+
+/* ── Empty state ── */
+.profile-empty-hint {
+  font-size: 13px;
+  color: var(--text-dim, rgba(255,255,255,0.25));
+  padding: 16px 0;
+  font-style: italic;
+}

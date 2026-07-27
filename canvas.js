@@ -20,6 +20,9 @@ let activeFrameDragSourceBlock = null;
 let activeFrameDragGhost = null;
 let activeFrameDragOffsetX = 0;
 let activeFrameDragOffsetY = 0;
+let activeFrameCarryItems = [];
+let activeFrameCarryStartX = 0;
+let activeFrameCarryStartY = 0;
 let activePageCardImageBlock = null;
 let activePageCardImageStartY = 0;
 let activePageCardImageStartPos = 50;
@@ -861,7 +864,7 @@ function getFrameDraggableType(node) {
   if (!node) return "";
   if (node.classList?.contains("frame-item")) {
     const type = node.dataset.frameChildType || node.dataset.type || "";
-    return ["text", "image", "page", "domain", "divider", "divider-vertical", "divider-updown", "divider-dashed"].includes(type) ? type : "";
+    return ["text", "image", "button", "page", "domain", "divider", "divider-vertical", "divider-updown", "divider-dashed"].includes(type) ? type : "";
   }
   return getFrameDropTypeForBlock(node);
 }
@@ -915,6 +918,90 @@ function getFrameDropPlacement(containerBlock, clientY, clientX = 0, ignoreItem 
   };
 }
 
+function getCanvasBlockBox(block) {
+  if (!block) return { x: 0, y: 0, w: 0, h: 0 };
+
+  const x = parseInt(block.style.left || "0", 10) || 0;
+  const y = parseInt(block.style.top || "0", 10) || 0;
+  const w = parseInt(block.style.width || block.getBoundingClientRect().width || "0", 10) || 0;
+  const h = parseInt(block.style.height || block.getBoundingClientRect().height || "0", 10) || 0;
+
+  return { x, y, w, h };
+}
+
+function getCanvasBlockZ(block) {
+  const z = parseInt(block?.style?.zIndex || block?.dataset?.z || "0", 10);
+  return Number.isFinite(z) ? z : 0;
+}
+
+function isBlockCarriedByFrame(block, frameBlock, frameBox, frameZ) {
+  if (!block || !frameBlock || block === frameBlock) return false;
+  if (block.classList.contains("ghost")) return false;
+  if (block.closest(".frame-item")) return false;
+  if (block.parentElement?.id !== "grid") return false;
+  if (getCanvasBlockZ(block) < frameZ) return false;
+
+  const box = getCanvasBlockBox(block);
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+
+  return centerX >= frameBox.x
+    && centerX <= frameBox.x + frameBox.w
+    && centerY >= frameBox.y
+    && centerY <= frameBox.y + frameBox.h;
+}
+
+function beginFrameSurfaceCarry(frameBlock) {
+  activeFrameCarryItems = [];
+  activeFrameCarryStartX = 0;
+  activeFrameCarryStartY = 0;
+
+  if (!frameBlock || frameBlock.dataset.type !== "container") return;
+
+  const frameBox = getCanvasBlockBox(frameBlock);
+  const frameZ = getCanvasBlockZ(frameBlock);
+  activeFrameCarryStartX = frameBox.x;
+  activeFrameCarryStartY = frameBox.y;
+
+  activeFrameCarryItems = Array.from(document.querySelectorAll("#grid > .block"))
+    .filter((block) => isBlockCarriedByFrame(block, frameBlock, frameBox, frameZ))
+    .map((block) => {
+      const box = getCanvasBlockBox(block);
+      return {
+        block,
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h
+      };
+    });
+}
+
+function updateFrameSurfaceCarry(deltaX, deltaY) {
+  if (!activeFrameCarryItems.length) return;
+
+  const gridWidth = getGridViewportWidth();
+  const gridHeight = getGridViewportHeight();
+
+  activeFrameCarryItems.forEach((item) => {
+    if (!item.block?.isConnected) return;
+
+    const maxX = Math.max(0, gridWidth - item.w);
+    const maxY = Math.max(0, gridHeight - item.h);
+    const nextX = Math.max(0, Math.min(item.x + deltaX, maxX));
+    const nextY = Math.max(0, Math.min(item.y + deltaY, maxY));
+
+    item.block.style.left = `${nextX}px`;
+    item.block.style.top = `${nextY}px`;
+  });
+}
+
+function clearFrameSurfaceCarry() {
+  activeFrameCarryItems = [];
+  activeFrameCarryStartX = 0;
+  activeFrameCarryStartY = 0;
+}
+
 function positionFrameDragGhost(clientX, clientY) {
   if (!activeFrameDragGhost) return;
   activeFrameDragGhost.style.left = `${Math.round(clientX - activeFrameDragOffsetX)}px`;
@@ -934,15 +1021,18 @@ function clearFrameItemDragState() {
 
 // Kill native HTML drag always (prevents 🚫 ghost)
 document.addEventListener("dragstart", (e) => {
+  if (e.target.closest(".page-database-col-head-wrap[data-db-header-prop-id]")) return;
   if (e.target.closest(".block")) e.preventDefault();
 });
 
 document.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
+  if (e.button !== 0) return;
 
   if (beginCanvasTableColumnResize(e)) return;
 
   if (e.target.closest('[contenteditable="true"]')) return;
+  if (e.target.closest(".page-database-block-shell input, .page-database-block-shell textarea, .page-database-block-shell button, .page-database-block-shell select, .page-database-block-shell [data-db-action], .page-database-cell, .page-database-row-shell, .page-database-gallery-card, .page-database-board-card, .page-calendar-event, .page-calendar-day, .page-database-table-scroll")) return;
   if (e.target.closest(".typing-drill-shell input, .typing-drill-shell button, .typing-drill-shell select, .typing-drill-shell textarea, .match-pairs-shell button, .match-pairs-shell input, .match-pairs-shell select, .match-pairs-shell textarea")) return;
   if (e.target.closest(".page-card-media-action")) return;
 
@@ -965,14 +1055,15 @@ document.addEventListener("mousedown", (e) => {
 
   if (getCanvasTargetType(block) === "calendar") {
     const inlineShell = e.target.closest(".page-database-block-shell");
-    const titleHandle = e.target.closest(".page-database-block-title");
-    if (inlineShell && !titleHandle && !handle) {
+    const dragHandle = e.target.closest(".page-database-block-header, .page-database-block-title");
+    if (inlineShell && !dragHandle && !handle) {
       return;
     }
   }
 
   e.preventDefault();
   clearFrameDropPreview();
+  clearFrameSurfaceCarry();
 
   activeBlock = block;
 
@@ -994,12 +1085,15 @@ document.addEventListener("mousedown", (e) => {
   offsetX = (e.clientX - rect.left) / scale;
   offsetY = (e.clientY - rect.top) / scale;
 
+  beginFrameSurfaceCarry(block);
+
   // make sure left/top are relative to grid
   // (no action needed here—mousemove will set them)
 });
 
 document.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
+  if (e.button !== 0) return;
   if (e.target.closest('[contenteditable="true"]')) return;
   if (e.target.closest(".frame-item-delete, .frame-item-image-action, .container-insert-prompt")) return;
 
@@ -1008,10 +1102,7 @@ document.addEventListener("mousedown", (e) => {
   if (!item || !sourceBlock) return;
 
   if (selectedBlock !== item) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
     selectBlock(item);
-    return;
   }
 
   e.preventDefault();
@@ -1107,8 +1198,9 @@ document.addEventListener("mousemove", (e) => {
 
     activeBlock.style.left = `${x}px`;
     activeBlock.style.top = `${y}px`;
+    updateFrameSurfaceCarry(x - activeFrameCarryStartX, y - activeFrameCarryStartY);
 
-    const frameDropTarget = getFrameDropTargetAtPoint(e.clientX, e.clientY, activeBlock);
+    const frameDropTarget = null;
     if (!frameDropTarget) {
       clearFrameDropPreview();
     } else {
@@ -1138,6 +1230,13 @@ document.addEventListener("mousemove", (e) => {
     }
 
     h = Math.max(minDims.height, h);
+
+    if (activeType === "image" && shouldLockImageCropAspect(activeBlock.dataset.imageCropShape)) {
+      const maxWidth = Math.max(minDims.width, getGridViewportWidth() - blockX);
+      const size = Math.min(maxWidth, Math.max(minDims.width, w, h));
+      w = size;
+      h = size;
+    }
 
     activeBlock.style.width = `${w}px`;
     activeBlock.style.height = `${h}px`;
@@ -1183,7 +1282,7 @@ document.addEventListener("mouseup", (e) => {
   }
 
   if (activeBlock && mode === "move") {
-    const frameDropTarget = getFrameDropTargetAtPoint(e.clientX, e.clientY, activeBlock);
+    const frameDropTarget = null;
     if (frameDropTarget) {
       dropBlockIntoFrame(frameDropTarget, activeBlock, getFrameDropPlacement(frameDropTarget, e.clientY, e.clientX));
       clearFrameDropPreview();
@@ -1196,8 +1295,12 @@ document.addEventListener("mouseup", (e) => {
   if (activeBlock && mode === "resize") {
     enforceMinHeight(activeBlock);
   }
-  if (activeBlock) expandGrid();
+  if (activeBlock) {
+    expandGrid();
+    if (typeof saveState === "function") saveState();
+  }
   clearFrameDropPreview();
+  clearFrameSurfaceCarry();
   activeBlock = null;
   mode = null;
 });
@@ -1219,13 +1322,22 @@ const toolDivider = document.getElementById("toolDivider");
 const toolDataCallout = document.getElementById("toolDataCallout");
 const toolProgress = document.getElementById("toolProgress");
 const toolClock = document.getElementById("toolClock");
+const toolStudy = document.getElementById("toolStudy");
+const toolStudyBack = document.getElementById("toolStudyBack");
+const toolFlashcards = document.getElementById("toolFlashcards");
 const toolTypingDrill = document.getElementById("toolTypingDrill");
 const toolFillBlank = document.getElementById("toolFillBlank");
 const toolMatchPairs = document.getElementById("toolMatchPairs");
+const toolSessionProgress = document.getElementById("toolSessionProgress");
+const toolDailyStreak = document.getElementById("toolDailyStreak");
+const toolRecentAnswers = document.getElementById("toolRecentAnswers");
 
 
 function startPlacingPreset(preset) {
-  if (!document.body.classList.contains("editing")) return;
+  if (!document.body.classList.contains("editing")) {
+    if (!window.isInfiniteCanvasPage?.()) return;
+    document.body.classList.add("editing");
+  }
   placePreset = preset;
   if (placing) stopPlacing(true);
   startPlacing();
@@ -1239,11 +1351,24 @@ toolDomain.addEventListener("click", (e) => { e.preventDefault(); startPlacingPr
 toolDataCallout?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("data-callout"); });
 toolProgress?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("progress"); });
 toolClock?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("clock"); });
+toolStudy?.addEventListener("click", (e) => {
+  e.preventDefault();
+  document.body.classList.add("dock-study-open");
+});
+toolStudyBack?.addEventListener("click", (e) => {
+  e.preventDefault();
+  document.body.classList.remove("dock-study-open");
+});
+toolFlashcards?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("flashcards"); });
 toolTypingDrill?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("typing-drill"); });
 toolFillBlank?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("fill-blank"); });
 toolMatchPairs?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("match-pairs"); });
+toolSessionProgress?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("session-progress"); });
+toolDailyStreak?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("daily-streak"); });
+toolRecentAnswers?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("recent-answers"); });
 document.getElementById("toolContainer")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("container"); });
 document.getElementById("toolTable")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("table"); });
+document.getElementById("toolButton")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("button"); });
 document.getElementById("generateLayoutBtn")?.addEventListener("click", (e) => {
   e.preventDefault();
   if (typeof window.openAssistantWithQuery === "function") {
@@ -1311,6 +1436,22 @@ function getDefaultBlockDimensions(type = "text") {
 
   if (type === "match-pairs") {
     return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 8) };
+  }
+
+  if (type === "session-progress") {
+    return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 5) };
+  }
+
+  if (type === "daily-streak") {
+    return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 4) };
+  }
+
+  if (type === "recent-answers") {
+    return { width: snap(GRID_SIZE * 12), height: snap(GRID_SIZE * 7) };
+  }
+
+  if (type === "button") {
+    return { width: snap(GRID_SIZE * 7), height: snap(GRID_SIZE * 2) };
   }
 
   if (isVerticalDividerType(type)) {
@@ -1529,6 +1670,13 @@ function getMinResizeDimensionsForBlock(block, widthOverride = 0) {
     const layout = getActiveMatchPairsLayout(config);
     return {
       width: snap(GRID_SIZE * (layout === "focus" ? 14 : layout === "columns" ? 10 : 9)),
+      height: getMinHeightForBlock(block)
+    };
+  }
+
+  if (["session-progress", "daily-streak", "recent-answers"].includes(type)) {
+    return {
+      width: snap(GRID_SIZE * (type === "recent-answers" ? 8 : 7)),
       height: getMinHeightForBlock(block)
     };
   }
@@ -1869,6 +2017,106 @@ async function prepareImageFileForStorage(file) {
   }
 }
 
+const IMAGE_CROP_OPTIONS = [
+  { value: "original", label: "Original", width: 260, height: 180 },
+  { value: "rectangle", label: "Rectangle", width: 320, height: 200 },
+  { value: "landscape", label: "Landscape", width: 360, height: 216 },
+  { value: "portrait", label: "Portrait", width: 216, height: 320 },
+  { value: "square", label: "Square", width: 240, height: 240 },
+  { value: "circle", label: "Circle", width: 240, height: 240 },
+  { value: "arch-tall", label: "Tall arch", width: 220, height: 320 },
+  { value: "arch-short", label: "Short arch", width: 300, height: 220 }
+];
+
+const IMAGE_FRAME_OPTIONS = [
+  { value: "none", label: "No frame" },
+  { value: "hairline", label: "Hairline" },
+  { value: "dashed", label: "Dashed" },
+  { value: "double", label: "Double" },
+  { value: "mat", label: "Mat" }
+];
+
+function normalizeImageCropShape(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return IMAGE_CROP_OPTIONS.some((option) => option.value === safe) ? safe : "original";
+}
+
+function normalizeImageFrameStyle(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return IMAGE_FRAME_OPTIONS.some((option) => option.value === safe) ? safe : "none";
+}
+
+function getImageCropOption(shape = "original") {
+  const safe = normalizeImageCropShape(shape);
+  return IMAGE_CROP_OPTIONS.find((option) => option.value === safe) || IMAGE_CROP_OPTIONS[0];
+}
+
+function shouldLockImageCropAspect(shape = "") {
+  const safe = normalizeImageCropShape(shape);
+  return safe === "circle";
+}
+
+function enforceImageCropAspect(target, shape = "") {
+  if (!target?.classList?.contains("block") || !shouldLockImageCropAspect(shape)) return;
+
+  const width = parseInt(target.style.width || target.getBoundingClientRect().width, 10) || 0;
+  const height = parseInt(target.style.height || target.getBoundingClientRect().height, 10) || 0;
+  const size = Math.max(GRID_SIZE * 3, snap(Math.max(width, height) || GRID_SIZE * 10));
+
+  target.style.width = `${size}px`;
+  target.style.height = `${size}px`;
+}
+
+function applyImageCropShape(target, shape = "original", options = {}) {
+  if (!target) return;
+
+  const nextShape = normalizeImageCropShape(shape);
+  target.dataset.imageCropShape = nextShape;
+  const radiusByShape = {
+    circle: "50%",
+    "arch-tall": "999px 999px 8px 8px",
+    "arch-short": "999px 999px 4px 4px"
+  };
+  target.style.borderRadius = radiusByShape[nextShape] || "2px";
+  target.dataset.radiusState = nextShape === "original" || nextShape === "rectangle" || nextShape === "landscape" || nextShape === "portrait" || nextShape === "square"
+    ? "square"
+    : "custom";
+
+  const body = target.querySelector(".block-image-body");
+  if (body) body.dataset.imageCropShape = nextShape;
+
+  if (options.resize !== false && target.classList?.contains("block")) {
+    const dims = getImageCropOption(nextShape);
+    target.style.width = `${dims.width}px`;
+    target.style.height = `${dims.height}px`;
+    clampBlockWithinGrid(target, { clampWidth: true });
+    if (typeof expandGrid === "function") expandGrid();
+  } else if (options.enforceAspect !== false) {
+    enforceImageCropAspect(target, nextShape);
+  }
+
+  if (!options.skipSave && typeof saveState === "function") {
+    saveState();
+  }
+}
+
+function applyImageFrameStyle(target, frameStyle = "none", options = {}) {
+  if (!target) return;
+
+  const nextFrame = normalizeImageFrameStyle(frameStyle);
+  target.dataset.imageFrameStyle = nextFrame;
+  target.style.removeProperty("border-width");
+  target.style.removeProperty("border-style");
+  target.style.removeProperty("border-color");
+  target.dataset.borderState = "default";
+
+  target.classList.toggle("has-image-frame", nextFrame !== "none");
+
+  if (!options.skipSave && typeof saveState === "function") {
+    saveState();
+  }
+}
+
 function promptImageUploadForBlock(block) {
   if (!block || block.dataset.type !== "image") return;
 
@@ -1886,7 +2134,8 @@ function promptImageUploadForBlock(block) {
 
     try {
       const storedSrc = await prepareImageFileForStorage(file);
-      body.innerHTML = `<img src="${storedSrc}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" />`;
+      body.innerHTML = `<img src="${storedSrc}" class="canvas-cropped-image" draggable="false" />`;
+      applyImageCropShape(block, block.dataset.imageCropShape || "original", { resize: false, skipSave: true });
 
       const ownerBlock = block.classList.contains("block") ? block : block.closest(".block");
       if (ownerBlock && typeof autoGrowBlock === "function") {
@@ -2103,6 +2352,28 @@ function syncContainerInsertPrompt(containerBlock) {
   prompt.hidden = hasFrameItems(containerBlock);
 }
 
+function ensureFrameTypingLine(containerBlock, options = {}) {
+  const host = getContainerItemsHost(containerBlock);
+  if (!host) return null;
+
+  const items = Array.from(host.querySelectorAll(":scope > .frame-item"));
+  const lastItem = items[items.length - 1] || null;
+  const lastEditable = getFrameItemTextContent(lastItem);
+
+  if (lastEditable && isFrameTextItemEmpty(lastItem)) {
+    if (options.focus) focusFrameTextItem(lastItem, !!options.placeAtEnd);
+    syncContainerInsertPrompt(containerBlock);
+    return lastItem;
+  }
+
+  const item = buildFrameItemElement({ type: "text" });
+  host.appendChild(item);
+  syncContainerInsertPrompt(containerBlock);
+
+  if (options.focus) focusFrameTextItem(item, !!options.placeAtEnd);
+  return item;
+}
+
 function applyStoredFrameItemStyles(item, data = {}) {
   if (!item) return;
 
@@ -2221,12 +2492,16 @@ function buildFrameItemElement(data = {}) {
 
   if (type === "image") {
     item.dataset.type = "image";
+    item.dataset.imageCropShape = normalizeImageCropShape(data.imageCropShape);
+    item.dataset.imageFrameStyle = normalizeImageFrameStyle(data.imageFrameStyle);
     item.innerHTML = `
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       <div class="block-body block-image-body">${data.bodyHTML || '<div class="image-placeholder">🖼 Click replace to add image</div>'}</div>
       <button type="button" class="frame-item-image-action">Replace</button>
     `;
     applyStoredFrameItemStyles(item, data);
+    applyImageCropShape(item, data.imageCropShape || "original", { resize: false, skipSave: true });
+    applyImageFrameStyle(item, data.imageFrameStyle || "none", { skipSave: true });
     return item;
   }
 
@@ -2251,6 +2526,18 @@ function buildFrameItemElement(data = {}) {
     syncTableFormulaCells(item);
 
     applyStoredFrameItemStyles(item, data);
+    return item;
+  }
+
+  if (type === "button") {
+    item.dataset.type = "button";
+    item.dataset.buttonConfig = data.buttonConfig || "{}";
+    item.innerHTML = `
+      <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
+      <div class="button-block-shell"></div>
+    `;
+    applyStoredFrameItemStyles(item, data);
+    window.mountButtonBlock?.(item);
     return item;
   }
 
@@ -2351,11 +2638,18 @@ function serializeFrameItemElement(item) {
 
   if (type === "image") {
     payload.bodyHTML = item.querySelector(".block-body")?.innerHTML || "";
+    payload.imageCropShape = normalizeImageCropShape(item.dataset.imageCropShape);
+    payload.imageFrameStyle = normalizeImageFrameStyle(item.dataset.imageFrameStyle);
     return payload;
   }
 
   if (type === "table") {
     payload.tableHTML = serializeCanvasTableHTML(item);
+    return payload;
+  }
+
+  if (type === "button") {
+    payload.buttonConfig = item.dataset.buttonConfig || "{}";
     return payload;
   }
 
@@ -2417,6 +2711,7 @@ function hydrateContainerBlockFromData(block, data = {}) {
     items.forEach((itemData) => {
       host.appendChild(buildFrameItemElement(itemData));
     });
+    ensureFrameTypingLine(block);
     syncContainerInsertPrompt(block);
     return;
   }
@@ -2429,6 +2724,7 @@ function hydrateContainerBlockFromData(block, data = {}) {
     }));
   }
 
+  ensureFrameTypingLine(block);
   syncContainerInsertPrompt(block);
 }
 
@@ -2482,6 +2778,10 @@ function insertFrameItemIntoContainer(containerBlock, type = "text", options = {
     }, 0);
   }
 
+  if (type === "button") {
+    requestAnimationFrame(() => window.mountButtonBlock?.(item));
+  }
+
   if ((type === "page" || type === "domain") && options.pageMode) {
     setTimeout(() => {
       if (options.pageMode === "link") {
@@ -2499,6 +2799,8 @@ function insertFrameItemIntoContainer(containerBlock, type = "text", options = {
     }, 0);
   }
 
+  ensureFrameTypingLine(containerBlock);
+
   return item;
 }
 
@@ -2512,6 +2814,7 @@ function removeFrameItem(item) {
   if (containerBlock) syncContainerInsertPrompt(containerBlock);
   if (wasSelected) clearSelection();
 
+  if (containerBlock) ensureFrameTypingLine(containerBlock);
   if (containerBlock && typeof autoGrowBlock === "function") autoGrowBlock(containerBlock);
   if (typeof expandGrid === "function") expandGrid();
   if (typeof saveState === "function") saveState();
@@ -2537,6 +2840,8 @@ function moveFrameItemToContainer(item, containerBlock, placement = {}) {
 
   syncContainerInsertPrompt(containerBlock);
   if (sourceBlock && sourceBlock !== containerBlock) syncContainerInsertPrompt(sourceBlock);
+  ensureFrameTypingLine(containerBlock);
+  if (sourceBlock && sourceBlock !== containerBlock) ensureFrameTypingLine(sourceBlock);
 
   [sourceBlock, containerBlock].filter(Boolean).forEach((block, index, list) => {
     if (list.indexOf(block) !== index) return;
@@ -2582,6 +2887,9 @@ function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
     textColor: itemData.textColor || "",
     padding: itemData.padding || "",
     radius: itemData.radius || "",
+    buttonConfig: itemData.buttonConfig || "",
+    imageCropShape: itemData.imageCropShape || "original",
+    imageFrameStyle: itemData.imageFrameStyle || "none",
     hasNote: 0,
     linkedPageId: itemData.linkedPageId || "",
     pageCardTitle: itemData.pageCardTitle || "",
@@ -2629,11 +2937,17 @@ function placeFrameItemOnGrid(item, clientX, clientY, offsetX = 0, offsetY = 0) 
   grid.appendChild(block);
   item.remove();
 
-  if (sourceBlock) syncContainerInsertPrompt(sourceBlock);
+  if (sourceBlock) {
+    ensureFrameTypingLine(sourceBlock);
+    syncContainerInsertPrompt(sourceBlock);
+  }
 
   if (sourceBlock && typeof autoGrowBlock === "function") autoGrowBlock(sourceBlock);
   if (typeof autoGrowBlock === "function" && block.dataset.type !== "page" && block.dataset.type !== "domain") {
     autoGrowBlock(block);
+  }
+  if (block.dataset.type === "button") {
+    requestAnimationFrame(() => window.mountButtonBlock?.(block));
   }
   if (typeof expandGrid === "function") expandGrid();
 
@@ -2644,7 +2958,7 @@ function getFrameDropTypeForBlock(block) {
   const type = block?.dataset?.type || "";
 
   if (type === "text" || type === "list") return "text";
-  if (type === "image" || type === "page" || type === "domain" || isDividerType(type) || type === "table") return type;
+  if (type === "image" || type === "button" || type === "page" || type === "domain" || isDividerType(type) || type === "table") return type;
 
   return "";
 }
@@ -2671,6 +2985,20 @@ function buildFrameItemDataFromBlock(block) {
     return {
       type: "image",
       bodyHTML: serialized.bodyHTML || "",
+      bg: "",
+      borderColor: "",
+      textColor: serialized.textColor || "",
+      padding: serialized.padding || "",
+      radius: serialized.radius || "",
+      imageCropShape: serialized.imageCropShape || "original",
+      imageFrameStyle: serialized.imageFrameStyle || "none"
+    };
+  }
+
+  if (nextType === "table") {
+    return {
+      type: "table",
+      tableHTML: serialized.tableHTML || "",
       bg: serialized.bg || "",
       borderColor: serialized.borderColor || "",
       textColor: serialized.textColor || "",
@@ -2679,10 +3007,10 @@ function buildFrameItemDataFromBlock(block) {
     };
   }
 
-  if (nextType === "table") {
+  if (nextType === "button") {
     return {
-      type: "table",
-      tableHTML: serialized.tableHTML || "",
+      type: "button",
+      buttonConfig: serialized.buttonConfig || "{}",
       bg: serialized.bg || "",
       borderColor: serialized.borderColor || "",
       textColor: serialized.textColor || "",
@@ -2811,7 +3139,7 @@ window.insertFrameItemIntoContainer = insertFrameItemIntoContainer;
 function normalizeBlockAppearanceForType(block, type) {
   if (!block) return;
 
-  if (type === "table" || isDividerType(type)) {
+  if (type === "table" || type === "container" || isDividerType(type)) {
     block.style.backgroundColor = "";
     block.style.borderColor = "";
     block.dataset.bgState = "default";
@@ -2843,6 +3171,8 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.cardStyle;
   delete block.dataset.pageCardIcon;
   delete block.dataset.externalUrl;
+  delete block.dataset.imageCropShape;
+  delete block.dataset.imageFrameStyle;
   delete block.dataset.dataCalloutLabel;
   delete block.dataset.dataCalloutSourceKind;
   delete block.dataset.dataCalloutSourcePageId;
@@ -2855,6 +3185,9 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.dataCalloutLabelPos;
   delete block.dataset.dataCalloutShowIcon;
   delete block.dataset.dataCalloutIcon;
+  delete block.dataset.dataCalloutShowProjectImage;
+  delete block.dataset.dataCalloutProjectImageLayout;
+  delete block.dataset.dataCalloutProjectImageSize;
   delete block.dataset.progressTitle;
   delete block.dataset.progressSourceType;
   delete block.dataset.progressSourceKind;
@@ -2885,6 +3218,8 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.typingDrillConfig;
   delete block.dataset.fillBlankConfig;
   delete block.dataset.matchPairsConfig;
+  delete block.dataset.studyDashboardConfig;
+  delete block.dataset.studySessionId;
   block.innerHTML = makeBlockHTML(nextType);
 
   normalizeBlockAppearanceForType(block, nextType);
@@ -2916,7 +3251,7 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   }
 
   let focusTarget = null;
-  if (nextType === "container") focusTarget = block.querySelector(".container-body");
+  if (nextType === "container") focusTarget = block.querySelector(".frame-item-text-content");
   if (nextType === "table") focusTarget = block.querySelector(".table-cell");
 
   if (focusTarget) {
@@ -2955,6 +3290,14 @@ function convertCanvasBlockType(block, nextType, options = {}) {
     window.mountMatchPairsBlock?.(block, { openPicker: !!options.openMatchPairsPicker });
   }
 
+  if (["session-progress", "daily-streak", "recent-answers"].includes(nextType)) {
+    window.mountStudyDashboardBlock?.(block);
+  }
+
+  if (nextType === "button") {
+    window.mountButtonBlock?.(block, { openPicker: !!options.openButtonPicker });
+  }
+
   if (options.openImagePicker) {
     promptImageUploadForBlock(block);
   }
@@ -2966,6 +3309,13 @@ window.convertCanvasBlockType = convertCanvasBlockType;
 window.promptImageUploadForBlock = promptImageUploadForBlock;
 
 function makeBlockHTML(type = "text") {
+  if (type === "button") {
+    return `
+      <div class="button-block-shell"></div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
  if (type === "image") {
     return `
       <div class="block-body block-image-body">
@@ -3200,7 +3550,6 @@ function makeBlockHTML(type = "text") {
         <div class="flashcard-deck-footer">
           <button type="button" class="flashcard-deck-nav-btn" data-flashcards-action="prev">‹</button>
           <span class="flashcard-deck-position">0 / 0</span>
-          <button type="button" class="flashcard-deck-study-btn" data-flashcards-action="review">Studied</button>
           <button type="button" class="flashcard-deck-nav-btn" data-flashcards-action="next">›</button>
         </div>
       </div>
@@ -3319,6 +3668,55 @@ function makeBlockHTML(type = "text") {
     `;
   }
 
+  if (type === "session-progress") {
+    return `
+      <div class="study-widget-shell session-progress-widget">
+        <div class="study-widget-head">
+          <span class="study-widget-title">Session Progress</span>
+          <button type="button" class="study-widget-config-btn" data-study-widget-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="study-progress-body">
+          <div class="study-progress-ring"><span class="study-progress-ring-value">0%</span><span class="study-progress-ring-label">Correct</span></div>
+          <div class="study-progress-stats">
+            <span><i class="ok"></i><strong data-study-progress="correct">0</strong> Correct</span>
+            <span><i class="bad"></i><strong data-study-progress="incorrect">0</strong> Incorrect</span>
+            <span><i class="left"></i><strong data-study-progress="remaining">0</strong> Remaining</span>
+          </div>
+        </div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "daily-streak") {
+    return `
+      <div class="study-widget-shell daily-streak-widget">
+        <div class="study-widget-head">
+          <span class="study-widget-title">Current Streak</span>
+          <button type="button" class="study-widget-config-btn" data-study-widget-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="daily-streak-body">
+          <div class="daily-streak-count"><span class="daily-streak-number">0</span><span class="daily-streak-days">day streak</span></div>
+          <div class="daily-streak-dots"></div>
+        </div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "recent-answers") {
+    return `
+      <div class="study-widget-shell recent-answers-widget">
+        <div class="study-widget-head">
+          <span class="study-widget-title">Recent Answers</span>
+          <button type="button" class="study-widget-config-btn" data-study-widget-action="configure" title="Configure">⚙</button>
+        </div>
+        <div class="recent-answers-list"></div>
+      </div>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
 if (type === "container") {
     return `
       <div class="container-title" contenteditable="false" spellcheck="false">Frame</div>
@@ -3366,7 +3764,18 @@ function normalizeDataCalloutSourceType(value = "") {
 
 function normalizeDataCalloutSystemKey(value = "") {
   const safe = String(value || "").trim().toLowerCase();
-  return ["current-date", "current-time", "page-activity"].includes(safe) ? safe : "current-date";
+  return [
+    "current-date",
+    "current-time",
+    "page-activity",
+    "domain-last-opened-projects",
+    "domain-project-count",
+    "domain-note-count",
+    "scope-last-opened-items",
+    "scope-project-count",
+    "scope-note-count",
+    "inbox-question-count"
+  ].includes(safe) ? safe : "current-date";
 }
 
 function normalizeDataCalloutSystemTargetKind(value = "") {
@@ -3392,6 +3801,14 @@ function normalizeDataCalloutSystemFormat(value = "", systemKey = "current-date"
     ].includes(safe) ? safe : "compact";
   }
 
+  if (systemKey === "domain-last-opened-projects" || systemKey === "scope-last-opened-items") {
+    return ["1", "2", "3", "4", "5"].includes(safe) ? safe : "3";
+  }
+
+  if (systemKey === "domain-project-count" || systemKey === "domain-note-count" || systemKey === "scope-project-count" || systemKey === "scope-note-count" || systemKey === "inbox-question-count") {
+    return "count";
+  }
+
   return ["short", "long"].includes(safe) ? safe : "short";
 }
 
@@ -3402,6 +3819,13 @@ function getDefaultDataCalloutLabel(config = {}) {
   if (sourceType !== "system") return "Value";
   if (systemKey === "current-time") return "Current time";
   if (systemKey === "page-activity") return "Time on page";
+  if (systemKey === "domain-last-opened-projects") return "Last opened";
+  if (systemKey === "domain-project-count") return "Projects";
+  if (systemKey === "domain-note-count") return "Notes";
+  if (systemKey === "scope-last-opened-items") return "Last opened";
+  if (systemKey === "scope-project-count") return "Projects";
+  if (systemKey === "scope-note-count") return "Notes";
+  if (systemKey === "inbox-question-count") return "Inbox";
   return "Today's date";
 }
 
@@ -3551,6 +3975,413 @@ function getPageActivityLastOpenedLabel(pageId = "") {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function getPageActivityLastOpenedTime(pageId = "") {
+  const safePageId = String(pageId || "").trim();
+  if (!safePageId) return 0;
+  const all = readPageActivityData();
+  const entry = normalizePageActivityEntry(all[safePageId]);
+  const date = new Date(entry.lastOpenedAt || "");
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function getDataCalloutAllDomains() {
+  return Array.isArray(window.userDomains) ? window.userDomains : [];
+}
+
+function getDataCalloutAllPages() {
+  return Array.isArray(window.userPages) ? window.userPages : [];
+}
+
+function getDataCalloutDomainForTarget(targetPageId = "") {
+  const safeTargetId = String(targetPageId || "").trim();
+  const domains = getDataCalloutAllDomains();
+  const pages = getDataCalloutAllPages();
+  const domainIds = new Set(domains.map((domain) => domain?.id).filter(Boolean));
+
+  if (domainIds.has(safeTargetId)) {
+    return domains.find((domain) => domain.id === safeTargetId) || null;
+  }
+
+  const byId = new Map(pages.map((page) => [page.id, page]));
+  let cursor = byId.get(safeTargetId) || null;
+  const visited = new Set();
+  while (cursor && !visited.has(cursor.id)) {
+    visited.add(cursor.id);
+    if (domainIds.has(cursor.parent)) {
+      return domains.find((domain) => domain.id === cursor.parent) || null;
+    }
+    cursor = byId.get(cursor.parent) || null;
+  }
+
+  return null;
+}
+
+function getDataCalloutDomainDescendants(domainId = "") {
+  const safeDomainId = String(domainId || "").trim();
+  if (!safeDomainId) return [];
+
+  const pages = getDataCalloutAllPages().filter((page) => page?.hiddenInSidebar !== true || page?.containerType === "database-row");
+  const childrenByParent = new Map();
+  pages.forEach((page) => {
+    if (!childrenByParent.has(page.parent)) childrenByParent.set(page.parent, []);
+    childrenByParent.get(page.parent).push(page);
+  });
+
+  const results = [];
+  const visited = new Set();
+  const walk = (parentId) => {
+    (childrenByParent.get(parentId) || []).forEach((page) => {
+      if (!page?.id || visited.has(page.id)) return;
+      visited.add(page.id);
+      results.push(page);
+      walk(page.id);
+    });
+  };
+
+  walk(safeDomainId);
+  return results;
+}
+
+function getDataCalloutScopeForTarget(targetPageId = "") {
+  const safeTargetId = String(targetPageId || "").trim();
+  const domains = getDataCalloutAllDomains();
+  const pages = getDataCalloutAllPages();
+  const domain = domains.find((entry) => entry?.id === safeTargetId) || null;
+  if (domain) {
+    return {
+      page: domain,
+      id: domain.id,
+      title: domain.title || "Untitled domain",
+      kind: "domain",
+      descendants: getDataCalloutDomainDescendants(domain.id)
+    };
+  }
+
+  const page = pages.find((entry) => entry?.id === safeTargetId) || null;
+  if (page) {
+    return {
+      page,
+      id: page.id,
+      title: page.title || "Untitled page",
+      kind: page.containerType || page.category || "page",
+      descendants: getDataCalloutDomainDescendants(page.id)
+    };
+  }
+
+  return null;
+}
+
+function getDataCalloutProjectImage(project = {}) {
+  if (!project?.id) return "";
+  const rowPeekData = typeof window.getDatabaseRowPeekData === "function"
+    ? window.getDatabaseRowPeekData(project.id)
+    : null;
+  if (rowPeekData?.coverSource) return rowPeekData.coverSource;
+
+  if (typeof getLinkedPageCardImageSource === "function" && typeof getPageSettings === "function") {
+    const linkedImage = getLinkedPageCardImageSource(project.id);
+    if (linkedImage) return linkedImage;
+  }
+
+  const allBlocks = typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {};
+  for (const blocks of Object.values(allBlocks || {})) {
+    if (!Array.isArray(blocks)) continue;
+    const card = blocks.find((block) => (
+      (block?.type === "page" || block?.type === "domain")
+      && block?.linkedPageId === project.id
+      && typeof block?.pageCardImageSrc === "string"
+      && block.pageCardImageSrc.trim()
+    ));
+    if (card) return card.pageCardImageSrc.trim();
+  }
+
+  return "";
+}
+
+function getDataCalloutItemTitle(item = {}, fallback = "Untitled") {
+  if (!item?.id) return String(item?.title || fallback).trim() || fallback;
+  const rowPeekData = typeof window.getDatabaseRowPeekData === "function"
+    ? window.getDatabaseRowPeekData(item.id)
+    : null;
+  return String(rowPeekData?.title || item.title || fallback).trim() || fallback;
+}
+
+function normalizeDataCalloutImageLayout(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return safe === "top" ? "top" : "side";
+}
+
+function normalizeDataCalloutImageSize(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["sm", "md", "lg", "xl", "xxl"].includes(safe) ? safe : "md";
+}
+
+function renderDataCalloutLastOpenedItems(items = [], config = {}, fallbackTitle = "Untitled") {
+  const limit = Math.max(1, Math.min(5, Number(config.systemFormat) || items.length || 1));
+  const showImages = !!config.showProjectImage && limit <= 3;
+  const imageLayout = normalizeDataCalloutImageLayout(config.projectImageLayout || "side");
+  const imageSize = normalizeDataCalloutImageSize(config.projectImageSize || "md");
+
+  if (showImages) {
+    const layoutClass = imageLayout === "top" ? " top-image" : "";
+    return `
+      <span class="data-callout-project-card-list image-size-${escapeDataCalloutHTML(imageSize)}${layoutClass}">
+        ${items.map((item) => {
+          const title = getDataCalloutItemTitle(item, fallbackTitle);
+          const image = getDataCalloutProjectImage(item);
+          return `
+            <button type="button" class="data-callout-project-single" data-has-image="${image ? "true" : "false"}" data-callout-open-page="${escapeDataCalloutHTML(item.id)}">
+              ${image ? `<img src="${escapeDataCalloutHTML(image)}" alt="" />` : ""}
+              <span>
+                <strong>${escapeDataCalloutHTML(title)}</strong>
+                <small>${escapeDataCalloutHTML(getPageActivityLastOpenedLabel(item.id))}</small>
+              </span>
+            </button>
+          `;
+        }).join("")}
+      </span>
+    `;
+  }
+
+  return `
+    <span class="data-callout-project-list">
+      ${items.map((item) => {
+        const title = getDataCalloutItemTitle(item, fallbackTitle);
+        return `
+          <button type="button" class="data-callout-project-row" data-callout-open-page="${escapeDataCalloutHTML(item.id)}">
+            <strong>${escapeDataCalloutHTML(title)}</strong>
+            <small>${escapeDataCalloutHTML(getPageActivityLastOpenedLabel(item.id))}</small>
+          </button>
+        `;
+      }).join("")}
+    </span>
+  `;
+}
+
+function computeDomainCalloutTarget(config = {}) {
+  const targetPageId = resolveDataCalloutTargetPageId(config);
+  const domain = getDataCalloutDomainForTarget(targetPageId);
+  if (!domain) {
+    return {
+      domain: null,
+      descendants: [],
+      configured: false,
+      valueText: "—"
+    };
+  }
+
+  return {
+    domain,
+    descendants: getDataCalloutDomainDescendants(domain.id),
+    configured: true
+  };
+}
+
+function computeScopeCalloutTarget(config = {}) {
+  const targetPageId = resolveDataCalloutTargetPageId(config);
+  const scope = getDataCalloutScopeForTarget(targetPageId);
+  if (!scope) {
+    return {
+      scope: null,
+      descendants: [],
+      configured: false,
+      valueText: "\u2014"
+    };
+  }
+
+  return {
+    scope,
+    descendants: scope.descendants || [],
+    configured: true
+  };
+}
+
+function computeDomainLastOpenedProjectsCallout(config = {}) {
+  const context = computeDomainCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "—",
+      subline: "Choose a domain target.",
+      configured: false
+    };
+  }
+
+  const limit = Math.max(1, Math.min(5, Number(config.systemFormat) || 3));
+  const projects = context.descendants
+    .filter((page) => page?.containerType === "project")
+    .map((page) => ({
+      ...page,
+      lastOpenedAt: getPageActivityLastOpenedTime(page.id)
+    }))
+    .filter((page) => page.lastOpenedAt > 0)
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+    .slice(0, limit);
+
+  if (!projects.length) {
+    return {
+      valueText: "None",
+      subline: `No opened projects in ${context.domain.title || "this domain"} yet.`,
+      configured: true
+    };
+  }
+
+  if (limit === 1) {
+    const project = projects[0];
+    return {
+      valueText: getDataCalloutItemTitle(project, "Untitled project"),
+      html: renderDataCalloutLastOpenedItems([project], config, "Untitled project"),
+      configured: true
+    };
+  }
+
+  return {
+    valueText: `${projects.length}`,
+    html: renderDataCalloutLastOpenedItems(projects, config, "Untitled project"),
+    configured: true
+  };
+}
+
+function computeDomainProjectCountCallout(config = {}) {
+  const context = computeDomainCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "—",
+      subline: "Choose a domain target.",
+      configured: false
+    };
+  }
+
+  return {
+    valueText: formatDataCalloutNumber(context.descendants.filter((page) => page?.containerType === "project").length),
+    configured: true
+  };
+}
+
+function computeDomainNoteCountCallout(config = {}) {
+  const context = computeDomainCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "—",
+      subline: "Choose a domain target.",
+      configured: false
+    };
+  }
+
+  const attachedIds = new Set([context.domain.id, ...context.descendants.map((page) => page.id)]);
+  const notes = typeof window.readStorageJSON === "function"
+    ? window.readStorageJSON(window.STORAGE_KEYS?.notesVault || "sanctum_notes_vault_v1", [])
+    : [];
+  const count = Array.isArray(notes)
+    ? notes.filter((note) => {
+      if (note?.archived) return false;
+      const ids = [
+        note.contextPageId,
+        ...(Array.isArray(note.directPageIds) ? note.directPageIds : []),
+        ...(Array.isArray(note.contextBreadcrumbIds) ? note.contextBreadcrumbIds : [])
+      ].filter(Boolean);
+      return ids.some((id) => attachedIds.has(id));
+    }).length
+    : 0;
+
+  return {
+    valueText: formatDataCalloutNumber(count),
+    configured: true
+  };
+}
+
+function computeScopeLastOpenedItemsCallout(config = {}) {
+  const context = computeScopeCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "\u2014",
+      subline: "Choose a scope target.",
+      configured: false
+    };
+  }
+
+  const limit = Math.max(1, Math.min(5, Number(config.systemFormat) || 3));
+  const items = context.descendants
+    .filter((page) => page?.id && (page?.hiddenInSidebar !== true || page?.containerType === "database-row"))
+    .map((page) => ({
+      ...page,
+      lastOpenedAt: getPageActivityLastOpenedTime(page.id)
+    }))
+    .filter((page) => page.lastOpenedAt > 0)
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+    .slice(0, limit);
+
+  if (!items.length) {
+    return {
+      valueText: "None",
+      subline: `No opened items in ${context.scope.title || "this scope"} yet.`,
+      configured: true
+    };
+  }
+
+  if (limit === 1) {
+    const item = items[0];
+    return {
+      valueText: getDataCalloutItemTitle(item, "Untitled"),
+      html: renderDataCalloutLastOpenedItems([item], config, "Untitled"),
+      configured: true
+    };
+  }
+
+  return {
+    valueText: `${items.length}`,
+    html: renderDataCalloutLastOpenedItems(items, config, "Untitled"),
+    configured: true
+  };
+}
+
+function computeScopeProjectCountCallout(config = {}) {
+  const context = computeScopeCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "\u2014",
+      subline: "Choose a scope target.",
+      configured: false
+    };
+  }
+
+  return {
+    valueText: formatDataCalloutNumber(context.descendants.filter((page) => page?.containerType === "project").length),
+    configured: true
+  };
+}
+
+function computeScopeNoteCountCallout(config = {}) {
+  const context = computeScopeCalloutTarget(config);
+  if (!context.configured) {
+    return {
+      valueText: "\u2014",
+      subline: "Choose a scope target.",
+      configured: false
+    };
+  }
+
+  const attachedIds = new Set([context.scope.id, ...context.descendants.map((page) => page.id)]);
+  const notes = typeof window.readStorageJSON === "function"
+    ? window.readStorageJSON(window.STORAGE_KEYS?.notesVault || "sanctum_notes_vault_v1", [])
+    : [];
+  const count = Array.isArray(notes)
+    ? notes.filter((note) => {
+      if (note?.archived) return false;
+      const ids = [
+        note.contextPageId,
+        ...(Array.isArray(note.directPageIds) ? note.directPageIds : []),
+        ...(Array.isArray(note.contextBreadcrumbIds) ? note.contextBreadcrumbIds : [])
+      ].filter(Boolean);
+      return ids.some((id) => attachedIds.has(id));
+    }).length
+    : 0;
+
+  return {
+    valueText: formatDataCalloutNumber(count),
+    configured: true
+  };
+}
+
 function flushTrackedPageActivity(options = {}) {
   const now = Math.max(0, Math.floor(Number(options.now) || Date.now()));
   const keepRunning = !!options.keepRunning;
@@ -3623,6 +4454,12 @@ function normalizeDataCalloutLabelPos(value = "") {
 
 function normalizeDataCalloutShowIcon(value = "") {
   return String(value || "").trim().toLowerCase() === "true";
+}
+
+function normalizeDataCalloutShowProjectImage(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  if (safe === "false" || safe === "0" || safe === "off") return false;
+  return true;
 }
 
 function normalizeProgressBlockSourceType(value = "") {
@@ -4290,7 +5127,10 @@ function normalizeDataCalloutConfig(raw = {}) {
     size: normalizeDataCalloutSize(raw?.size || "md"),
     labelPos: normalizeDataCalloutLabelPos(raw?.labelPos || "below"),
     showIcon: normalizeDataCalloutShowIcon(raw?.showIcon || ""),
-    icon: String(raw?.icon || "").trim()
+    icon: String(raw?.icon || "").trim(),
+    showProjectImage: normalizeDataCalloutShowProjectImage(raw?.showProjectImage ?? "true"),
+    projectImageLayout: normalizeDataCalloutImageLayout(raw?.projectImageLayout || "side"),
+    projectImageSize: normalizeDataCalloutImageSize(raw?.projectImageSize || "md")
   };
 }
 
@@ -4313,7 +5153,10 @@ function readDataCalloutConfig(block) {
     size: block.dataset.dataCalloutSize || "md",
     labelPos: block.dataset.dataCalloutLabelPos || "below",
     showIcon: block.dataset.dataCalloutShowIcon || "",
-    icon: block.dataset.dataCalloutIcon || ""
+    icon: block.dataset.dataCalloutIcon || "",
+    showProjectImage: block.dataset.dataCalloutShowProjectImage || "true",
+    projectImageLayout: block.dataset.dataCalloutProjectImageLayout || "side",
+    projectImageSize: block.dataset.dataCalloutProjectImageSize || "md"
   });
 }
 
@@ -4337,6 +5180,9 @@ function writeDataCalloutConfig(block, config) {
   block.dataset.dataCalloutLabelPos = normalized.labelPos;
   block.dataset.dataCalloutShowIcon = normalized.showIcon ? "true" : "false";
   block.dataset.dataCalloutIcon = normalized.icon;
+  block.dataset.dataCalloutShowProjectImage = normalized.showProjectImage ? "true" : "false";
+  block.dataset.dataCalloutProjectImageLayout = normalized.projectImageLayout;
+  block.dataset.dataCalloutProjectImageSize = normalized.projectImageSize;
 }
 
 function ensureDataCalloutStructure(block) {
@@ -4363,14 +5209,6 @@ function ensureDataCalloutStructure(block) {
     if (labelEl) contentEl.appendChild(labelEl);
     const configBtn = shellEl.querySelector(".data-callout-config-btn");
     shellEl.insertBefore(contentEl, configBtn || null);
-  }
-
-  if (type === "match-pairs") {
-    const config = readMatchPairsConfig(block);
-    return {
-      width: config.layoutMode === "columns" ? snap(GRID_SIZE * 14) : snap(GRID_SIZE * 11),
-      height: getMinHeightForBlock(block)
-    };
   }
 
   return {
@@ -4526,6 +5364,22 @@ function getDataCalloutSystemFormatOptions(systemKey = "current-date") {
     ];
   }
 
+  if (systemKey === "domain-last-opened-projects" || systemKey === "scope-last-opened-items") {
+    return [
+      { value: "1", label: "Single item" },
+      { value: "2", label: "Last 2 items" },
+      { value: "3", label: "Last 3 items" },
+      { value: "4", label: "Last 4 items" },
+      { value: "5", label: "Last 5 items" }
+    ];
+  }
+
+  if (systemKey === "domain-project-count" || systemKey === "domain-note-count" || systemKey === "scope-project-count" || systemKey === "scope-note-count" || systemKey === "inbox-question-count") {
+    return [
+      { value: "count", label: "Count" }
+    ];
+  }
+
   return [
     { value: "short", label: "Short date" },
     { value: "long", label: "Long date" }
@@ -4625,6 +5479,34 @@ function computeSystemDataCalloutValue(config) {
     };
   }
 
+  if (config.systemKey === "domain-last-opened-projects") {
+    return computeDomainLastOpenedProjectsCallout(config);
+  }
+
+  if (config.systemKey === "domain-project-count") {
+    return computeDomainProjectCountCallout(config);
+  }
+
+  if (config.systemKey === "domain-note-count") {
+    return computeDomainNoteCountCallout(config);
+  }
+
+  if (config.systemKey === "scope-last-opened-items") {
+    return computeScopeLastOpenedItemsCallout(config);
+  }
+
+  if (config.systemKey === "scope-project-count") {
+    return computeScopeProjectCountCallout(config);
+  }
+
+  if (config.systemKey === "scope-note-count") {
+    return computeScopeNoteCountCallout(config);
+  }
+
+  if (config.systemKey === "inbox-question-count") {
+    return computeInboxQuestionCountCallout();
+  }
+
   return {
     valueText: formatDataCalloutDate(config.systemFormat),
     configured: true
@@ -4702,7 +5584,19 @@ function renderDataCalloutBlock(block) {
     : computeDataCalloutValue(getDataCalloutSourcePayload(config), config);
 
   refs.labelEl.textContent = config.label || getDefaultDataCalloutLabel(config);
-  valueEl.textContent = result.configured ? result.valueText : "—";
+  if (result.configured && result.html) {
+    valueEl.innerHTML = result.html;
+    valueEl.querySelectorAll("[data-callout-open-page]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const pageId = button.dataset.calloutOpenPage || "";
+        if (pageId && typeof window.openPage === "function") window.openPage(pageId);
+      });
+    });
+  } else {
+    valueEl.textContent = result.configured ? result.valueText : "—";
+  }
   refs.iconEl.textContent = config.icon || "✦";
   refs.iconEl.hidden = !config.showIcon;
   refs.shellEl.classList.toggle("is-configured", !!result.configured);
@@ -4718,6 +5612,8 @@ function renderVisibleDataCalloutBlocks() {
     renderDataCalloutBlock(block);
   });
 }
+
+window.refreshDataCalloutBlocks = renderVisibleDataCalloutBlocks;
 
 function closeDataCalloutPicker() {
   const picker = document.querySelector('.topbar-dropdown.data-callout-picker');
@@ -4782,15 +5678,46 @@ function openDataCalloutPicker(block, anchorEl = null) {
           <option value="current-date">Today's date</option>
           <option value="current-time">Current time</option>
           <option value="page-activity">Time spent on page today</option>
+          <option value="domain-last-opened-projects">Domain: last opened projects</option>
+          <option value="domain-project-count">Domain: project count</option>
+          <option value="domain-note-count">Domain: note count</option>
+          <option value="scope-last-opened-items">Scope: last opened items</option>
+          <option value="scope-project-count">Scope: project count</option>
+          <option value="scope-note-count">Scope: note count</option>
+          <option value="inbox-question-count">Inbox: pending questions</option>
         </select>
       </label>
       <label class="data-callout-picker-field" data-callout-system-target-wrap hidden>
-        <span>Page target</span>
+        <span>Target</span>
         <select data-callout-input="systemTarget"></select>
       </label>
-      <label class="data-callout-picker-field">
-        <span>Format</span>
-        <select data-callout-input="systemFormat"></select>
+    <label class="data-callout-picker-field">
+      <span>Format</span>
+      <select data-callout-input="systemFormat"></select>
+    </label>
+      <label class="data-callout-picker-field" data-callout-project-image-wrap hidden>
+        <span>Item image</span>
+        <select data-callout-input="showProjectImage">
+          <option value="true">On</option>
+          <option value="false">Off</option>
+        </select>
+      </label>
+      <label class="data-callout-picker-field" data-callout-project-image-layout-wrap hidden>
+        <span>Image placement</span>
+        <select data-callout-input="projectImageLayout">
+          <option value="side">Left side</option>
+          <option value="top">Image on top</option>
+        </select>
+      </label>
+      <label class="data-callout-picker-field" data-callout-project-image-size-wrap hidden>
+        <span>Image size</span>
+        <select data-callout-input="projectImageSize">
+          <option value="sm">Small</option>
+          <option value="md">Medium</option>
+          <option value="lg">Large</option>
+          <option value="xl">XL</option>
+          <option value="xxl">XXL</option>
+        </select>
       </label>
     </div>
     <div class="data-callout-picker-divider"></div>
@@ -4874,6 +5801,12 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const systemTargetWrap = picker.querySelector('[data-callout-system-target-wrap]');
   const systemTargetSelect = picker.querySelector('[data-callout-input="systemTarget"]');
   const systemFormatSelect = picker.querySelector('[data-callout-input="systemFormat"]');
+  const projectImageWrap = picker.querySelector('[data-callout-project-image-wrap]');
+  const showProjectImageSelect = picker.querySelector('[data-callout-input="showProjectImage"]');
+  const projectImageLayoutWrap = picker.querySelector('[data-callout-project-image-layout-wrap]');
+  const projectImageLayoutSelect = picker.querySelector('[data-callout-input="projectImageLayout"]');
+  const projectImageSizeWrap = picker.querySelector('[data-callout-project-image-size-wrap]');
+  const projectImageSizeSelect = picker.querySelector('[data-callout-input="projectImageSize"]');
   const alignSelect = picker.querySelector('[data-callout-input="align"]');
   const sizeSelect = picker.querySelector('[data-callout-input="size"]');
   const labelPosSelect = picker.querySelector('[data-callout-input="labelPos"]');
@@ -4882,7 +5815,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const saveBtn = picker.querySelector('[data-callout-action="save"]');
   const clearBtn = picker.querySelector('[data-callout-action="clear"]');
 
-  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !showIconSelect || !iconInput || !saveBtn || !clearBtn) {
+  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !projectImageWrap || !showProjectImageSelect || !projectImageLayoutWrap || !projectImageLayoutSelect || !projectImageSizeWrap || !projectImageSizeSelect || !showIconSelect || !iconInput || !saveBtn || !clearBtn) {
     closeDataCalloutPicker();
     return;
   }
@@ -4895,6 +5828,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
   if (sizeSelect) sizeSelect.value = normalizeDataCalloutSize(config.size || "md");
   if (labelPosSelect) labelPosSelect.value = normalizeDataCalloutLabelPos(config.labelPos || "below");
   showIconSelect.value = config.showIcon ? "true" : "false";
+  showProjectImageSelect.value = config.showProjectImage ? "true" : "false";
+  projectImageLayoutSelect.value = normalizeDataCalloutImageLayout(config.projectImageLayout || "side");
+  projectImageSizeSelect.value = normalizeDataCalloutImageSize(config.projectImageSize || "md");
   iconInput.value = config.icon || "";
 
   sourceSelect.innerHTML = '<option value="">Choose a table...</option>' + sources.map((source) => {
@@ -5007,7 +5943,22 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const refreshSystemOptions = () => {
     const systemKey = normalizeDataCalloutSystemKey(systemKeySelect.value || "current-date");
     fillSystemFormatOptions(systemKey, systemFormatSelect.value || config.systemFormat || "");
-    const shouldShowTarget = systemKey === "page-activity";
+    const isLastOpened = systemKey === "domain-last-opened-projects" || systemKey === "scope-last-opened-items";
+    const imageEligible = isLastOpened && Number(systemFormatSelect.value || 0) <= 3;
+    projectImageWrap.hidden = !imageEligible;
+    showProjectImageSelect.disabled = !imageEligible;
+    const imageControlsEnabled = imageEligible && showProjectImageSelect.value !== "false";
+    projectImageLayoutWrap.hidden = !imageControlsEnabled;
+    projectImageLayoutSelect.disabled = !imageControlsEnabled;
+    projectImageSizeWrap.hidden = !imageControlsEnabled;
+    projectImageSizeSelect.disabled = !imageControlsEnabled;
+    const shouldShowTarget = systemKey === "page-activity"
+      || systemKey === "domain-last-opened-projects"
+      || systemKey === "domain-project-count"
+      || systemKey === "domain-note-count"
+      || systemKey === "scope-last-opened-items"
+      || systemKey === "scope-project-count"
+      || systemKey === "scope-note-count";
     systemTargetWrap.hidden = !shouldShowTarget;
     systemTargetSelect.disabled = !shouldShowTarget;
     if (shouldShowTarget) {
@@ -5042,6 +5993,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
     maybeSyncAutoLabel();
     refreshSystemOptions();
   });
+  systemFormatSelect.addEventListener("change", refreshSystemOptions);
+  showProjectImageSelect.addEventListener("change", refreshSystemOptions);
   showIconSelect.addEventListener("change", syncIconInputs);
 
   refreshDependentOptions();
@@ -5071,14 +6024,33 @@ function openDataCalloutPicker(block, anchorEl = null) {
         mode: "row",
         rowId: "",
         systemKey,
-        systemTargetKind: systemKey === "page-activity" ? targetInfo.targetKind : "current",
-        systemTargetPageId: systemKey === "page-activity" && targetInfo.targetKind === "page" ? targetInfo.pageId : "",
+        systemTargetKind: (
+          systemKey === "page-activity"
+          || systemKey === "domain-last-opened-projects"
+          || systemKey === "domain-project-count"
+          || systemKey === "domain-note-count"
+          || systemKey === "scope-last-opened-items"
+          || systemKey === "scope-project-count"
+          || systemKey === "scope-note-count"
+        ) ? targetInfo.targetKind : "current",
+        systemTargetPageId: (
+          systemKey === "page-activity"
+          || systemKey === "domain-last-opened-projects"
+          || systemKey === "domain-project-count"
+          || systemKey === "domain-note-count"
+          || systemKey === "scope-last-opened-items"
+          || systemKey === "scope-project-count"
+          || systemKey === "scope-note-count"
+        ) && targetInfo.targetKind === "page" ? targetInfo.pageId : "",
         systemFormat: systemFormatSelect.value || "",
         align: alignSelect?.value || "left",
         size: sizeSelect?.value || "md",
         labelPos: labelPosSelect?.value || "below",
         showIcon: showIconSelect.value === "true",
-        icon: iconInput.value || ""
+        icon: iconInput.value || "",
+        showProjectImage: showProjectImageSelect.value !== "false",
+        projectImageLayout: projectImageLayoutSelect.value || "side",
+        projectImageSize: projectImageSizeSelect.value || "md"
       });
 
       renderDataCalloutBlock(block);
@@ -5121,7 +6093,10 @@ function openDataCalloutPicker(block, anchorEl = null) {
       size: sizeSelect?.value || "md",
       labelPos: labelPosSelect?.value || "below",
       showIcon: showIconSelect.value === "true",
-      icon: iconInput.value || ""
+      icon: iconInput.value || "",
+      showProjectImage: showProjectImageSelect.value !== "false",
+      projectImageLayout: projectImageLayoutSelect.value || "side",
+      projectImageSize: projectImageSizeSelect.value || "md"
     });
 
     renderDataCalloutBlock(block);
@@ -5148,7 +6123,10 @@ function openDataCalloutPicker(block, anchorEl = null) {
       size: sizeSelect?.value || "md",
       labelPos: labelPosSelect?.value || "below",
       showIcon: showIconSelect.value === "true",
-      icon: iconInput.value || ""
+      icon: iconInput.value || "",
+      showProjectImage: showProjectImageSelect.value !== "false",
+      projectImageLayout: projectImageLayoutSelect.value || "side",
+      projectImageSize: projectImageSizeSelect.value || "md"
     });
     renderDataCalloutBlock(block);
     if (typeof saveState === "function") saveState();
@@ -5192,9 +6170,590 @@ function parseFlashcardsJSON(raw, fallback) {
   }
 }
 
+const STUDY_ACTIVITY_STORAGE_KEY = "sanctum.studyActivity.v1";
+const STUDY_ACTIVITY_MAX_ITEMS = 2000;
+
+function createStudyActivityId(prefix = "study") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getStudyDayKey(date = new Date()) {
+  const value = date instanceof Date ? date : new Date(date);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function readStudyActivityLog() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STUDY_ACTIVITY_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === "object") : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function writeStudyActivityLog(items = []) {
+  const trimmed = items
+    .filter(Boolean)
+    .sort((left, right) => String(right.timestamp || "").localeCompare(String(left.timestamp || "")))
+    .slice(0, STUDY_ACTIVITY_MAX_ITEMS);
+  try {
+    localStorage.setItem(STUDY_ACTIVITY_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (_error) {
+    localStorage.setItem(STUDY_ACTIVITY_STORAGE_KEY, JSON.stringify(trimmed.slice(0, 500)));
+  }
+}
+
+function getBlockStudySessionId(block, reset = false) {
+  if (!block) return "";
+  if (reset || !block.dataset.studySessionId) {
+    block.dataset.studySessionId = createStudyActivityId("session");
+  }
+  return block.dataset.studySessionId;
+}
+
+function createStudyPromptKey(payload = {}) {
+  return [
+    payload.tool || "",
+    payload.rowId || "",
+    payload.prompt || "",
+    payload.expected || ""
+  ].map((part) => String(part || "")).join("|");
+}
+
+function markStudyPromptSeen(block, payload = {}) {
+  if (!block) return;
+  const key = createStudyPromptKey(payload);
+  if (!key.trim()) return;
+  if (block.dataset.studyPromptKey === key) return;
+  block.dataset.studyPromptKey = key;
+  block.dataset.studyPromptStartedAt = String(Date.now());
+}
+
+function getStudyPromptDuration(block, payload = {}) {
+  if (!block) return 0;
+  const key = createStudyPromptKey(payload);
+  const started = Number(block.dataset.studyPromptStartedAt || 0) || 0;
+  if (!started || block.dataset.studyPromptKey !== key) return 0;
+  return Math.max(0, Date.now() - started);
+}
+
+function getStudyActivitySourceFromConfig(config = {}) {
+  return {
+    kind: config.sourceKind === "block" ? "block" : "page",
+    pageId: String(config.sourcePageId || "").trim(),
+    blockId: config.sourceKind === "block" ? String(config.sourceBlockId || "").trim() : ""
+  };
+}
+
+function getStudyActivitySourceTitle(config = {}) {
+  const sourceData = typeof window.getDatabaseCalloutSourceData === "function"
+    ? window.getDatabaseCalloutSourceData(getStudyActivitySourceFromConfig(config))
+    : null;
+  return sourceData?.database?.title || "";
+}
+
+function recordStudyActivity(block, config = {}, payload = {}) {
+  const now = new Date();
+  const entry = {
+    id: createStudyActivityId("activity"),
+    timestamp: now.toISOString(),
+    day: getStudyDayKey(now),
+    sessionId: getBlockStudySessionId(block),
+    tool: String(payload.tool || block?.dataset?.type || "study"),
+    blockId: String(block?.id || ""),
+    pageId: typeof window.getCurrentPageId === "function" ? String(window.getCurrentPageId() || "") : "",
+    sourceKind: config.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(config.sourcePageId || ""),
+    sourceBlockId: config.sourceKind === "block" ? String(config.sourceBlockId || "") : "",
+    sourceTitle: String(payload.sourceTitle || getStudyActivitySourceTitle(config) || ""),
+    rowId: String(payload.rowId || ""),
+    prompt: String(payload.prompt || ""),
+    answer: String(payload.answer || ""),
+    expected: String(payload.expected || ""),
+    result: ["correct", "incorrect", "skipped"].includes(payload.result) ? payload.result : "correct",
+    total: Math.max(0, Number(payload.total || 0) || 0),
+    durationMs: Math.max(0, Number(payload.durationMs || 0) || 0)
+  };
+  writeStudyActivityLog([entry, ...readStudyActivityLog()]);
+  renderStudyDashboardBlocks();
+  window.dispatchEvent(new CustomEvent("sanctum:study-activity", { detail: entry }));
+  return entry;
+}
+
+function normalizeStudyDashboardConfig(raw = {}, fallbackTitle = "") {
+  const scope = ["all", "page", "session"].includes(raw?.scope) ? raw.scope : "all";
+  const streakShape = ["pill", "dot", "square"].includes(raw?.streakShape) ? raw.streakShape : "pill";
+  const progressStyle = ["ring", "bar"].includes(raw?.progressStyle) ? raw.progressStyle : "ring";
+  const recentMarker = ["dot", "bar", "symbol", "none"].includes(raw?.recentMarker) ? raw.recentMarker : "dot";
+  return {
+    title: String(raw?.title || fallbackTitle || "Study").trim(),
+    scope,
+    limit: Math.max(3, Math.min(20, Number(raw?.limit || 5) || 5)),
+    accentColor: String(raw?.accentColor || "").trim(),
+    trackColor: String(raw?.trackColor || "").trim(),
+    freezeColor: String(raw?.freezeColor || "").trim(),
+    freezesEnabled: raw?.freezesEnabled === true || raw?.freezesEnabled === "true",
+    freezeCount: Math.max(0, Math.min(365, Number(raw?.freezeCount || 0) || 0)),
+    showHeader: raw?.showHeader !== false,
+    streakShape,
+    progressStyle,
+    recentMarker
+  };
+}
+
+function readStudyDashboardConfig(block, fallbackTitle = "") {
+  return normalizeStudyDashboardConfig(parseFlashcardsJSON(block?.dataset.studyDashboardConfig || "", {}), fallbackTitle);
+}
+
+function writeStudyDashboardConfig(block, config, fallbackTitle = "") {
+  if (!block) return;
+  block.dataset.studyDashboardConfig = JSON.stringify(normalizeStudyDashboardConfig(config, fallbackTitle));
+}
+
+function getStudyActivitiesForWidget(block, config = {}) {
+  const currentPageId = typeof window.getCurrentPageId === "function" ? String(window.getCurrentPageId() || "") : "";
+  const log = readStudyActivityLog();
+  if (config.scope === "page") return log.filter((entry) => entry.pageId === currentPageId || entry.sourcePageId === currentPageId);
+  if (config.scope === "session") {
+    const latest = log[0]?.sessionId || "";
+    return latest ? log.filter((entry) => entry.sessionId === latest) : [];
+  }
+  return log;
+}
+
+function computeStudyStreak(entries = []) {
+  const days = new Set(entries.map((entry) => entry.day).filter(Boolean));
+  let streak = 0;
+  const cursor = new Date();
+  while (days.has(getStudyDayKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function addStudyDays(date, offset) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + offset);
+  return next;
+}
+
+function computeStudyStreakState(entries = [], config = {}) {
+  const activeDays = new Set(entries.map((entry) => entry.day).filter(Boolean));
+  const frozenDays = new Set();
+  const today = new Date();
+  let cursor = activeDays.has(getStudyDayKey(today)) ? today : addStudyDays(today, -1);
+  let freezesLeft = config.freezesEnabled ? Math.max(0, Number(config.freezeCount || 0) || 0) : 0;
+  let streak = 0;
+
+  while (true) {
+    const key = getStudyDayKey(cursor);
+    if (activeDays.has(key)) {
+      streak += 1;
+    } else if (freezesLeft > 0) {
+      freezesLeft -= 1;
+      frozenDays.add(key);
+    } else {
+      break;
+    }
+    cursor = addStudyDays(cursor, -1);
+  }
+
+  return { streak, activeDays, frozenDays };
+}
+
+function applyStudyDashboardStyles(block, config = {}) {
+  const shell = block?.querySelector(".study-widget-shell");
+  if (!shell) return;
+  const accent = config.accentColor || "var(--accent)";
+  const track = config.trackColor || "color-mix(in srgb, currentColor 16%, transparent)";
+  const freeze = config.freezeColor || "color-mix(in srgb, #8dbdff 78%, currentColor)";
+  block.style.setProperty("--study-accent", accent);
+  block.style.setProperty("--study-track", track);
+  block.style.setProperty("--study-freeze", freeze);
+  shell.style.setProperty("--study-accent", accent);
+  shell.style.setProperty("--study-track", track);
+  shell.style.setProperty("--study-freeze", freeze);
+  shell.dataset.chrome = config.showHeader ? "shown" : "minimal";
+  shell.dataset.streakShape = config.streakShape || "pill";
+  shell.dataset.progressStyle = config.progressStyle || "ring";
+  shell.dataset.recentMarker = config.recentMarker || "dot";
+}
+
+function formatStudyDuration(ms = 0) {
+  const value = Math.max(0, Number(ms || 0) || 0);
+  if (!value) return "";
+  const seconds = Math.max(1, Math.round(value / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.round(seconds / 60)}m`;
+}
+
+function renderSessionProgressWidget(block) {
+  const config = readStudyDashboardConfig(block, "Session Progress");
+  applyStudyDashboardStyles(block, config);
+  const entries = getStudyActivitiesForWidget(block, { ...config, scope: config.scope === "all" ? "session" : config.scope });
+  const attempted = entries.filter((entry) => entry.result === "correct" || entry.result === "incorrect");
+  const correct = attempted.filter((entry) => entry.result === "correct").length;
+  const incorrect = attempted.filter((entry) => entry.result === "incorrect").length;
+  const skipped = entries.filter((entry) => entry.result === "skipped").length;
+  const total = Math.max(...entries.map((entry) => Number(entry.total || 0) || 0), 0);
+  const remaining = total ? Math.max(0, total - attempted.length - skipped) : 0;
+  const graded = correct + incorrect;
+  const percent = graded ? Math.max(0, Math.min(100, Math.round((correct / graded) * 100))) : 0;
+  block.querySelector(".study-widget-title").textContent = config.title || "Session Progress";
+  block.querySelector(".study-progress-ring")?.style.setProperty("--study-progress", `${percent}%`);
+  block.querySelector(".study-progress-ring-value").textContent = `${percent}%`;
+  block.querySelector('[data-study-progress="correct"]').textContent = String(correct);
+  block.querySelector('[data-study-progress="incorrect"]').textContent = String(incorrect);
+  block.querySelector('[data-study-progress="remaining"]').textContent = String(remaining);
+}
+
+function renderDailyStreakWidget(block) {
+  const config = readStudyDashboardConfig(block, "Current Streak");
+  applyStudyDashboardStyles(block, config);
+  const entries = getStudyActivitiesForWidget(block, config);
+  const { streak, activeDays, frozenDays } = computeStudyStreakState(entries, config);
+  block.querySelector(".study-widget-title").textContent = config.title || "Current Streak";
+  block.querySelector(".daily-streak-number").textContent = String(streak);
+  const dots = block.querySelector(".daily-streak-dots");
+  if (dots) {
+    const today = new Date();
+    dots.innerHTML = Array.from({ length: 7 }, (_item, index) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() - (6 - index));
+      const key = getStudyDayKey(day);
+      const active = activeDays.has(key);
+      const frozen = frozenDays.has(key);
+      return `<span class="${active ? "active" : frozen ? "frozen" : ""}" title="${frozen ? "Freeze used" : active ? "Studied" : "No activity"}"></span>`;
+    }).join("");
+  }
+}
+
+function renderRecentAnswersWidget(block) {
+  const config = readStudyDashboardConfig(block, "Recent Answers");
+  applyStudyDashboardStyles(block, config);
+  const entries = getStudyActivitiesForWidget(block, config).slice(0, config.limit);
+  const list = block.querySelector(".recent-answers-list");
+  block.querySelector(".study-widget-title").textContent = config.title || "Recent Answers";
+  if (!list) return;
+  if (!entries.length) {
+    list.innerHTML = `<div class="recent-answer-empty">No study answers yet.</div>`;
+    return;
+  }
+  list.innerHTML = entries.map((entry, index) => `
+    <div class="recent-answer-row" data-result="${escapeHTML(entry.result)}">
+      <span class="recent-answer-index">${index + 1}</span>
+      <span class="recent-answer-main"><strong>${escapeHTML(entry.prompt || entry.rowId || "Study item")}</strong><small>${escapeHTML(entry.answer || entry.expected || entry.sourceTitle || entry.tool)}</small></span>
+      <span class="recent-answer-mark" title="${escapeHTML(entry.result)}"></span>
+      <span class="recent-answer-time">${escapeHTML(formatStudyDuration(entry.durationMs))}</span>
+    </div>
+  `).join("");
+}
+
+function renderStudyDashboardBlock(block) {
+  if (!block) return null;
+  if (block.dataset.type === "session-progress") renderSessionProgressWidget(block);
+  if (block.dataset.type === "daily-streak") renderDailyStreakWidget(block);
+  if (block.dataset.type === "recent-answers") renderRecentAnswersWidget(block);
+  return block;
+}
+
+function renderStudyDashboardBlocks() {
+  document.querySelectorAll('.block[data-type="session-progress"], .block[data-type="daily-streak"], .block[data-type="recent-answers"]').forEach((block) => {
+    renderStudyDashboardBlock(block);
+  });
+}
+
+function closeStudyDashboardPicker() {
+  document.querySelector(".topbar-dropdown.study-widget-picker")?.remove();
+}
+
+function openStudyDashboardPicker(block, anchorEl = null) {
+  if (!block || !["session-progress", "daily-streak", "recent-answers"].includes(block.dataset.type)) return;
+  closeStudyDashboardPicker();
+  const fallback = block.dataset.type === "session-progress" ? "Session Progress" : block.dataset.type === "daily-streak" ? "Current Streak" : "Recent Answers";
+  const config = readStudyDashboardConfig(block, fallback);
+  const isSession = block.dataset.type === "session-progress";
+  const isStreak = block.dataset.type === "daily-streak";
+  const isRecent = block.dataset.type === "recent-answers";
+  const picker = document.createElement("div");
+  picker.className = "topbar-dropdown study-widget-picker";
+  picker.dataset.uiId = "studyWidgetPicker";
+  picker.innerHTML = `
+    <div class="study-widget-picker-head">
+      <strong>${escapeHTML(fallback)}</strong>
+      <button type="button" data-study-widget-picker="close" aria-label="Close">×</button>
+    </div>
+    <div class="study-widget-picker-body">
+      <label class="study-widget-picker-field"><span>Title</span><input type="text" data-study-widget-input="title" value="${escapeHTML(config.title)}" /></label>
+      <label class="study-widget-picker-field"><span>${isRecent ? "History" : "Scope"}</span><select data-study-widget-input="scope">
+        <option value="all">All study activity</option>
+        <option value="page">This page</option>
+        <option value="session">Latest session</option>
+      </select></label>
+      <details open class="study-widget-picker-section">
+        <summary>Style</summary>
+        <div class="study-widget-picker-grid${isRecent ? " single" : ""}">
+          <label class="study-widget-picker-field"><span>Accent</span><input type="color" data-study-widget-input="accentColor" value="${escapeHTML(config.accentColor || "#9fe870")}" /></label>
+          ${isRecent ? "" : `<label class="study-widget-picker-field"><span>Track</span><input type="color" data-study-widget-input="trackColor" value="${escapeHTML(config.trackColor || "#3a3a3a")}" /></label>`}
+        </div>
+        <button type="button" class="topbar-dropdown-btn" data-study-widget-picker="clear-colors">Use theme colors</button>
+      </details>
+      ${isSession ? `
+        <details open class="study-widget-picker-section">
+          <summary>Progress</summary>
+          <label class="study-widget-picker-field"><span>Display</span><select data-study-widget-input="progressStyle">
+            <option value="ring">Ring</option>
+            <option value="bar">Bar</option>
+          </select></label>
+        </details>
+      ` : ""}
+      ${isStreak ? `
+        <details open class="study-widget-picker-section">
+          <summary>Streak</summary>
+          <label class="study-widget-picker-field"><span>Shape</span><select data-study-widget-input="streakShape">
+            <option value="pill">Pills</option>
+            <option value="dot">Dots</option>
+            <option value="square">Squares</option>
+          </select></label>
+          <label class="study-widget-picker-check"><input type="checkbox" data-study-widget-input="freezesEnabled" /> Use freezes</label>
+          <div class="study-widget-picker-grid">
+            <label class="study-widget-picker-field"><span>Freeze count</span><input type="number" min="0" max="365" step="1" data-study-widget-input="freezeCount" value="${config.freezeCount}" /></label>
+            <label class="study-widget-picker-field"><span>Freeze color</span><input type="color" data-study-widget-input="freezeColor" value="${escapeHTML(config.freezeColor || "#8dbdff")}" /></label>
+          </div>
+        </details>
+      ` : ""}
+      ${isRecent ? `
+        <details open class="study-widget-picker-section">
+          <summary>List</summary>
+          <label class="study-widget-picker-field"><span>Rows shown</span><input type="number" min="3" max="20" step="1" data-study-widget-input="limit" value="${config.limit}" /></label>
+          <label class="study-widget-picker-field"><span>Status marker</span><select data-study-widget-input="recentMarker">
+            <option value="dot">Dot</option>
+            <option value="symbol">Small check / x</option>
+            <option value="bar">Side bar</option>
+            <option value="none">None</option>
+          </select></label>
+        </details>
+      ` : ""}
+      <details open class="study-widget-picker-section">
+        <summary>Chrome</summary>
+        <label class="study-widget-picker-check"><input type="checkbox" data-study-widget-input="showHeader" /> Show title/settings row</label>
+      </details>
+    </div>
+    <div class="study-widget-picker-footer">
+      <button type="button" class="topbar-dropdown-btn" data-study-widget-picker="save">Save</button>
+    </div>
+  `;
+
+  document.body.appendChild(picker);
+  const setValue = (name, value) => {
+    const input = picker.querySelector(`[data-study-widget-input="${name}"]`);
+    if (!input) return;
+    if (input.type === "checkbox") input.checked = !!value;
+    else input.value = value;
+  };
+  setValue("scope", config.scope);
+  setValue("progressStyle", config.progressStyle);
+  setValue("streakShape", config.streakShape);
+  setValue("recentMarker", config.recentMarker);
+  setValue("freezesEnabled", config.freezesEnabled);
+  setValue("showHeader", config.showHeader);
+  const anchorTarget = anchorEl || block.querySelector(".study-widget-config-btn") || block;
+  positionTypingDrillPicker(picker, block, anchorTarget);
+  watchStudyToolPickerPosition(picker, block, anchorTarget);
+  openOverlay("studyWidgetPicker", picker);
+
+  const readNext = () => {
+    const value = (name, fallbackValue = "") => picker.querySelector(`[data-study-widget-input="${name}"]`)?.value ?? fallbackValue;
+    const checked = (name) => !!picker.querySelector(`[data-study-widget-input="${name}"]`)?.checked;
+    const accentColor = value("accentColor", config.accentColor);
+    const trackColor = value("trackColor", config.trackColor);
+    const freezeColor = value("freezeColor", config.freezeColor);
+    return normalizeStudyDashboardConfig({
+      ...config,
+      title: value("title", config.title),
+      scope: value("scope", config.scope),
+      accentColor,
+      trackColor,
+      freezeColor,
+      freezesEnabled: checked("freezesEnabled"),
+      freezeCount: value("freezeCount", config.freezeCount),
+      showHeader: checked("showHeader"),
+      streakShape: value("streakShape", config.streakShape),
+      progressStyle: value("progressStyle", config.progressStyle),
+      recentMarker: value("recentMarker", config.recentMarker),
+      limit: value("limit", config.limit)
+    }, fallback);
+  };
+
+  picker.addEventListener("mousedown", (event) => event.stopPropagation());
+  picker.addEventListener("input", (event) => {
+    if (event.target.closest('[data-study-widget-input="accentColor"], [data-study-widget-input="trackColor"]')) {
+      delete picker.dataset.clearStudyColors;
+    }
+  });
+  const saveStudyWidgetDraft = () => {
+    const next = readNext();
+    if (picker.dataset.clearStudyColors === "true") {
+      next.accentColor = "";
+      next.trackColor = "";
+    }
+    writeStudyDashboardConfig(block, next, fallback);
+    applyStudyDashboardStyles(block, next);
+    const titleEl = block.querySelector(".study-widget-title");
+    if (titleEl) titleEl.textContent = next.title || fallback;
+    const shell = block.querySelector(".study-widget-shell");
+    if (shell) {
+      shell.dataset.streakShape = next.streakShape || "pill";
+      shell.dataset.progressStyle = next.progressStyle || "ring";
+      shell.dataset.recentMarker = next.recentMarker || "dot";
+      shell.dataset.chrome = next.showHeader ? "shown" : "minimal";
+    }
+    if (typeof saveState === "function") saveState();
+  };
+  picker.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-study-widget-picker]")?.dataset.studyWidgetPicker;
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (action === "close") {
+      renderStudyDashboardBlock(block);
+      closeStudyDashboardPicker();
+      return;
+    }
+    if (action === "clear-colors") {
+      const accent = picker.querySelector('[data-study-widget-input="accentColor"]');
+      const track = picker.querySelector('[data-study-widget-input="trackColor"]');
+      if (accent) accent.value = "#9fe870";
+      if (track) track.value = "#3a3a3a";
+      picker.dataset.clearStudyColors = "true";
+      const next = readNext();
+      next.accentColor = "";
+      next.trackColor = "";
+      writeStudyDashboardConfig(block, next, fallback);
+      applyStudyDashboardStyles(block, next);
+      renderStudyDashboardBlock(block);
+      if (typeof saveState === "function") saveState();
+      return;
+    }
+    if (action === "save") {
+      const next = readNext();
+      if (picker.dataset.clearStudyColors === "true") {
+        next.accentColor = "";
+        next.trackColor = "";
+      }
+      writeStudyDashboardConfig(block, next, fallback);
+      renderStudyDashboardBlock(block);
+      if (typeof saveState === "function") saveState();
+      closeStudyDashboardPicker();
+    }
+  });
+
+  picker.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-study-widget-input]")) return;
+    saveStudyWidgetDraft();
+  });
+  picker.addEventListener("change", (event) => {
+    if (!event.target.closest("[data-study-widget-input]")) return;
+    saveStudyWidgetDraft();
+  });
+}
+
+window.mountStudyDashboardBlock = function mountStudyDashboardBlock(block) {
+  if (!block || !["session-progress", "daily-streak", "recent-answers"].includes(block.dataset.type)) return null;
+  const fallback = block.dataset.type === "session-progress" ? "Session Progress" : block.dataset.type === "daily-streak" ? "Current Streak" : "Recent Answers";
+  if (!block.dataset.studyDashboardConfig) writeStudyDashboardConfig(block, { title: fallback }, fallback);
+  renderStudyDashboardBlock(block);
+  return block;
+};
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    renderStudyDashboardBlocks();
+  }, { once: true });
+} else {
+  renderStudyDashboardBlocks();
+}
+
 function normalizeFlashcardDeckSourceType(value = "") {
   const safe = String(value || "").trim().toLowerCase();
   return safe === "database" ? "database" : "manual";
+}
+
+function normalizeStudyScoreWriteback(raw = {}, defaults = {}) {
+  const numberOrDefault = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const defaultCorrect = numberOrDefault(defaults.correctChange, 1);
+  const defaultIncorrect = numberOrDefault(defaults.incorrectChange, -1);
+  return {
+    scoreFieldId: String(raw?.scoreFieldId || "").trim(),
+    correctChange: numberOrDefault(raw?.correctChange, defaultCorrect),
+    incorrectChange: numberOrDefault(raw?.incorrectChange, defaultIncorrect)
+  };
+}
+
+function applyStudyScoreWriteback(config, rowId, isCorrect) {
+  const scoring = normalizeStudyScoreWriteback(config?.scoring || {});
+  if (!rowId || !scoring.scoreFieldId || typeof window.updateDatabaseRowScore !== "function") return false;
+  return window.updateDatabaseRowScore({
+    kind: config.sourceKind === "block" ? "block" : "page",
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  }, rowId, scoring.scoreFieldId, isCorrect ? scoring.correctChange : scoring.incorrectChange);
+}
+
+function buildStudyScoreSettingsHTML(prefix = "study-score", fieldClass = "typing-drill-picker-field", gridClass = "typing-drill-picker-grid", options = {}) {
+  const includeIncorrect = options.includeIncorrect !== false;
+  return `
+    <label class="${fieldClass}"><span>Score number field</span><select data-study-score="${prefix}-field"></select></label>
+    <div class="${gridClass}">
+      <label class="${fieldClass}"><span>Correct change</span><input type="number" step="any" data-study-score="${prefix}-correct" /></label>
+      ${includeIncorrect ? `<label class="${fieldClass}"><span>Incorrect change</span><input type="number" step="any" data-study-score="${prefix}-incorrect" /></label>` : ""}
+    </div>
+    <div class="typing-drill-picker-help">Score never goes below 0. To change a real Status field from this score or a formula, use Status automations in the database settings.</div>`;
+}
+
+function readStudyScoreSettings(container, prefix = "study-score", fallback = {}, defaults = {}) {
+  const base = normalizeStudyScoreWriteback(fallback, defaults);
+  const value = (suffix, defaultValue = "") => {
+    const input = container?.querySelector(`[data-study-score="${prefix}-${suffix}"]`);
+    if (!input) return defaultValue;
+    if (input.dataset.studyScoreReady !== "true") return defaultValue;
+    if (input instanceof HTMLSelectElement && !input.options.length) return defaultValue;
+    return input.value;
+  };
+  return normalizeStudyScoreWriteback({
+    scoreFieldId: value("field", base.scoreFieldId),
+    correctChange: value("correct", base.correctChange),
+    incorrectChange: value("incorrect", base.incorrectChange)
+  }, defaults);
+}
+
+function syncStudyScoreSettings(container, prefix = "study-score", properties = [], config = {}, defaults = {}) {
+  const scoring = normalizeStudyScoreWriteback(config, defaults);
+  const fill = (suffix, types, selected) => {
+    const select = container?.querySelector(`[data-study-score="${prefix}-${suffix}"]`);
+    if (!select) return;
+    const options = [{ value: "", label: "None" }].concat((properties || [])
+      .filter((property) => types.includes(property.type))
+      .map((property) => ({ value: property.id, label: property.name || "Property" })));
+    select.innerHTML = options.map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`).join("");
+    select.value = selected || "";
+    select.dataset.studyScoreReady = "true";
+  };
+  fill("field", ["number"], scoring.scoreFieldId);
+  ["correct", "incorrect"].forEach((suffix) => {
+    const input = container?.querySelector(`[data-study-score="${prefix}-${suffix}"]`);
+    if (!input) return;
+    const map = {
+      correct: scoring.correctChange,
+      incorrect: scoring.incorrectChange
+    };
+    input.value = String(map[suffix] ?? "");
+    input.dataset.studyScoreReady = "true";
+  });
 }
 
 function normalizeFlashcardDeckTemplate(value = "") {
@@ -5312,17 +6871,6 @@ function normalizeFlashcardDeckFilters(raw = []) {
   })).filter((filter) => filter.propertyId);
 }
 
-function normalizeFlashcardDeckStudy(raw = {}) {
-  return {
-    setPropertyId: String(raw?.setPropertyId || "").trim(),
-    setValue: String(raw?.setValue || "").trim(),
-    countPropertyId: String(raw?.countPropertyId || "").trim(),
-    stagePropertyId: String(raw?.stagePropertyId || "").trim(),
-    stageReviewCount: Math.max(0, Number(raw?.stageReviewCount || 0) || 0),
-    stageValue: String(raw?.stageValue || "").trim()
-  };
-}
-
 function normalizeFlashcardDeckConfig(raw = {}) {
   const manualCards = Array.isArray(raw?.manualCards) ? raw.manualCards : [];
   const normalizedCards = manualCards.length
@@ -5352,7 +6900,7 @@ function normalizeFlashcardDeckConfig(raw = {}) {
     backgroundImage: String(raw?.backgroundImage || "").trim(),
     mappings: normalizeFlashcardDeckMappings(raw?.mappings || {}),
     filters: normalizeFlashcardDeckFilters(raw?.filters || []),
-    study: normalizeFlashcardDeckStudy(raw?.study || {}),
+    scoring: normalizeStudyScoreWriteback(raw?.scoring || raw?.study?.scoring || {}, { correctChange: 0.5, incorrectChange: 0 }),
     manualCards: normalizedCards,
     cardOverrides: normalizeFlashcardDeckOverrides(raw?.cardOverrides || {}),
     currentIndex,
@@ -5484,45 +7032,11 @@ function getFlashcardDeckCurrentCard(config) {
   };
 }
 
-function applyFlashcardDeckStudyAction(block, options = {}) {
-  if (!block || typeof window.updateDatabaseSourceRowValues !== "function") return false;
-  const includeSet = options.includeSet !== false;
-  const includeCount = options.includeCount !== false;
-  const includeStage = options.includeStage !== false;
+function applyFlashcardScoreAction(block, isCorrect) {
   const config = readFlashcardDeckConfig(block);
   if (config.sourceType !== "database") return false;
   const { card } = getFlashcardDeckCurrentCard(config);
-  if (!card?.sourceRowId) return false;
-  const sourceData = getFlashcardDeckDatabaseSourceData(config);
-  const row = sourceData?.database?.rows?.find((entry) => entry?.id === card.sourceRowId) || null;
-  if (!row) return false;
-
-  const patch = {};
-  const properties = sourceData?.database?.properties || [];
-  const setProperty = getFlashcardDeckProperty(properties, config.study.setPropertyId);
-  if (includeSet && setProperty && config.study.setValue) {
-    patch[setProperty.id] = config.study.setValue;
-  }
-
-  const countProperty = getFlashcardDeckProperty(properties, config.study.countPropertyId);
-  let nextReviewCount = 0;
-  if (includeCount && countProperty && countProperty.type === "number") {
-    const currentCount = Number(row.values?.[countProperty.id] || 0);
-    nextReviewCount = (Number.isFinite(currentCount) ? currentCount : 0) + 1;
-    patch[countProperty.id] = String(nextReviewCount);
-  }
-
-  const stageProperty = getFlashcardDeckProperty(properties, config.study.stagePropertyId);
-  if (includeStage && stageProperty && config.study.stageReviewCount > 0 && nextReviewCount >= config.study.stageReviewCount && config.study.stageValue) {
-    patch[stageProperty.id] = config.study.stageValue;
-  }
-
-  if (!Object.keys(patch).length) return false;
-  return window.updateDatabaseSourceRowValues({
-    kind: config.sourceKind,
-    pageId: config.sourcePageId,
-    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
-  }, card.sourceRowId, patch);
+  return applyStudyScoreWriteback(config, card?.sourceRowId || "", isCorrect);
 }
 
 function ensureFlashcardDeckStructure(block) {
@@ -5581,7 +7095,6 @@ function renderFlashcardDeckBlock(block) {
   const backEl = block.querySelector(".flashcard-card-back");
   const prevBtn = block.querySelector('[data-flashcards-action="prev"]');
   const nextBtn = block.querySelector('[data-flashcards-action="next"]');
-  const studyBtn = block.querySelector('[data-flashcards-action="review"]');
   const { cards, card, index } = getFlashcardDeckCurrentCard(config);
   const total = cards.length;
 
@@ -5607,14 +7120,16 @@ function renderFlashcardDeckBlock(block) {
   }
   if (prevBtn) prevBtn.disabled = total <= 1;
   if (nextBtn) nextBtn.disabled = total <= 1;
-  if (studyBtn) {
-    const hasStudyAction = config.sourceType === "database" && (!!config.study.setPropertyId || !!config.study.countPropertyId);
-    studyBtn.hidden = config.sourceType !== "database";
-    studyBtn.disabled = !total || !hasStudyAction;
-  }
-
   renderFlashcardFace(frontEl, "front", card, !!config.showBack);
   renderFlashcardFace(backEl, "back", card, !!config.showBack);
+  if (card) {
+    markStudyPromptSeen(block, {
+      tool: "Flashcards",
+      rowId: card.sourceRowId || card.id || "",
+      prompt: [card.frontTitle, card.frontBody].filter(Boolean).join(" - "),
+      expected: [card.backTitle, card.backBody].filter(Boolean).join(" - ")
+    });
+  }
   return block;
 }
 
@@ -5933,54 +7448,19 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
   `;
   databaseWrapEl?.appendChild(filterControlsEl);
 
-  const studyControlsEl = document.createElement("details");
-  studyControlsEl.className = "flashcard-deck-picker-details";
-  studyControlsEl.open = true;
-  studyControlsEl.innerHTML = `
-    <summary>On studied</summary>
-    <label class="flashcard-deck-picker-field">
-      <span>Set property</span>
-      <select data-flashcards-input="studySetProperty"></select>
-    </label>
-    <label class="flashcard-deck-picker-field">
-      <span>Set value</span>
-      <input type="text" data-flashcards-input="studySetValue" list="flashcard-study-values" placeholder="Learning, Reviewed, etc." />
-      <datalist id="flashcard-study-values"></datalist>
-    </label>
-    <label class="flashcard-deck-picker-field">
-      <span>Increment number</span>
-      <select data-flashcards-input="studyCountProperty"></select>
-    </label>
-    <div class="flashcard-deck-picker-grid">
-      <label class="flashcard-deck-picker-field">
-        <span>After count</span>
-        <input type="number" min="0" step="1" data-flashcards-input="studyStageCount" placeholder="0" />
-      </label>
-      <label class="flashcard-deck-picker-field">
-        <span>Then set</span>
-        <select data-flashcards-input="studyStageProperty"></select>
-      </label>
-    </div>
-    <label class="flashcard-deck-picker-field">
-      <span>Stage value</span>
-      <input type="text" data-flashcards-input="studyStageValue" list="flashcard-stage-values" placeholder="Known, Mastered, etc." />
-      <datalist id="flashcard-stage-values"></datalist>
-    </label>
+  const scoreControlsEl = document.createElement("details");
+  scoreControlsEl.className = "flashcard-deck-picker-details";
+  scoreControlsEl.open = true;
+  scoreControlsEl.innerHTML = `
+    <summary>Score write-back</summary>
+    ${buildStudyScoreSettingsHTML("flashcards", "flashcard-deck-picker-field", "flashcard-deck-picker-grid", { includeIncorrect: false })}
   `;
-  studyPanelEl.appendChild(studyControlsEl);
+  studyPanelEl.appendChild(scoreControlsEl);
 
   const filterPropertySelect = picker.querySelector('[data-flashcards-input="filterProperty"]');
   const filterOperatorSelect = picker.querySelector('[data-flashcards-input="filterOperator"]');
   const filterValueInput = picker.querySelector('[data-flashcards-input="filterValue"]');
   const filterValuesList = picker.querySelector("#flashcard-filter-values");
-  const studySetPropertySelect = picker.querySelector('[data-flashcards-input="studySetProperty"]');
-  const studySetValueInput = picker.querySelector('[data-flashcards-input="studySetValue"]');
-  const studyValuesList = picker.querySelector("#flashcard-study-values");
-  const studyCountPropertySelect = picker.querySelector('[data-flashcards-input="studyCountProperty"]');
-  const studyStageCountInput = picker.querySelector('[data-flashcards-input="studyStageCount"]');
-  const studyStagePropertySelect = picker.querySelector('[data-flashcards-input="studyStageProperty"]');
-  const studyStageValueInput = picker.querySelector('[data-flashcards-input="studyStageValue"]');
-  const studyStageValuesList = picker.querySelector("#flashcard-stage-values");
 
   function setFlashcardPickerTab(tabName = "source") {
     const safeTab = ["source", "card", "study", "style"].includes(tabName) ? tabName : "source";
@@ -6148,14 +7628,7 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
         operator: filterOperatorSelect?.value || "is",
         value: inputValue(filterValueInput, baseConfig.filters[0]?.value || "")
       }] : [],
-      study: {
-        setPropertyId: selectValue(studySetPropertySelect, baseConfig.study.setPropertyId),
-        setValue: inputValue(studySetValueInput, baseConfig.study.setValue),
-        countPropertyId: selectValue(studyCountPropertySelect, baseConfig.study.countPropertyId),
-        stageReviewCount: Number(inputValue(studyStageCountInput, baseConfig.study.stageReviewCount ? String(baseConfig.study.stageReviewCount) : "") || 0) || 0,
-        stagePropertyId: selectValue(studyStagePropertySelect, baseConfig.study.stagePropertyId),
-        stageValue: inputValue(studyStageValueInput, baseConfig.study.stageValue)
-      }
+      scoring: readStudyScoreSettings(picker, "flashcards", baseConfig.scoring, { correctChange: 0.5, incorrectChange: 0 })
     });
     if (nextConfig.sourceType === "database") {
       const sourceData = getFlashcardDeckDatabaseSourceData(nextConfig);
@@ -6200,40 +7673,11 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
         filterValueInput.disabled = ["checked", "unchecked"].includes(filterOperatorSelect?.value || "");
         filterValueInput.dataset.flashcardsReady = "true";
       }
-      fillDatabasePropertySelect(studySetPropertySelect, properties, workingConfig.study.setPropertyId, {
-        types: ["text", "select", "status", "tag", "checkbox", "date", "number"]
-      });
-      const studyProperty = getFlashcardDeckProperty(properties, workingConfig.study.setPropertyId || "");
-      fillFlashcardValueDatalist(studyValuesList, studyProperty);
-      if (studySetValueInput) {
-        studySetValueInput.value = workingConfig.study.setValue || "";
-        studySetValueInput.disabled = !workingConfig.study.setPropertyId;
-        studySetValueInput.dataset.flashcardsReady = "true";
-      }
-      fillDatabasePropertySelect(studyCountPropertySelect, properties, workingConfig.study.countPropertyId, {
-        types: ["number"]
-      });
-      if (studyStageCountInput) {
-        studyStageCountInput.value = workingConfig.study.stageReviewCount ? String(workingConfig.study.stageReviewCount) : "";
-        studyStageCountInput.disabled = !workingConfig.study.countPropertyId;
-        studyStageCountInput.dataset.flashcardsReady = "true";
-      }
-      fillDatabasePropertySelect(studyStagePropertySelect, properties, workingConfig.study.stagePropertyId, {
-        types: ["text", "select", "status", "tag", "checkbox", "date", "number"]
-      });
-      const stageProperty = getFlashcardDeckProperty(properties, workingConfig.study.stagePropertyId || "");
-      fillFlashcardValueDatalist(studyStageValuesList, stageProperty);
-      if (studyStageValueInput) {
-        studyStageValueInput.value = workingConfig.study.stageValue || "";
-        studyStageValueInput.disabled = !workingConfig.study.stagePropertyId;
-        studyStageValueInput.dataset.flashcardsReady = "true";
-      }
+      syncStudyScoreSettings(picker, "flashcards", properties, workingConfig.scoring, { correctChange: 0.5, incorrectChange: 0 });
       workingConfig.mappings = mappings;
     } else {
       fillDatabasePropertySelect(filterPropertySelect, [], "");
-      fillDatabasePropertySelect(studySetPropertySelect, [], "");
-      fillDatabasePropertySelect(studyCountPropertySelect, [], "");
-      fillDatabasePropertySelect(studyStagePropertySelect, [], "");
+      syncStudyScoreSettings(picker, "flashcards", [], workingConfig.scoring, { correctChange: 0.5, incorrectChange: 0 });
     }
 
     const { cards, card, index } = getFlashcardDeckCurrentCard(workingConfig);
@@ -6323,7 +7767,8 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
     if (target === sourceTypeSelect || target === sourceSelect || target === templateSelect || target === surfaceSelect
       || target === frontTitleMapSelect || target === frontBodyMapSelect || target === backTitleMapSelect || target === backBodyMapSelect || target === imageMapSelect
       || target === textAlignSelect || target === verticalAlignSelect || target === titleSizeSelect || target === bodySizeSelect
-      || target === filterPropertySelect || target === filterOperatorSelect || target === studySetPropertySelect || target === studyCountPropertySelect || target === studyStagePropertySelect) {
+      || target === filterPropertySelect || target === filterOperatorSelect
+      || target.matches("[data-study-score]")) {
       if (target === sourceTypeSelect && sourceTypeSelect.value === "database" && !sourceSelect.value && sourceOptions[0]) {
         sourceSelect.value = `${sourceOptions[0].kind}:${sourceOptions[0].pageId}:${sourceOptions[0].blockId || ""}`;
       }
@@ -6344,7 +7789,7 @@ function openFlashcardDeckPicker(block, anchorEl = null) {
       commitDeckSettingsState();
       return;
     }
-    if (target === filterValueInput || target === studySetValueInput || target === studyStageValueInput || target === studyStageCountInput) {
+    if (target === filterValueInput || target.matches("[data-study-score]")) {
       commitDeckSettingsState();
       syncCardEditor();
       return;
@@ -6519,6 +7964,7 @@ function normalizeTypingDrillConfig(raw = {}) {
     order: normalizeTypingDrillOrder(raw?.order || "random"),
     poolMode: normalizeTypingDrillPoolMode(raw?.poolMode || "all"),
     displaySize: normalizeTypingDrillDisplaySize(raw?.displaySize || "standard"),
+    showSourceChips: raw?.showSourceChips !== false,
     currentIndex: Math.max(0, Number(raw?.currentIndex || 0) || 0),
     seenRowIds: Array.isArray(raw?.seenRowIds) ? raw.seenRowIds.map((id) => String(id || "").trim()).filter(Boolean).slice(0, 500) : [],
     userAnswer: String(raw?.userAnswer || ""),
@@ -6529,7 +7975,9 @@ function normalizeTypingDrillConfig(raw = {}) {
     feedbackText: String(raw?.feedbackText || "").trim(),
     scoreCorrect: Math.max(0, Number(raw?.scoreCorrect || 0) || 0),
     scoreTried: Math.max(0, Number(raw?.scoreTried || 0) || 0),
-    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0)
+    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0),
+    accentColor: normalizeMatchPairsAccent(raw?.accentColor),
+    scoring: normalizeStudyScoreWriteback(raw?.scoring || {}, { correctChange: 2, incorrectChange: -1.5 })
   };
 }
 
@@ -6543,6 +7991,26 @@ function writeTypingDrillConfig(block, config) {
   block.dataset.typingDrillConfig = JSON.stringify(normalizeTypingDrillConfig(config));
 }
 
+function applyStudyToolAccent(block, accentColor = "") {
+  if (!block) return;
+  const normalized = normalizeMatchPairsAccent(accentColor);
+  if (normalized) block.style.setProperty("--accent", normalized);
+  else block.style.removeProperty("--accent");
+}
+
+function applyMatchPairsAccent(block, accentColor = "") {
+  if (!block) return;
+  const normalized = normalizeMatchPairsAccent(accentColor);
+  const shellEl = block.querySelector(".match-pairs-shell");
+  if (normalized) {
+    block.style.setProperty("--match-accent", normalized);
+    shellEl?.style.setProperty("--match-accent", normalized);
+  } else {
+    block.style.removeProperty("--match-accent");
+    shellEl?.style.removeProperty("--match-accent");
+  }
+}
+
 function getTypingDrillSourceData(config) {
   if (!config?.sourcePageId || typeof window.getDatabaseCalloutSourceData !== "function") return null;
   return window.getDatabaseCalloutSourceData({
@@ -6550,6 +8018,23 @@ function getTypingDrillSourceData(config) {
     pageId: config.sourcePageId,
     blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
   });
+}
+
+function getFirstDatabaseCalloutSource() {
+  const sources = typeof window.getDatabaseCalloutSources === "function" ? window.getDatabaseCalloutSources() : [];
+  return Array.isArray(sources) ? sources[0] || null : null;
+}
+
+function applyDefaultStudySource(config = {}) {
+  if (config?.sourcePageId) return config;
+  const source = getFirstDatabaseCalloutSource();
+  if (!source?.pageId) return config;
+  return {
+    ...config,
+    sourceKind: source.kind === "block" ? "block" : "page",
+    sourcePageId: source.pageId || "",
+    sourceBlockId: source.kind === "block" ? source.blockId || "" : ""
+  };
 }
 
 function getTypingDrillRowValue(row, propertyId = "") {
@@ -6680,7 +8165,16 @@ function buildTypingDrillScoreText(config) {
 
 function renderTypingDrillBlock(block) {
   if (!block || block.dataset.type !== "typing-drill") return null;
-  const config = readTypingDrillConfig(block);
+  let config = readTypingDrillConfig(block);
+  if (!config.sourcePageId) {
+    config = normalizeTypingDrillConfig(applyDefaultStudySource(config));
+    if (config.sourcePageId) writeTypingDrillConfig(block, config);
+  }
+  const sourceForFields = getTypingDrillSourceData(config);
+  if (sourceForFields?.database?.properties?.length && (!config.promptFieldId || !config.answerFieldId)) {
+    config = normalizeTypingDrillConfig({ ...config, ...inferTypingDrillFields(sourceForFields.database.properties, config) });
+    writeTypingDrillConfig(block, config);
+  }
   const { sourceData, rows, row, index } = getTypingDrillCurrent(config);
   const titleEl = block.querySelector(".typing-drill-title");
   const countEl = block.querySelector(".typing-drill-count");
@@ -6705,8 +8199,10 @@ function renderTypingDrillBlock(block) {
   const feedbackState = checked ? config.resultState : config.feedbackState;
 
   if (titleEl) titleEl.textContent = config.title || "Typing Drill";
+  applyStudyToolAccent(block, config.accentColor);
   block.dataset.typingDrillFeedback = feedbackState || "";
   block.dataset.typingDrillSize = config.displaySize || "standard";
+  block.dataset.studyChrome = config.showSourceChips ? "shown" : "minimal";
   if (countEl) countEl.textContent = rows.length ? `${index + 1} / ${rows.length}` : "0 items";
   if (scoreEl) scoreEl.textContent = buildTypingDrillScoreText(config);
   if (databaseChip) databaseChip.textContent = sourceData?.database?.title || "No database";
@@ -6745,6 +8241,14 @@ function renderTypingDrillBlock(block) {
   if (skipBtn) skipBtn.disabled = !row;
   if (backBtn) backBtn.disabled = !rows.length;
   if (resetBtn) resetBtn.disabled = !rows.length && !config.userAnswer && config.resultState === "idle";
+  if (row && config.resultState !== "correct" && config.resultState !== "wrong") {
+    markStudyPromptSeen(block, {
+      tool: "Typing Drill",
+      rowId: row.id || "",
+      prompt: getTypingDrillRowValue(row, config.promptFieldId),
+      expected: getTypingDrillRowValue(row, config.answerFieldId)
+    });
+  }
   return block;
 }
 
@@ -6884,6 +8388,12 @@ function openTypingDrillPicker(block, anchorEl = null) {
           <label class="typing-drill-picker-field"><span>Extra field</span><select data-typing-drill-setting="extra"></select></label>
         </div>
       </details>
+      <details class="typing-drill-picker-section">
+        <summary>Score write-back</summary>
+        <div class="typing-drill-picker-section-body">
+          ${buildStudyScoreSettingsHTML("typing")}
+        </div>
+      </details>
     </div>
     <div class="typing-drill-picker-panel" data-typing-drill-panel="session">
       <details class="typing-drill-picker-section" open>
@@ -6901,6 +8411,15 @@ function openTypingDrillPicker(block, anchorEl = null) {
         <summary>Display</summary>
         <div class="typing-drill-picker-section-body">
           <label class="typing-drill-picker-field"><span>Display size</span><select data-typing-drill-setting="size"><option value="compact">Compact</option><option value="standard">Standard</option><option value="wide">Wide</option></select></label>
+          <label class="match-pairs-toggle"><input type="checkbox" data-typing-drill-setting="source-chips" /> Show database/filter chips</label>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section" open>
+        <summary>Color</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="match-pairs-toggle"><input type="checkbox" data-typing-drill-setting="custom-accent" /> Custom accent</label>
+          <label class="typing-drill-picker-field"><span>Accent color</span><input type="color" data-typing-drill-setting="accent" /></label>
+          <div class="typing-drill-picker-help">Leave custom accent off to follow this page's theme color.</div>
         </div>
       </details>
     </div>
@@ -6930,6 +8449,9 @@ function openTypingDrillPicker(block, anchorEl = null) {
   const limitInput = picker.querySelector('[data-typing-drill-setting="limit"]');
   const orderSelect = picker.querySelector('[data-typing-drill-setting="order"]');
   const sizeSelect = picker.querySelector('[data-typing-drill-setting="size"]');
+  const showSourceChipsInput = picker.querySelector('[data-typing-drill-setting="source-chips"]');
+  const customAccentInput = picker.querySelector('[data-typing-drill-setting="custom-accent"]');
+  const accentInput = picker.querySelector('[data-typing-drill-setting="accent"]');
 
   const sourceKey = (source) => `${source.kind}:${source.pageId}:${source.blockId || ""}`;
   const selectedSourceKey = () => sourceSelect?.value || "";
@@ -6989,6 +8511,9 @@ function openTypingDrillPicker(block, anchorEl = null) {
       order: orderSelect?.value || base.order,
       poolMode: "all",
       displaySize: sizeSelect?.value || base.displaySize,
+      showSourceChips: !!showSourceChipsInput?.checked,
+      accentColor: customAccentInput?.checked ? accentInput?.value : "",
+      scoring: readStudyScoreSettings(picker, "typing", base.scoring, { correctChange: 2, incorrectChange: -1.5 }),
       resultState: "idle",
       userAnswer: "",
       showHint: false,
@@ -7041,6 +8566,7 @@ function openTypingDrillPicker(block, anchorEl = null) {
     fillPropertySelect(hintSelect, properties, inferred.hintFieldId);
     fillPropertySelect(extraSelect, properties, inferred.extraFieldId);
     fillPropertySelect(acceptedSelect, properties, working.acceptedFieldId);
+    syncStudyScoreSettings(picker, "typing", properties, working.scoring, { correctChange: 2, incorrectChange: -1.5 });
     syncModePanels();
   }
 
@@ -7057,14 +8583,47 @@ function openTypingDrillPicker(block, anchorEl = null) {
   if (limitInput) limitInput.value = String(config.sessionLimit || 10);
   if (orderSelect) orderSelect.value = config.order;
   if (sizeSelect) sizeSelect.value = config.displaySize || "standard";
+  if (showSourceChipsInput) showSourceChipsInput.checked = config.showSourceChips !== false;
+  if (customAccentInput) customAccentInput.checked = !!config.accentColor;
+  if (accentInput) {
+    accentInput.value = config.accentColor || "#7b9cff";
+    accentInput.disabled = !customAccentInput?.checked;
+  }
   syncPicker();
+  if ((!config.sourcePageId || !getTypingDrillSourceData(config)) && selectedSource()) {
+    const seededConfig = getWorkingTypingConfig();
+    writeTypingDrillConfig(block, seededConfig);
+    renderTypingDrillBlock(block);
+    if (typeof saveState === "function") saveState();
+  }
 
-  picker.addEventListener("change", () => {
+  const syncTypingAccentControls = () => {
+    if (accentInput && customAccentInput) accentInput.disabled = !customAccentInput.checked;
+    applyStudyToolAccent(block, customAccentInput?.checked ? accentInput?.value : "");
+  };
+
+  const saveTypingAccentOnly = () => {
+    const next = readTypingDrillConfig(block);
+    next.accentColor = customAccentInput?.checked ? (accentInput?.value || "") : "";
+    writeTypingDrillConfig(block, next);
+    syncTypingAccentControls();
+    if (typeof saveState === "function") saveState();
+  };
+
+  picker.addEventListener("change", (event) => {
+    if (event.target === customAccentInput || event.target === accentInput) {
+      saveTypingAccentOnly();
+      return;
+    }
     saveTypingConfig();
     syncPicker();
   });
   picker.addEventListener("input", (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target === accentInput) {
+      saveTypingAccentOnly();
+      return;
+    }
     saveTypingConfig();
     syncPicker();
   });
@@ -7121,6 +8680,7 @@ function moveTypingDrillBack(block) {
 
 function resetTypingDrill(block) {
   const config = readTypingDrillConfig(block);
+  getBlockStudySessionId(block, true);
   config.currentIndex = 0;
   config.seenRowIds = [];
   resetTypingDrillCardState(config);
@@ -7148,7 +8708,8 @@ function submitTypingDrillAnswer(block, userAnswer = "") {
   if (!answerText || config.resultState === "wrong") return config;
 
   config.userAnswer = userAnswer || "";
-  const { row } = getTypingDrillCurrent(config);
+  const current = getTypingDrillCurrent(config);
+  const { row } = current;
   const check = checkTypingDrillAnswer(row, config, config.userAnswer);
   config.resultState = check.correct ? "correct" : "wrong";
   config.lastCorrect = check.correct;
@@ -7156,6 +8717,22 @@ function submitTypingDrillAnswer(block, userAnswer = "") {
   config.feedbackText = "";
   config.scoreTried += 1;
   if (check.correct) config.scoreCorrect += 1;
+  if (!["manual", "ai"].includes(config.checkMode)) applyStudyScoreWriteback(config, row?.id || "", check.correct);
+  recordStudyActivity(block, config, {
+    tool: "Typing Drill",
+    rowId: row?.id || "",
+    prompt: row ? getTypingDrillRowValue(row, config.promptFieldId) : "",
+    answer: config.userAnswer,
+    expected: check.primaryAnswer || "",
+    result: check.correct ? "correct" : "incorrect",
+    total: current.rows?.length || 0,
+    durationMs: getStudyPromptDuration(block, {
+      tool: "Typing Drill",
+      rowId: row?.id || "",
+      prompt: row ? getTypingDrillRowValue(row, config.promptFieldId) : "",
+      expected: row ? getTypingDrillRowValue(row, config.answerFieldId) : ""
+    })
+  });
   return config;
 }
 
@@ -7191,6 +8768,7 @@ function normalizeFillBlankConfig(raw = {}) {
     sessionLimit: Math.max(1, Math.min(100, Number(raw?.sessionLimit || 10) || 10)),
     order: normalizeTypingDrillOrder(raw?.order || "random"),
     displaySize: normalizeTypingDrillDisplaySize(raw?.displaySize || "standard"),
+    showSourceChips: raw?.showSourceChips !== false,
     currentIndex: Math.max(0, Number(raw?.currentIndex || 0) || 0),
     seenRowIds: Array.isArray(raw?.seenRowIds) ? raw.seenRowIds.map((id) => String(id || "").trim()).filter(Boolean).slice(0, 500) : [],
     answers: Array.isArray(raw?.answers) ? raw.answers.map((value) => String(value || "")).slice(0, 30) : [],
@@ -7200,7 +8778,9 @@ function normalizeFillBlankConfig(raw = {}) {
     feedbackText: String(raw?.feedbackText || "").trim(),
     scoreCorrect: Math.max(0, Number(raw?.scoreCorrect || 0) || 0),
     scoreTried: Math.max(0, Number(raw?.scoreTried || 0) || 0),
-    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0)
+    scoreSkipped: Math.max(0, Number(raw?.scoreSkipped || 0) || 0),
+    accentColor: normalizeMatchPairsAccent(raw?.accentColor),
+    scoring: normalizeStudyScoreWriteback(raw?.scoring || {}, { correctChange: 1.5, incorrectChange: -1 })
   };
 }
 
@@ -7383,7 +8963,16 @@ function renderFillBlankPrompt(promptEl, row, config) {
 
 function renderFillBlankBlock(block) {
   if (!block || block.dataset.type !== "fill-blank") return null;
-  const config = readFillBlankConfig(block);
+  let config = readFillBlankConfig(block);
+  if (!config.sourcePageId) {
+    config = normalizeFillBlankConfig(applyDefaultStudySource(config));
+    if (config.sourcePageId) writeFillBlankConfig(block, config);
+  }
+  const sourceForFields = getFillBlankSourceData(config);
+  if (sourceForFields?.database?.properties?.length && (!config.promptFieldId || !config.answerFieldId)) {
+    config = normalizeFillBlankConfig({ ...config, ...inferFillBlankFields(sourceForFields.database.properties, config) });
+    writeFillBlankConfig(block, config);
+  }
   const { sourceData, rows, row, index } = getFillBlankCurrent(config);
   const titleEl = block.querySelector(".typing-drill-title");
   const countEl = block.querySelector(".typing-drill-count");
@@ -7408,8 +8997,10 @@ function renderFillBlankBlock(block) {
   const feedbackState = checked ? config.resultState : config.feedbackState;
 
   if (titleEl) titleEl.textContent = config.title || "Fill-in-the-Blank";
+  applyStudyToolAccent(block, config.accentColor);
   block.dataset.typingDrillFeedback = feedbackState || "";
   block.dataset.typingDrillSize = config.displaySize || "standard";
+  block.dataset.studyChrome = config.showSourceChips ? "shown" : "minimal";
   if (countEl) countEl.textContent = rows.length ? `${index + 1} / ${rows.length}` : "0 items";
   if (scoreEl) scoreEl.textContent = buildTypingDrillScoreText(config);
   if (databaseChip) databaseChip.textContent = sourceData?.database?.title || "No database";
@@ -7452,6 +9043,14 @@ function renderFillBlankBlock(block) {
   if (skipBtn) skipBtn.disabled = !row;
   if (backBtn) backBtn.disabled = !rows.length;
   if (resetBtn) resetBtn.disabled = !rows.length && !config.answers.length && config.resultState === "idle";
+  if (row && config.resultState !== "correct" && config.resultState !== "wrong") {
+    markStudyPromptSeen(block, {
+      tool: "Fill-in-the-Blank",
+      rowId: row.id || "",
+      prompt: getFillBlankRowValue(row, config.promptFieldId),
+      expected: getFillBlankRowValue(row, config.answerFieldId)
+    });
+  }
   return block;
 }
 
@@ -7528,12 +9127,27 @@ function openFillBlankPicker(block, anchorEl = null) {
           <label class="typing-drill-picker-field"><span>Notes / Extra Field</span><select data-fill-blank-setting="extra"></select></label>
         </div>
       </details>
+      <details class="typing-drill-picker-section">
+        <summary>Score write-back</summary>
+        <div class="typing-drill-picker-section-body">
+          ${buildStudyScoreSettingsHTML("fill")}
+        </div>
+      </details>
     </div>
     <div class="typing-drill-picker-panel" data-fill-blank-panel="style">
       <details class="typing-drill-picker-section" open>
         <summary>Display</summary>
         <div class="typing-drill-picker-section-body">
           <label class="typing-drill-picker-field"><span>Display size</span><select data-fill-blank-setting="size"><option value="compact">Compact</option><option value="standard">Standard</option><option value="wide">Wide</option></select></label>
+          <label class="match-pairs-toggle"><input type="checkbox" data-fill-blank-setting="source-chips" /> Show database/filter chips</label>
+        </div>
+      </details>
+      <details class="typing-drill-picker-section" open>
+        <summary>Color</summary>
+        <div class="typing-drill-picker-section-body">
+          <label class="match-pairs-toggle"><input type="checkbox" data-fill-blank-setting="custom-accent" /> Custom accent</label>
+          <label class="typing-drill-picker-field"><span>Accent color</span><input type="color" data-fill-blank-setting="accent" /></label>
+          <div class="typing-drill-picker-help">Leave custom accent off to follow this page's theme color.</div>
         </div>
       </details>
     </div>
@@ -7563,6 +9177,9 @@ function openFillBlankPicker(block, anchorEl = null) {
   const limitInput = picker.querySelector('[data-fill-blank-setting="limit"]');
   const orderSelect = picker.querySelector('[data-fill-blank-setting="order"]');
   const sizeSelect = picker.querySelector('[data-fill-blank-setting="size"]');
+  const showSourceChipsInput = picker.querySelector('[data-fill-blank-setting="source-chips"]');
+  const customAccentInput = picker.querySelector('[data-fill-blank-setting="custom-accent"]');
+  const accentInput = picker.querySelector('[data-fill-blank-setting="accent"]');
   const sourceKey = (source) => `${source.kind}:${source.pageId}:${source.blockId || ""}`;
   const selectedSource = () => sources.find((source) => sourceKey(source) === (sourceSelect?.value || "")) || null;
   const fillPropertySelect = (selectEl, properties, selectedValue, includeTitle = true) => {
@@ -7619,6 +9236,9 @@ function openFillBlankPicker(block, anchorEl = null) {
       sessionLimit: limitInput?.value || base.sessionLimit,
       order: orderSelect?.value || base.order,
       displaySize: sizeSelect?.value || base.displaySize,
+      showSourceChips: !!showSourceChipsInput?.checked,
+      accentColor: customAccentInput?.checked ? accentInput?.value : "",
+      scoring: readStudyScoreSettings(picker, "fill", base.scoring, { correctChange: 1.5, incorrectChange: -1 }),
       answers: [],
       resultState: "idle",
       showHint: false,
@@ -7671,6 +9291,7 @@ function openFillBlankPicker(block, anchorEl = null) {
     fillPropertySelect(hintSelect, properties, inferred.hintFieldId);
     fillPropertySelect(extraSelect, properties, inferred.extraFieldId);
     fillPropertySelect(acceptedSelect, properties, working.acceptedFieldId);
+    syncStudyScoreSettings(picker, "fill", properties, working.scoring, { correctChange: 1.5, incorrectChange: -1 });
     syncModePanels();
   }
 
@@ -7687,14 +9308,47 @@ function openFillBlankPicker(block, anchorEl = null) {
   if (limitInput) limitInput.value = String(config.sessionLimit || 10);
   if (orderSelect) orderSelect.value = config.order;
   if (sizeSelect) sizeSelect.value = config.displaySize || "standard";
+  if (showSourceChipsInput) showSourceChipsInput.checked = config.showSourceChips !== false;
+  if (customAccentInput) customAccentInput.checked = !!config.accentColor;
+  if (accentInput) {
+    accentInput.value = config.accentColor || "#7b9cff";
+    accentInput.disabled = !customAccentInput?.checked;
+  }
   syncPicker();
+  if ((!config.sourcePageId || !getFillBlankSourceData(config)) && selectedSource()) {
+    const seededConfig = getWorkingFillBlankConfig();
+    writeFillBlankConfig(block, seededConfig);
+    renderFillBlankBlock(block);
+    if (typeof saveState === "function") saveState();
+  }
 
-  picker.addEventListener("change", () => {
+  const syncFillBlankAccentControls = () => {
+    if (accentInput && customAccentInput) accentInput.disabled = !customAccentInput.checked;
+    applyStudyToolAccent(block, customAccentInput?.checked ? accentInput?.value : "");
+  };
+
+  const saveFillBlankAccentOnly = () => {
+    const next = readFillBlankConfig(block);
+    next.accentColor = customAccentInput?.checked ? (accentInput?.value || "") : "";
+    writeFillBlankConfig(block, next);
+    syncFillBlankAccentControls();
+    if (typeof saveState === "function") saveState();
+  };
+
+  picker.addEventListener("change", (event) => {
+    if (event.target === customAccentInput || event.target === accentInput) {
+      saveFillBlankAccentOnly();
+      return;
+    }
     saveFillBlankConfig();
     syncPicker();
   });
   picker.addEventListener("input", (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.target === accentInput) {
+      saveFillBlankAccentOnly();
+      return;
+    }
     saveFillBlankConfig();
     syncPicker();
   });
@@ -7744,6 +9398,7 @@ function moveFillBlankBack(block) {
 
 function resetFillBlank(block) {
   const config = readFillBlankConfig(block);
+  getBlockStudySessionId(block, true);
   config.currentIndex = 0;
   config.seenRowIds = [];
   resetFillBlankCardState(config);
@@ -7762,13 +9417,30 @@ function submitFillBlankAnswer(block) {
   const answers = Array.from(block.querySelectorAll(".fill-blank-input")).map((input) => input.value || "");
   if (!answers.some((answer) => String(answer || "").trim())) return config;
   config.answers = answers;
-  const { row } = getFillBlankCurrent(config);
+  const current = getFillBlankCurrent(config);
+  const { row } = current;
   const check = checkFillBlankAnswers(row, config);
   config.resultState = check.correct ? "correct" : "wrong";
   config.feedbackState = check.correct ? "correct" : "wrong";
   config.feedbackText = "";
   config.scoreTried += 1;
   if (check.correct) config.scoreCorrect += 1;
+  if (!["manual", "ai"].includes(config.checkMode)) applyStudyScoreWriteback(config, row?.id || "", check.correct);
+  recordStudyActivity(block, config, {
+    tool: "Fill-in-the-Blank",
+    rowId: row?.id || "",
+    prompt: row ? getFillBlankRowValue(row, config.promptFieldId) : "",
+    answer: config.answers.filter(Boolean).join(", "),
+    expected: check.primaryAnswer || "",
+    result: check.correct ? "correct" : "incorrect",
+    total: current.rows?.length || 0,
+    durationMs: getStudyPromptDuration(block, {
+      tool: "Fill-in-the-Blank",
+      rowId: row?.id || "",
+      prompt: row ? getFillBlankRowValue(row, config.promptFieldId) : "",
+      expected: row ? getFillBlankRowValue(row, config.answerFieldId) : ""
+    })
+  });
   return config;
 }
 
@@ -7858,6 +9530,7 @@ function normalizeMatchPairsConfig(raw = {}) {
     promptSize: normalizeMatchPairsPromptSize(raw.promptSize),
     answerSize: normalizeMatchPairsAnswerSize(raw.answerSize),
     promptHeight: normalizeMatchPairsPromptHeight(raw.promptHeight),
+    showSourceChips: raw.showSourceChips !== false,
     backgroundImage: String(raw.backgroundImage || "").trim(),
     sessionSeed,
     mixedStep: Math.max(0, Number(raw.mixedStep || 0) || 0),
@@ -7870,7 +9543,8 @@ function normalizeMatchPairsConfig(raw = {}) {
     hintRowId: String(raw.hintRowId || ""),
     wrongRowId: String(raw.wrongRowId || ""),
     feedbackState: ["", "correct", "wrong", "reset", "hint"].includes(raw.feedbackState) ? raw.feedbackState : "",
-    feedbackText: String(raw.feedbackText || "").trim()
+    feedbackText: String(raw.feedbackText || "").trim(),
+    scoring: normalizeStudyScoreWriteback(raw?.scoring || {}, { correctChange: 1, incorrectChange: -0.5 })
   };
 }
 
@@ -8087,7 +9761,16 @@ function renderMatchPairsStage(config, items) {
 
 function renderMatchPairsBlock(block) {
   if (!block || block.dataset.type !== "match-pairs") return null;
-  const config = readMatchPairsConfig(block);
+  let config = readMatchPairsConfig(block);
+  if (!config.sourcePageId) {
+    config = normalizeMatchPairsConfig(applyDefaultStudySource(config));
+    if (config.sourcePageId) writeMatchPairsConfig(block, config);
+  }
+  const sourceForFields = getMatchPairsSourceData(config);
+  if (sourceForFields?.database?.properties?.length && (!config.leftFieldId || !config.rightFieldId)) {
+    config = normalizeMatchPairsConfig({ ...config, ...inferMatchPairsFields(sourceForFields.database.properties, config) });
+    writeMatchPairsConfig(block, config);
+  }
   const { sourceData, properties, items } = getMatchPairsItems(config);
   const matched = config.matchedRowIds.filter((id) => items.some((item) => item.id === id));
   if (matched.length !== config.matchedRowIds.length) {
@@ -8115,14 +9798,14 @@ function renderMatchPairsBlock(block) {
   const instructionEl = block.querySelector(".match-pairs-instruction");
   const shellEl = block.querySelector(".match-pairs-shell");
   const layout = getActiveMatchPairsLayout(config);
+  applyMatchPairsAccent(block, config.accentColor);
   if (shellEl) {
-    if (config.accentColor) shellEl.style.setProperty("--match-accent", config.accentColor);
-    else shellEl.style.removeProperty("--match-accent");
     shellEl.dataset.surface = config.surfaceStyle;
     shellEl.dataset.layout = layout;
     shellEl.dataset.mode = config.layoutMode;
     shellEl.dataset.answerSize = config.answerSize;
     shellEl.dataset.promptHeight = config.promptHeight;
+    shellEl.dataset.chrome = config.showSourceChips ? "shown" : "minimal";
     shellEl.style.setProperty("--match-bg-image", config.backgroundImage ? `url("${config.backgroundImage.replace(/"/g, "%22")}")` : "none");
     shellEl.classList.toggle("has-background-image", !!config.backgroundImage);
   }
@@ -8148,6 +9831,28 @@ function renderMatchPairsBlock(block) {
     statusEl.hidden = layout === "focus";
   }
   block.classList.toggle("match-pairs-focus-mode", layout === "focus");
+  if (layout === "focus") {
+    const unmatched = items.filter((item) => !config.matchedRowIds.includes(item.id));
+    const focus = unmatched[config.focusCursor % Math.max(unmatched.length, 1)];
+    if (focus && !config.focusResultId) {
+      markStudyPromptSeen(block, {
+        tool: "Match Pairs",
+        rowId: focus.id,
+        prompt: focus.left,
+        expected: focus.right
+      });
+    }
+  } else if (config.selectedLeftId) {
+    const selected = items.find((item) => item.id === config.selectedLeftId);
+    if (selected) {
+      markStudyPromptSeen(block, {
+        tool: "Match Pairs",
+        rowId: selected.id,
+        prompt: selected.left,
+        expected: selected.right
+      });
+    }
+  }
   const minDims = getMinResizeDimensionsForBlock(block);
   const currentWidth = parseInt(block.style.width || block.getBoundingClientRect().width || "0", 10);
   if (currentWidth < minDims.width) block.style.width = `${minDims.width}px`;
@@ -8157,6 +9862,7 @@ function renderMatchPairsBlock(block) {
 
 function resetMatchPairsSession(block) {
   const config = readMatchPairsConfig(block);
+  getBlockStudySessionId(block, true);
   config.matchedRowIds = [];
   config.selectedLeftId = "";
   config.selectedRightId = "";
@@ -8189,23 +9895,75 @@ function chooseMatchPairsItem(block, side, rowId) {
       config.wrongRowId = "";
       config.feedbackState = "correct";
       config.feedbackText = "Correct.";
+      applyStudyScoreWriteback(config, focus.id, true);
+      recordStudyActivity(block, config, {
+        tool: "Match Pairs",
+        rowId: focus.id,
+        prompt: focus.left,
+        answer: focus.right,
+        expected: focus.right,
+        result: "correct",
+        total: items.length,
+        durationMs: getStudyPromptDuration(block, {
+          tool: "Match Pairs",
+          rowId: focus.id,
+          prompt: focus.left,
+          expected: focus.right
+        })
+      });
     } else {
       config.wrongRowId = rowId;
       config.feedbackState = "wrong";
       config.feedbackText = "Not a match. Try again.";
+      applyStudyScoreWriteback(config, focus.id, false);
+      const picked = items.find((item) => item.id === rowId);
+      recordStudyActivity(block, config, {
+        tool: "Match Pairs",
+        rowId: focus.id,
+        prompt: focus.left,
+        answer: picked?.right || "",
+        expected: focus.right,
+        result: "incorrect",
+        total: items.length,
+        durationMs: getStudyPromptDuration(block, {
+          tool: "Match Pairs",
+          rowId: focus.id,
+          prompt: focus.left,
+          expected: focus.right
+        })
+      });
     }
     return config;
   }
+  const { items } = getMatchPairsItems(config);
   if (side === "left") config.selectedLeftId = config.selectedLeftId === rowId ? "" : rowId;
   if (side === "right") config.selectedRightId = config.selectedRightId === rowId ? "" : rowId;
   config.wrongRowId = "";
   config.feedbackState = "";
   config.feedbackText = "";
   if (!config.selectedLeftId || !config.selectedRightId) return config;
+  const gradedRowId = config.selectedLeftId;
   if (config.selectedLeftId === config.selectedRightId) {
     config.matchedRowIds.push(config.selectedLeftId);
     config.feedbackState = "correct";
     config.feedbackText = "Correct match.";
+    applyStudyScoreWriteback(config, gradedRowId, true);
+    const matchedItem = items.find((item) => item.id === gradedRowId);
+    recordStudyActivity(block, config, {
+      tool: "Match Pairs",
+      rowId: gradedRowId,
+      prompt: matchedItem?.left || "",
+      answer: matchedItem?.right || "",
+      expected: matchedItem?.right || "",
+      result: "correct",
+      total: items.length,
+      durationMs: getStudyPromptDuration(block, {
+        tool: "Match Pairs",
+        rowId: gradedRowId,
+        prompt: matchedItem?.left || "",
+        expected: matchedItem?.right || ""
+      })
+    });
     if (config.layoutMode === "mixed") {
       const { items } = getMatchPairsItems(config);
       const roundItems = getVisibleMatchPairsItems(config, items);
@@ -8220,6 +9978,24 @@ function chooseMatchPairsItem(block, side, rowId) {
     config.wrongRowId = config.selectedRightId;
     config.feedbackState = "wrong";
     config.feedbackText = "Not a match. Try again.";
+    applyStudyScoreWriteback(config, gradedRowId, false);
+    const leftItem = items.find((item) => item.id === gradedRowId);
+    const rightItem = items.find((item) => item.id === config.selectedRightId);
+    recordStudyActivity(block, config, {
+      tool: "Match Pairs",
+      rowId: gradedRowId,
+      prompt: leftItem?.left || "",
+      answer: rightItem?.right || "",
+      expected: leftItem?.right || "",
+      result: "incorrect",
+      total: items.length,
+      durationMs: getStudyPromptDuration(block, {
+        tool: "Match Pairs",
+        rowId: gradedRowId,
+        prompt: leftItem?.left || "",
+        expected: leftItem?.right || ""
+      })
+    });
   }
   config.selectedLeftId = "";
   config.selectedRightId = "";
@@ -8286,6 +10062,12 @@ function openMatchPairsPicker(block, anchorEl = null) {
           <div class="match-pairs-picker-note">Practice Mix switches after each Focus question, or after completing the full Two Column / Chip Board batch.</div>
         </div>
       </details>
+      <details class="typing-drill-picker-section">
+        <summary>Score write-back</summary>
+        <div class="typing-drill-picker-section-body">
+          ${buildStudyScoreSettingsHTML("matching")}
+        </div>
+      </details>
     </div>
     <div class="typing-drill-picker-panel" data-match-pairs-panel="style">
       <details class="typing-drill-picker-section" open>
@@ -8298,6 +10080,7 @@ function openMatchPairsPicker(block, anchorEl = null) {
             <label class="typing-drill-picker-field"><span>Answer size</span><select data-match-pairs-setting="answer-size"><option value="sm">Small</option><option value="md">Medium</option><option value="lg">Large</option></select></label>
           </div>
           <label class="typing-drill-picker-field"><span>Focus card height</span><select data-match-pairs-setting="prompt-height"><option value="compact">Compact</option><option value="standard">Standard</option><option value="tall">Tall</option></select></label>
+          <label class="match-pairs-toggle"><input type="checkbox" data-match-pairs-setting="source-chips" /> Show database/filter chips</label>
         </div>
       </details>
       <details class="typing-drill-picker-section" open>
@@ -8347,6 +10130,7 @@ function openMatchPairsPicker(block, anchorEl = null) {
   const promptSizeSelect = get("prompt-size");
   const answerSizeSelect = get("answer-size");
   const promptHeightSelect = get("prompt-height");
+  const showSourceChipsInput = get("source-chips");
   const customAccentInput = get("custom-accent");
   const accentInput = get("accent");
   const backgroundUploadInput = get("background-upload");
@@ -8391,8 +10175,10 @@ function openMatchPairsPicker(block, anchorEl = null) {
       promptSize: promptSizeSelect.value,
       answerSize: answerSizeSelect.value,
       promptHeight: promptHeightSelect.value,
+      showSourceChips: showSourceChipsInput.checked,
       accentColor: customAccentInput.checked ? accentInput.value : "",
-      backgroundImage: base.backgroundImage
+      backgroundImage: base.backgroundImage,
+      scoring: readStudyScoreSettings(picker, "matching", base.scoring, { correctChange: 1, incorrectChange: -0.5 })
     });
     if (!resetSession) return next;
     const sessionSeed = Date.now();
@@ -8422,6 +10208,7 @@ function openMatchPairsPicker(block, anchorEl = null) {
     fillFieldSelect(rightSelect, properties, mapped.rightFieldId, false);
     fillFieldSelect(hintSelect, properties, mapped.hintFieldId, true);
     fillFieldSelect(filterPropertySelect, properties, nextConfig.filters[0]?.propertyId || "", true);
+    syncStudyScoreSettings(picker, "matching", properties, nextConfig.scoring, { correctChange: 1, incorrectChange: -0.5 });
   }
 
   function saveSettings(event) {
@@ -8453,8 +10240,25 @@ function openMatchPairsPicker(block, anchorEl = null) {
     accentInput.disabled = !customAccentInput.checked;
     if (next.accentColor) picker.style.setProperty("--accent", next.accentColor);
     else picker.style.removeProperty("--accent");
+    applyMatchPairsAccent(block, next.accentColor);
     picker.querySelectorAll("[data-match-pairs-allowed]").forEach((input) => { input.checked = next.allowedModes.includes(input.value); });
     renderMatchPairsBlock(block);
+    if (typeof saveState === "function") saveState();
+  }
+
+  function syncMatchPairsAccentControls() {
+    if (accentInput && customAccentInput) accentInput.disabled = !customAccentInput.checked;
+    const accent = customAccentInput?.checked ? (accentInput?.value || "") : "";
+    if (accent) picker.style.setProperty("--accent", accent);
+    else picker.style.removeProperty("--accent");
+    applyMatchPairsAccent(block, accent);
+  }
+
+  function saveMatchPairsAccentOnly() {
+    const next = readMatchPairsConfig(block);
+    next.accentColor = customAccentInput?.checked ? (accentInput?.value || "") : "";
+    writeMatchPairsConfig(block, next);
+    syncMatchPairsAccentControls();
     if (typeof saveState === "function") saveState();
   }
 
@@ -8473,9 +10277,11 @@ function openMatchPairsPicker(block, anchorEl = null) {
   promptSizeSelect.value = config.promptSize;
   answerSizeSelect.value = config.answerSize;
   promptHeightSelect.value = config.promptHeight;
+  showSourceChipsInput.checked = config.showSourceChips !== false;
   customAccentInput.checked = !!config.accentColor;
   accentInput.value = config.accentColor || "#7b9cff";
   accentInput.disabled = !customAccentInput.checked;
+  syncMatchPairsAccentControls();
   picker.querySelectorAll("[data-match-pairs-allowed]").forEach((input) => { input.checked = config.allowedModes.includes(input.value); });
   const initialSource = selectedSource();
   const initialFieldConfig = config.sourcePageId ? config : normalizeMatchPairsConfig({
@@ -8485,13 +10291,29 @@ function openMatchPairsPicker(block, anchorEl = null) {
     sourceBlockId: initialSource?.blockId
   });
   syncFields(initialFieldConfig);
+  if ((!config.sourcePageId || !getMatchPairsSourceData(config)) && initialSource) {
+    const seededConfig = workingConfig(true);
+    writeMatchPairsConfig(block, seededConfig);
+    renderMatchPairsBlock(block);
+    if (typeof saveState === "function") saveState();
+  }
   picker.querySelector("[data-match-pairs-close]")?.addEventListener("click", closeMatchPairsPicker);
   picker.querySelector(".typing-drill-picker-tabs")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-match-pairs-tab]");
     if (button) setTab(button.dataset.matchPairsTab);
   });
-  picker.addEventListener("change", saveSettings);
+  picker.addEventListener("change", (event) => {
+    if (event.target === customAccentInput || event.target === accentInput) {
+      saveMatchPairsAccentOnly();
+      return;
+    }
+    saveSettings(event);
+  });
   picker.addEventListener("input", (event) => {
+    if (event.target === accentInput) {
+      saveMatchPairsAccentOnly();
+      return;
+    }
     if (event.target.matches('input[type="text"], input[type="number"]')) saveSettings(event);
   });
 
@@ -8542,20 +10364,27 @@ window.mountMatchPairsBlock = function mountMatchPairsBlock(block, options = {})
 
 window.addEventListener("sanctum:database-updated", () => {
   window.requestAnimationFrame(() => {
-    document.querySelectorAll('.block[data-type="flashcards"]').forEach((block) => {
-      renderFlashcardDeckBlock(block);
-    });
-    document.querySelectorAll('.block[data-type="typing-drill"]').forEach((block) => {
-      renderTypingDrillBlock(block);
-    });
-    document.querySelectorAll('.block[data-type="fill-blank"]').forEach((block) => {
-      renderFillBlankBlock(block);
-    });
-    document.querySelectorAll('.block[data-type="match-pairs"]').forEach((block) => {
-      renderMatchPairsBlock(block);
-    });
+    renderStudySourceBlocks();
+    renderStudyDashboardBlocks();
   });
 });
+
+function renderStudySourceBlocks() {
+  document.querySelectorAll('.block[data-type="flashcards"]').forEach((block) => {
+    renderFlashcardDeckBlock(block);
+  });
+  document.querySelectorAll('.block[data-type="typing-drill"]').forEach((block) => {
+    renderTypingDrillBlock(block);
+  });
+  document.querySelectorAll('.block[data-type="fill-blank"]').forEach((block) => {
+    renderFillBlankBlock(block);
+  });
+  document.querySelectorAll('.block[data-type="match-pairs"]').forEach((block) => {
+    renderMatchPairsBlock(block);
+  });
+}
+
+window.renderStudySourceBlocks = renderStudySourceBlocks;
 
 function renderLiveDataCalloutBlocks() {
   document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
@@ -8570,6 +10399,7 @@ window.onSanctumPageOpen = function onDataCalloutPageOpen(pageId) {
   previousDataCalloutPageOpenHook?.(pageId);
   setTrackedPageActivityPage(pageId);
   renderLiveDataCalloutBlocks();
+  renderStudyDashboardBlocks();
 };
 
 document.addEventListener("visibilitychange", () => {
@@ -9015,6 +10845,14 @@ function buildLinkedPageCardPayload(target, options = {}) {
   };
 }
 
+function getLinkedPageCardVisibleTypeLabel(host, label = "") {
+  const normalized = String(label || "").trim().toLowerCase();
+  const isFrameLinkedCard = host?.classList?.contains("frame-item")
+    && (host.dataset?.frameChildType === "page" || host.dataset?.frameChildType === "domain");
+  if (isFrameLinkedCard && (normalized === "page" || normalized === "domain")) return "";
+  return label || "";
+}
+
 function getLinkedCardSourceRecord(linkedPageId) {
   if (!linkedPageId) return null;
   return userPages.find((page) => page.id === linkedPageId)
@@ -9087,7 +10925,7 @@ function applyLinkedPageTargetToBlock(block, target, options = {}) {
   if (cardTitle) cardTitle.textContent = payload.pageCardTitle;
   if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄");
   if (cardSummary) cardSummary.textContent = payload.pageCardSummary;
-  if (cardTypeLabel) cardTypeLabel.textContent = payload.pageCardTypeLabel;
+  if (cardTypeLabel) cardTypeLabel.textContent = getLinkedPageCardVisibleTypeLabel(block, payload.pageCardTypeLabel);
   applyPageCardImage(block, {
     mode: payload.pageCardImageMode,
     src: payload.pageCardImageSrc,
@@ -9133,7 +10971,7 @@ function syncLinkedPageBlockFromRecord(block, linkedRecord = null) {
   if (cardTitle) cardTitle.textContent = payload.pageCardTitle;
   if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄");
   if (cardSummary) cardSummary.textContent = payload.pageCardSummary;
-  if (cardTypeLabel) cardTypeLabel.textContent = payload.pageCardTypeLabel;
+  if (cardTypeLabel) cardTypeLabel.textContent = getLinkedPageCardVisibleTypeLabel(block, payload.pageCardTypeLabel);
   applyPageCardImage(block, {
     mode: payload.pageCardImageMode,
     src: payload.pageCardImageSrc,
@@ -9175,6 +11013,8 @@ function serializeBlockElement(b) {
     textColor: b.style.color || "",
     padding: b.style.padding || "",
     radius: b.style.borderRadius || "",
+    imageCropShape: blockType === "image" ? normalizeImageCropShape(b.dataset.imageCropShape) : "original",
+    imageFrameStyle: blockType === "image" ? normalizeImageFrameStyle(b.dataset.imageFrameStyle) : "none",
     hasNote: b.classList.contains("has-note") ? 1 : 0,
     linkedPageId: isLinkedCardBlock ? (b.dataset.linkedPageId || "") : "",
     pageCardTitle: isLinkedCardBlock ? (b.querySelector(".page-card-title")?.textContent || "") : "",
@@ -9195,11 +11035,23 @@ function serializeBlockElement(b) {
     dbProperties: blockType === "calendar" ? (b.dataset.dbProperties || "[]") : "[]",
     dbRows: blockType === "calendar" ? (b.dataset.dbRows || "[]") : "[]",
     dbColumnWidths: blockType === "calendar" ? (b.dataset.dbColumnWidths || "{}") : "{}",
+    dbFilters: blockType === "calendar" ? (b.dataset.dbFilters || "[]") : "[]",
+    dbSorts: blockType === "calendar" ? (b.dataset.dbSorts || "[]") : "[]",
+    dbGroupBy: blockType === "calendar" ? (b.dataset.dbGroupBy || "") : "",
     dbFolderState: blockType === "calendar" ? (b.dataset.dbFolderState || "{}") : "{}",
     dbResetConfig: blockType === "calendar" ? (b.dataset.dbResetConfig || "{}") : "{}",
+    dbChecklistAutomation: blockType === "calendar" ? (b.dataset.dbChecklistAutomation || "{}") : "{}",
+    dbStatusAutomation: blockType === "calendar" ? (b.dataset.dbStatusAutomation || "{}") : "{}",
+    dbGalleryCardSize: blockType === "calendar" ? (b.dataset.dbGalleryCardSize || "") : "",
+    dbGalleryCardFields: blockType === "calendar" ? (b.dataset.dbGalleryCardFields || "") : "",
+    dbGalleryCardPropertyIds: blockType === "calendar" ? (b.dataset.dbGalleryCardPropertyIds || "[]") : "[]",
+    dbGalleryOpenMode: blockType === "calendar" ? (b.dataset.dbGalleryOpenMode || "") : "",
+    dbRowPageLayout: blockType === "calendar" ? (b.dataset.dbRowPageLayout || "") : "",
+    dbRowPageKind: blockType === "calendar" ? (b.dataset.dbRowPageKind || "") : "",
     dbSourceKind: blockType === "calendar" ? (b.dataset.dbSourceKind || "") : "",
     dbSourcePageId: blockType === "calendar" ? (b.dataset.dbSourcePageId || "") : "",
     dbSourceBlockId: blockType === "calendar" ? (b.dataset.dbSourceBlockId || "") : "",
+    dbViewTitle: blockType === "calendar" ? (b.dataset.dbViewTitle || "") : "",
     calendarCollapsed: blockType === "calendar" ? (b.dataset.calendarCollapsed || "") : "",
     calendarExpandedWidth: blockType === "calendar" ? (b.dataset.calendarExpandedWidth || "") : "",
     dataCalloutLabel: blockType === "data-callout" ? (b.dataset.dataCalloutLabel || "") : "",
@@ -9219,10 +11071,15 @@ function serializeBlockElement(b) {
     dataCalloutLabelPos: blockType === "data-callout" ? (b.dataset.dataCalloutLabelPos || "") : "",
     dataCalloutShowIcon: blockType === "data-callout" ? (b.dataset.dataCalloutShowIcon || "") : "",
     dataCalloutIcon: blockType === "data-callout" ? (b.dataset.dataCalloutIcon || "") : "",
+    dataCalloutShowProjectImage: blockType === "data-callout" ? (b.dataset.dataCalloutShowProjectImage || "") : "",
+    dataCalloutProjectImageLayout: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageLayout || "") : "",
+    dataCalloutProjectImageSize: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageSize || "") : "",
     flashcardsConfig: blockType === "flashcards" ? (b.dataset.flashcardsConfig || "") : "",
     typingDrillConfig: blockType === "typing-drill" ? (b.dataset.typingDrillConfig || "") : "",
     fillBlankConfig: blockType === "fill-blank" ? (b.dataset.fillBlankConfig || "") : "",
     matchPairsConfig: blockType === "match-pairs" ? (b.dataset.matchPairsConfig || "") : "",
+    studyDashboardConfig: ["session-progress", "daily-streak", "recent-answers"].includes(blockType) ? (b.dataset.studyDashboardConfig || "") : "",
+    studySessionId: ["session-progress", "daily-streak", "recent-answers"].includes(blockType) ? (b.dataset.studySessionId || "") : "",
     progressTitle: blockType === "progress" ? (b.dataset.progressTitle || "") : "",
     progressSourceType: blockType === "progress" ? (b.dataset.progressSourceType || "") : "",
     progressSourceKind: blockType === "progress" ? (b.dataset.progressSourceKind || "") : "",
@@ -9250,6 +11107,7 @@ function serializeBlockElement(b) {
     clockShowSeconds: blockType === "clock" ? (b.dataset.clockShowSeconds || "0") : "0",
     clockShowDate: blockType === "clock" ? (b.dataset.clockShowDate || "0") : "0",
     externalUrl: blockType === "weblink" ? (b.dataset.externalUrl || "") : "",
+    buttonConfig: blockType === "button" ? (b.dataset.buttonConfig || "{}") : "",
   };
 }
 
@@ -9294,6 +11152,19 @@ gridEl.addEventListener("click", (e) => {
   const block = configButton.closest('.block[data-type="clock"]');
   if (!block) return;
   openClockPicker(block, configButton);
+});
+
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+  const configButton = e.target.closest('[data-study-widget-action="configure"]');
+  if (!configButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const block = configButton.closest('.block[data-type="session-progress"], .block[data-type="daily-streak"], .block[data-type="recent-answers"]');
+  if (!block) return;
+  openStudyDashboardPicker(block, configButton);
 });
 
 gridEl.addEventListener("click", (e) => {
@@ -9373,7 +11244,22 @@ gridEl.addEventListener("click", (e) => {
   } else if (action === "reset") {
     config = resetTypingDrill(block);
   } else {
+    const current = getTypingDrillCurrent(config);
+    const { row } = current;
     config.scoreSkipped += 1;
+    recordStudyActivity(block, config, {
+      tool: "Typing Drill",
+      rowId: row?.id || "",
+      prompt: row ? getTypingDrillRowValue(row, config.promptFieldId) : "",
+      result: "skipped",
+      total: current.rows?.length || 0,
+      durationMs: getStudyPromptDuration(block, {
+        tool: "Typing Drill",
+        rowId: row?.id || "",
+        prompt: row ? getTypingDrillRowValue(row, config.promptFieldId) : "",
+        expected: row ? getTypingDrillRowValue(row, config.answerFieldId) : ""
+      })
+    });
     writeTypingDrillConfig(block, config);
     config = advanceTypingDrill(block, {
       feedbackState: "skipped",
@@ -9449,7 +11335,22 @@ gridEl.addEventListener("click", (e) => {
   } else if (action === "reset") {
     config = resetFillBlank(block);
   } else {
+    const current = getFillBlankCurrent(config);
+    const { row } = current;
     config.scoreSkipped += 1;
+    recordStudyActivity(block, config, {
+      tool: "Fill-in-the-Blank",
+      rowId: row?.id || "",
+      prompt: row ? getFillBlankRowValue(row, config.promptFieldId) : "",
+      result: "skipped",
+      total: current.rows?.length || 0,
+      durationMs: getStudyPromptDuration(block, {
+        tool: "Fill-in-the-Blank",
+        rowId: row?.id || "",
+        prompt: row ? getFillBlankRowValue(row, config.promptFieldId) : "",
+        expected: row ? getFillBlankRowValue(row, config.answerFieldId) : ""
+      })
+    });
     writeFillBlankConfig(block, config);
     config = advanceFillBlank(block, {
       feedbackState: "skipped",
@@ -9543,6 +11444,23 @@ gridEl.addEventListener("click", (e) => {
     config.mixedRoundRowIds = [];
     advanceMixedMatchPairsLayout(config);
   } else if (action === "skip" && unmatched.length) {
+    const target = getActiveMatchPairsLayout(config) === "focus"
+      ? unmatched[config.focusCursor % Math.max(unmatched.length, 1)]
+      : unmatched.find((item) => item.id === config.selectedLeftId) || unmatched[0];
+    recordStudyActivity(block, config, {
+      tool: "Match Pairs",
+      rowId: target?.id || "",
+      prompt: target?.left || "",
+      expected: target?.right || "",
+      result: "skipped",
+      total: items.length,
+      durationMs: getStudyPromptDuration(block, {
+        tool: "Match Pairs",
+        rowId: target?.id || "",
+        prompt: target?.left || "",
+        expected: target?.right || ""
+      })
+    });
     config.selectedLeftId = "";
     config.selectedRightId = "";
     config.focusResultId = "";
@@ -9561,7 +11479,7 @@ gridEl.addEventListener("click", (e) => {
   const actionEl = e.target.closest('[data-flashcards-action]');
   if (!actionEl) return;
   const action = actionEl.dataset.flashcardsAction || "";
-  if (!["flip", "prev", "next", "review"].includes(action)) return;
+  if (!["flip", "prev", "next"].includes(action)) return;
 
   const block = actionEl.closest('.block[data-type="flashcards"]');
   if (!block) return;
@@ -9574,13 +11492,26 @@ gridEl.addEventListener("click", (e) => {
   if (!cards.length) return;
 
   if (action === "flip") {
-    const willShowBack = !config.showBack;
-    config.showBack = !config.showBack;
-    if (willShowBack) {
-      applyFlashcardDeckStudyAction(block, { includeSet: true, includeCount: false, includeStage: false });
+    if (!config.showBack) {
+      applyFlashcardScoreAction(block, true);
+      const { card } = getFlashcardDeckCurrent(config);
+      recordStudyActivity(block, config, {
+        tool: "Flashcards",
+        rowId: card?.sourceRowId || card?.id || "",
+        prompt: [card?.frontTitle, card?.frontBody].filter(Boolean).join(" - "),
+        answer: [card?.backTitle, card?.backBody].filter(Boolean).join(" - "),
+        expected: [card?.backTitle, card?.backBody].filter(Boolean).join(" - "),
+        result: "correct",
+        total: cards.length,
+        durationMs: getStudyPromptDuration(block, {
+          tool: "Flashcards",
+          rowId: card?.sourceRowId || card?.id || "",
+          prompt: [card?.frontTitle, card?.frontBody].filter(Boolean).join(" - "),
+          expected: [card?.backTitle, card?.backBody].filter(Boolean).join(" - ")
+        })
+      });
     }
-  } else if (action === "review") {
-    applyFlashcardDeckStudyAction(block);
+    config.showBack = !config.showBack;
   } else if (action === "prev") {
     config.currentIndex = (config.currentIndex - 1 + cards.length) % cards.length;
     config.showBack = false;
@@ -9831,6 +11762,10 @@ function makeRealBlockFromGhost(ghost, preset) {
     b.dataset.radiusState = "square";
   }
 
+  if (preset === "container") {
+    ensureFrameTypingLine(b);
+  }
+
   return b;
 }
  
@@ -9852,6 +11787,58 @@ function stopPlacing(cancel = false) {
     ghostBlock.remove();
     ghostBlock = null;
   }
+}
+
+function computeInboxQuestionCountCallout() {
+  const inboxKey = window.STORAGE_KEYS?.helperInbox || "sanctum_helper_inbox_v1";
+  const inbox = typeof window.readStorageJSON === "function"
+    ? window.readStorageJSON(inboxKey, [])
+    : [];
+  const count = Array.isArray(inbox)
+    ? inbox.filter((item) => (item?.status || "open") === "open").length
+    : 0;
+
+  return {
+    valueText: formatDataCalloutNumber(count),
+    subline: count ? `${count} pending question${count === 1 ? "" : "s"}` : "Inbox clear",
+    configured: true
+  };
+}
+
+function placePresetAtPointer(preset, clientX, clientY) {
+  if (!document.body.classList.contains("editing")) return null;
+  const pointer = getPointerPositionOnGrid(clientX, clientY);
+  if (!pointer.rect) return null;
+
+  const ghost = makeGhostBlock(preset);
+  const defaultDims = getDefaultBlockDimensions(preset);
+  const ghostW = parseInt(ghost.style.width || `${defaultDims.width}`, 10) || defaultDims.width;
+  const ghostH = parseInt(ghost.style.height || `${defaultDims.height}`, 10) || defaultDims.height;
+
+  const x = snap(Math.max(0, Math.min(pointer.x - (ghostW / 2), getGridViewportWidth() - ghostW)));
+  const y = snap(Math.max(0, Math.min(pointer.y - 18, getGridViewportHeight() - ghostH)));
+
+  ghost.style.left = `${x}px`;
+  ghost.style.top = `${y}px`;
+
+  const real = makeRealBlockFromGhost(ghost, preset);
+  gridEl.appendChild(real);
+  selectBlock(real);
+
+  const body = real.querySelector(".block-body");
+  const frameTypingLine = real.dataset.type === "container" ? real.querySelector(".frame-item-text-content") : null;
+  if (frameTypingLine) {
+    frameTypingLine.focus();
+    placeCaretInsideEditable(frameTypingLine);
+  } else if (body) {
+    body.focus();
+  }
+
+  if (typeof autoGrowBlock === "function") autoGrowBlock(real);
+  if (typeof expandGrid === "function") expandGrid();
+  if (typeof saveState === "function") saveState();
+
+  return real;
 }
 
 // Click + to enter place mode (toggle)
@@ -9883,6 +11870,16 @@ gridEl.addEventListener("mousemove", (e) => {
   ghostBlock.style.top = `${y}px`;
 });
 
+gridEl.addEventListener("dblclick", (e) => {
+  if (!window.isInfiniteCanvasPage?.()) return;
+  if (placing || !document.body.classList.contains("editing")) return;
+  if (e.target.closest(".block")) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  placePresetAtPointer("text", e.clientX, e.clientY);
+});
+
 // Click grid to place block
 gridEl.addEventListener("mousedown", (e) => {
   if (!placing || !ghostBlock) return;
@@ -9899,7 +11896,13 @@ gridEl.addEventListener("mousedown", (e) => {
   e.preventDefault();
 
   const body = real.querySelector(".block-body");
-  if (body) body.focus();
+  const frameTypingLine = real.dataset.type === "container" ? real.querySelector(".frame-item-text-content") : null;
+  if (frameTypingLine) {
+    frameTypingLine.focus();
+    placeCaretInsideEditable(frameTypingLine);
+  } else if (body) {
+    body.focus();
+  }
 
  // open modal for page and domain cards AFTER this mousedown finishes
   if (placePreset === "page" || placePreset === "domain") {
@@ -9921,6 +11924,10 @@ gridEl.addEventListener("mousedown", (e) => {
     r.collapse(true);
     sel.removeAllRanges();
     sel.addRange(r);
+  }
+
+  if (placePreset === "button") {
+    window.mountButtonBlock?.(real, { openPicker: true });
   }
 
   if (placePreset === "data-callout") {
@@ -9945,6 +11952,10 @@ gridEl.addEventListener("mousedown", (e) => {
 
   if (placePreset === "match-pairs") {
     window.mountMatchPairsBlock?.(real, { openPicker: true });
+  }
+
+  if (["session-progress", "daily-streak", "recent-answers"].includes(placePreset)) {
+    window.mountStudyDashboardBlock?.(real);
   }
 
   const shouldOpenClockPicker = placePreset === "clock";
@@ -10001,12 +12012,96 @@ function bringBlockToFront(block) {
   block.style.zIndex = String(topZIndex);
 }
 
+function getSelectedLayerTarget() {
+  if (!selectedBlock) return null;
+  return isFrameItemTarget(selectedBlock)
+    ? selectedBlock.closest('.block[data-type="container"]')
+    : selectedBlock;
+}
+
+function getTopLevelLayerBlocks() {
+  return Array.from(document.querySelectorAll("#grid > .block"))
+    .filter((block) => !block.classList.contains("ghost"));
+}
+
+function getSortedLayerBlocks() {
+  return getTopLevelLayerBlocks().sort((a, b) => {
+    const zDiff = (parseInt(a.style.zIndex || "0", 10) || 0) - (parseInt(b.style.zIndex || "0", 10) || 0);
+    if (zDiff) return zDiff;
+    return Array.prototype.indexOf.call(a.parentElement?.children || [], a)
+      - Array.prototype.indexOf.call(b.parentElement?.children || [], b);
+  });
+}
+
+function applyLayerOrder(blocks) {
+  blocks.forEach((block, index) => {
+    block.style.zIndex = String(index + 1);
+  });
+  topZIndex = blocks.length + 1;
+}
+
+function moveSelectedLayer(action) {
+  if (!document.body.classList.contains("editing")) return;
+  const target = getSelectedLayerTarget();
+  if (!target) return;
+
+  const blocks = getSortedLayerBlocks();
+  const currentIndex = blocks.indexOf(target);
+  if (currentIndex < 0) return;
+
+  blocks.splice(currentIndex, 1);
+
+  let nextIndex = currentIndex;
+  if (action === "front") nextIndex = blocks.length;
+  else if (action === "back") nextIndex = 0;
+  else if (action === "forward") nextIndex = Math.min(blocks.length, currentIndex + 1);
+  else if (action === "backward") nextIndex = Math.max(0, currentIndex - 1);
+
+  blocks.splice(nextIndex, 0, target);
+  applyLayerOrder(blocks);
+  selectBlock(selectedBlock);
+  if (typeof saveState === "function") saveState();
+}
+
+function getExplicitFrameTargetForBlock(block) {
+  if (!block || isFrameItemTarget(block) || block.dataset.type === "container") return null;
+  if (!getFrameDropTypeForBlock(block)) return null;
+
+  const blockRect = block.getBoundingClientRect();
+  const centerX = blockRect.left + (blockRect.width / 2);
+  const centerY = blockRect.top + (blockRect.height / 2);
+
+  return Array.from(document.querySelectorAll('#grid > .block[data-type="container"]'))
+    .filter((container) => {
+      if (container === block || block.contains(container)) return false;
+      const rect = container.getBoundingClientRect();
+      return centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom;
+    })
+    .sort((a, b) => (parseInt(b.style.zIndex || "0", 10) || 0) - (parseInt(a.style.zIndex || "0", 10) || 0))[0] || null;
+}
+
+function moveSelectedBlockIntoFrame() {
+  if (!document.body.classList.contains("editing")) return;
+  if (!selectedBlock || isFrameItemTarget(selectedBlock)) return;
+
+  const targetFrame = getExplicitFrameTargetForBlock(selectedBlock);
+  if (!targetFrame) {
+    window.showAppToast?.("Place the block over a frame first.", "info");
+    return;
+  }
+
+  const inserted = dropBlockIntoFrame(targetFrame, selectedBlock, {});
+  if (inserted && typeof saveState === "function") saveState();
+}
+
 function clearDockTypeClasses() {
-  document.body.classList.remove("block-type-text", "block-type-list", "block-type-image", "block-type-container", "block-type-table");
+  document.body.classList.remove("block-type-text", "block-type-list", "block-type-image", "block-type-container", "block-type-table", "block-type-button");
 }
 
 function selectBlock(block) {
   closeCanvasColorPopover();
+  closeImageCropPopover();
+  closeImageFramePopover();
   window.closeCanvasSlashMenu?.();
   if (selectedBlock) selectedBlock.classList.remove("selected");
   selectedBlock = block || null;
@@ -10015,10 +12110,6 @@ function selectBlock(block) {
 
   if (selectedBlock) {
     selectedBlock.classList.add("selected");
-    const ownerBlock = getCanvasOwnerBlock(selectedBlock);
-    if (ownerBlock?.classList?.contains("block")) {
-      bringBlockToFront(ownerBlock);
-    }
     document.body.classList.add("block-selected");
 
     const type = getCanvasTargetType(selectedBlock);
@@ -10028,7 +12119,8 @@ function selectBlock(block) {
     if (type !== "table" && tableSelectionMode) {
       setTableSelectionMode(false);
     }
-    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || type === "typing-drill" || type === "fill-blank" || type === "match-pairs" || isDividerType(type)) document.body.classList.add("block-type-text");
+    if (type === "button") document.body.classList.add("block-type-button");
+    if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || type === "typing-drill" || type === "fill-blank" || type === "match-pairs" || type === "session-progress" || type === "daily-streak" || type === "recent-answers" || isDividerType(type)) document.body.classList.add("block-type-text");
     if (type === "list") document.body.classList.add("block-type-list");
     if (type === "image") document.body.classList.add("block-type-image");
     if (type === "container") document.body.classList.add("block-type-container");
@@ -10046,6 +12138,8 @@ function selectBlock(block) {
 
 function clearSelection() {
   closeCanvasColorPopover();
+  closeImageCropPopover();
+  closeImageFramePopover();
   window.closeCanvasSlashMenu?.();
   if (selectedBlock) selectedBlock.classList.remove("selected");
   selectedBlock = null;
@@ -10101,6 +12195,15 @@ const blockPaddingBtn   = document.getElementById("blockPaddingBtn");
 const blockRadiusBtn    = document.getElementById("blockRadiusBtn");
 const blockNoteBtn      = document.getElementById("blockNoteBtn");
 const blockDeleteBtn    = document.getElementById("blockDeleteBtn");
+const layerSendBackBtn  = document.getElementById("layerSendBackBtn");
+const layerBackwardBtn  = document.getElementById("layerBackwardBtn");
+const layerForwardBtn   = document.getElementById("layerForwardBtn");
+const layerBringFrontBtn = document.getElementById("layerBringFrontBtn");
+const layerIntoFrameBtn = document.getElementById("layerIntoFrameBtn");
+const buttonBgBtn       = document.getElementById("buttonBgBtn");
+const buttonTextColorBtn = document.getElementById("buttonTextColorBtn");
+const buttonBorderBtn   = document.getElementById("buttonBorderBtn");
+const buttonRadiusBtn   = document.getElementById("buttonRadiusBtn");
 const canvasColorPopover = document.getElementById("canvasColorPopover");
 
 const CANVAS_BG_DEFAULT_COLORS = [
@@ -10136,8 +12239,12 @@ const CANVAS_COLOR_TRIGGER_SELECTOR = [
   "#blockTextColorBtn",
   "#blockBorderBtn",
   "#listBorderBtn",
-  "#imageBorderBtn",
-  "#containerBorderBtn"
+  "#imageCropBtn",
+  "#imageFrameBtn",
+  "#containerBorderBtn",
+  "#buttonBgBtn",
+  "#buttonTextColorBtn",
+  "#buttonBorderBtn"
 ].join(", ");
 
 let activeCanvasColorMode = "";
@@ -10223,9 +12330,9 @@ function setDockToolTint(button, color = "") {
 
 function getCanvasColorTriggerButtons(mode = "") {
   const idsByMode = {
-    bg: ["blockBgBtn"],
-    text: ["blockTextColorBtn"],
-    border: ["blockBorderBtn", "listBorderBtn", "imageBorderBtn", "containerBorderBtn"]
+    bg: ["blockBgBtn", "buttonBgBtn"],
+    text: ["blockTextColorBtn", "buttonTextColorBtn"],
+    border: ["blockBorderBtn", "listBorderBtn", "containerBorderBtn", "buttonBorderBtn"]
   };
 
   return (idsByMode[mode] || [])
@@ -10254,10 +12361,33 @@ function refreshCanvasDockToolState() {
   const textColor = getSelectedCanvasColorValue("text");
   const borderColor = getSelectedCanvasColorValue("border");
   const ui = typeof getUIState === "function" ? getUIState() : { openOverlay: null };
+  const cropButton = document.getElementById("imageCropBtn");
+  const frameButton = document.getElementById("imageFrameBtn");
+  const imageShape = selectedBlock && getCanvasTargetType(selectedBlock) === "image"
+    ? normalizeImageCropShape(selectedBlock.dataset.imageCropShape)
+    : "original";
+  const imageFrame = selectedBlock && getCanvasTargetType(selectedBlock) === "image"
+    ? normalizeImageFrameStyle(selectedBlock.dataset.imageFrameStyle)
+    : "none";
 
   setDockToolTint(blockBgBtn, bgColor);
   setDockToolTint(blockTextColorBtn, textColor);
   getCanvasColorTriggerButtons("border").forEach((button) => setDockToolTint(button, borderColor));
+  setDockToolTint(buttonBgBtn, bgColor);
+  setDockToolTint(buttonTextColorBtn, textColor);
+
+  const layerTarget = getSelectedLayerTarget();
+  const layerBlocks = getSortedLayerBlocks();
+  const layerIndex = layerTarget ? layerBlocks.indexOf(layerTarget) : -1;
+  const canLayer = layerIndex >= 0;
+  if (layerSendBackBtn) layerSendBackBtn.disabled = !canLayer || layerIndex === 0;
+  if (layerBackwardBtn) layerBackwardBtn.disabled = !canLayer || layerIndex === 0;
+  if (layerForwardBtn) layerForwardBtn.disabled = !canLayer || layerIndex === layerBlocks.length - 1;
+  if (layerBringFrontBtn) layerBringFrontBtn.disabled = !canLayer || layerIndex === layerBlocks.length - 1;
+  if (layerIntoFrameBtn) layerIntoFrameBtn.disabled = !selectedBlock || isFrameItemTarget(selectedBlock) || !getExplicitFrameTargetForBlock(selectedBlock);
+
+  cropButton?.classList.toggle("active", imageShape !== "original");
+  frameButton?.classList.toggle("active", imageFrame !== "none");
   toolDivider?.classList.toggle("active", ui.openOverlay === "dividerDockMenu");
   refreshTableDockToolState();
 }
@@ -10481,6 +12611,220 @@ window.addEventListener("resize", () => {
   positionCanvasColorPopover(activeCanvasColorTrigger);
 });
 
+let imageCropPopover = null;
+let activeImageCropTrigger = null;
+let imageFramePopover = null;
+let activeImageFrameTrigger = null;
+
+function getImageCropPopover() {
+  if (imageCropPopover) return imageCropPopover;
+  imageCropPopover = document.createElement("div");
+  imageCropPopover.id = "imageCropPopover";
+  imageCropPopover.className = "image-crop-popover";
+  imageCropPopover.hidden = true;
+  document.body.appendChild(imageCropPopover);
+  imageCropPopover.addEventListener("mousedown", (event) => event.stopPropagation());
+  return imageCropPopover;
+}
+
+function positionImageCropPopover(trigger) {
+  const popover = getImageCropPopover();
+  if (!trigger || !popover) return;
+
+  const rect = trigger.getBoundingClientRect();
+  const popoverWidth = popover.offsetWidth || 190;
+  const popoverHeight = popover.offsetHeight || 260;
+
+  let left = rect.left - popoverWidth - 8;
+  if (left < 12) {
+    left = Math.min(window.innerWidth - popoverWidth - 12, rect.right + 8);
+  }
+
+  let top = rect.top + (rect.height / 2) - (popoverHeight / 2);
+  top = Math.max(12, Math.min(window.innerHeight - popoverHeight - 12, top));
+
+  popover.style.left = `${Math.round(left)}px`;
+  popover.style.top = `${Math.round(top)}px`;
+}
+
+function closeImageCropPopover() {
+  if (!imageCropPopover) return;
+  activeImageCropTrigger?.classList.remove("active");
+  imageCropPopover.hidden = true;
+  imageCropPopover.innerHTML = "";
+  activeImageCropTrigger = null;
+}
+
+function getImageFramePopover() {
+  if (imageFramePopover) return imageFramePopover;
+  imageFramePopover = document.createElement("div");
+  imageFramePopover.id = "imageFramePopover";
+  imageFramePopover.className = "image-frame-popover";
+  imageFramePopover.hidden = true;
+  document.body.appendChild(imageFramePopover);
+  imageFramePopover.addEventListener("mousedown", (event) => event.stopPropagation());
+  return imageFramePopover;
+}
+
+function positionImageFramePopover(trigger) {
+  const popover = getImageFramePopover();
+  if (!trigger || !popover) return;
+
+  const rect = trigger.getBoundingClientRect();
+  const popoverWidth = popover.offsetWidth || 190;
+  const popoverHeight = popover.offsetHeight || 196;
+
+  let left = rect.left - popoverWidth - 8;
+  if (left < 12) {
+    left = Math.min(window.innerWidth - popoverWidth - 12, rect.right + 8);
+  }
+
+  let top = rect.top + (rect.height / 2) - (popoverHeight / 2);
+  top = Math.max(12, Math.min(window.innerHeight - popoverHeight - 12, top));
+
+  popover.style.left = `${Math.round(left)}px`;
+  popover.style.top = `${Math.round(top)}px`;
+}
+
+function closeImageFramePopover() {
+  if (!imageFramePopover) return;
+  activeImageFrameTrigger?.classList.remove("active");
+  imageFramePopover.hidden = true;
+  imageFramePopover.innerHTML = "";
+  activeImageFrameTrigger = null;
+}
+
+function buildImageFramePopover() {
+  const popover = getImageFramePopover();
+  popover.innerHTML = "";
+
+  const currentFrame = normalizeImageFrameStyle(selectedBlock?.dataset?.imageFrameStyle);
+  IMAGE_FRAME_OPTIONS.forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `image-frame-option${option.value === currentFrame ? " active" : ""}`;
+    button.dataset.imageFrameStyle = option.value;
+    button.innerHTML = `
+      <span class="image-frame-option-icon" data-frame="${option.value}"></span>
+      <span class="image-frame-option-label">${option.label}</span>
+    `;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      withSelectedBlock((block) => {
+        if (getCanvasTargetType(block) !== "image") return;
+        applyImageFrameStyle(block, option.value, { skipSave: true });
+      });
+      closeImageFramePopover();
+    });
+    popover.appendChild(button);
+  });
+}
+
+function toggleImageFramePopover(trigger) {
+  if (!selectedBlock || getCanvasTargetType(selectedBlock) !== "image" || !trigger) return;
+
+  const popover = getImageFramePopover();
+  if (!popover.hidden && activeImageFrameTrigger === trigger) {
+    closeImageFramePopover();
+    return;
+  }
+
+  closeCanvasColorPopover();
+  closeImageCropPopover();
+  activeImageFrameTrigger?.classList.remove("active");
+  buildImageFramePopover();
+  activeImageFrameTrigger = trigger;
+  trigger.classList.add("active");
+  popover.hidden = false;
+  positionImageFramePopover(trigger);
+}
+
+function buildImageCropPopover() {
+  const popover = getImageCropPopover();
+  popover.innerHTML = "";
+
+  const currentShape = normalizeImageCropShape(selectedBlock?.dataset?.imageCropShape);
+  IMAGE_CROP_OPTIONS.forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `image-crop-option${option.value === currentShape ? " active" : ""}`;
+    button.dataset.imageCropShape = option.value;
+    button.innerHTML = `
+      <span class="image-crop-option-icon" data-shape="${option.value}"></span>
+      <span class="image-crop-option-label">${option.label}</span>
+    `;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      withSelectedBlock((block) => {
+        if (getCanvasTargetType(block) !== "image") return;
+        applyImageCropShape(block, option.value, { resize: true, skipSave: true });
+        if (isFrameItemTarget(block)) {
+          const ownerBlock = getCanvasOwnerBlock(block);
+          if (ownerBlock && typeof autoGrowBlock === "function") autoGrowBlock(ownerBlock);
+        }
+      });
+      closeImageCropPopover();
+    });
+    popover.appendChild(button);
+  });
+}
+
+function toggleImageCropPopover(trigger) {
+  if (!selectedBlock || getCanvasTargetType(selectedBlock) !== "image" || !trigger) return;
+
+  const popover = getImageCropPopover();
+  if (!popover.hidden && activeImageCropTrigger === trigger) {
+    closeImageCropPopover();
+    return;
+  }
+
+  closeCanvasColorPopover();
+  closeImageFramePopover();
+  activeImageCropTrigger?.classList.remove("active");
+  buildImageCropPopover();
+  activeImageCropTrigger = trigger;
+  trigger.classList.add("active");
+  popover.hidden = false;
+  positionImageCropPopover(trigger);
+}
+
+document.addEventListener("mousedown", (event) => {
+  if (event.target.closest("#imageCropPopover, #imageCropBtn")) return;
+  closeImageCropPopover();
+});
+
+document.addEventListener("mousedown", (event) => {
+  if (event.target.closest("#imageFramePopover, #imageFrameBtn")) return;
+  closeImageFramePopover();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeImageCropPopover();
+    closeImageFramePopover();
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (!imageCropPopover || imageCropPopover.hidden) return;
+  if (!activeImageCropTrigger) {
+    closeImageCropPopover();
+    return;
+  }
+  positionImageCropPopover(activeImageCropTrigger);
+});
+
+window.addEventListener("resize", () => {
+  if (!imageFramePopover || imageFramePopover.hidden) return;
+  if (!activeImageFrameTrigger) {
+    closeImageFramePopover();
+    return;
+  }
+  positionImageFramePopover(activeImageFrameTrigger);
+});
+
 function withSelectedBlock(fn) {
   if (!document.body.classList.contains("editing")) return;
   if (!selectedBlock) return;
@@ -10503,7 +12847,13 @@ function applyBlockBackgroundTone(block, value = "") {
 
   block.style.backgroundColor = value;
 
-  if (getCanvasTargetType(block) === "table") {
+  const type = getCanvasTargetType(block);
+  if (type === "button") {
+    window.mountButtonBlock?.(block);
+    return;
+  }
+
+  if (type === "table") {
     const wrap = block.querySelector(".block-table-wrap");
     if (wrap) wrap.style.backgroundColor = value || "";
 
@@ -10528,6 +12878,11 @@ function applyBlockBorderTone(block, value = "") {
     block.style.removeProperty("border-width");
     block.style.removeProperty("border-style");
     block.style.removeProperty("border-color");
+  }
+
+  if (getCanvasTargetType(block) === "button") {
+    window.mountButtonBlock?.(block);
+    return;
   }
 
   if (getCanvasTargetType(block) === "calendar") {
@@ -10560,8 +12915,48 @@ function applyBlockTextTone(block, value = "") {
   if (!block) return;
 
   block.style.color = value;
+  if (value) block.style.setProperty("--page-db-checklist-text", value);
+  else block.style.removeProperty("--page-db-checklist-text");
 
   const type = getCanvasTargetType(block);
+  if (type === "button") {
+    window.mountButtonBlock?.(block);
+    return;
+  }
+  const textParts = block.querySelectorAll([
+    ".canvas-rich-heading",
+    ".block-body h1",
+    ".block-body h2",
+    ".block-body h3",
+    ".data-callout-value",
+    ".data-callout-label",
+    ".data-callout-icon",
+    ".data-callout-project-single strong",
+    ".data-callout-project-single small",
+    ".data-callout-project-row strong",
+    ".data-callout-project-row small",
+    ".button-block-shell",
+    ".button-block-btn",
+    ".button-block-label",
+    ".button-block-icon",
+    ".page-database-block-shell",
+    ".page-database-gallery-card",
+    ".page-database-gallery-card-title",
+    ".page-database-gallery-card-field-label",
+    ".page-database-gallery-card-field-value",
+    ".page-database-gallery-add-card",
+    ".page-database-checklist",
+    ".page-database-checklist-title",
+    ".page-database-checklist-title-input",
+    ".page-database-checklist-side-value",
+    ".page-database-checklist-add-row",
+    ".progress-block-title",
+    ".progress-block-value",
+    ".study-widget-title"
+  ].join(", "));
+  textParts.forEach((part) => {
+    part.style.color = value || "";
+  });
 
   if (type === "container") {
     const title = block.querySelector(".container-title");
@@ -10573,6 +12968,9 @@ function applyBlockTextTone(block, value = "") {
 
   if (type === "table") {
     block.querySelectorAll(".table-cell").forEach((cell) => {
+      cell.style.color = value || "";
+    });
+    block.querySelectorAll("th.table-cell").forEach((cell) => {
       cell.style.color = value || "";
     });
     return;
@@ -10728,6 +13126,12 @@ if (blockDeleteBtn) {
   });
 }
 
+layerSendBackBtn?.addEventListener("click", () => moveSelectedLayer("back"));
+layerBackwardBtn?.addEventListener("click", () => moveSelectedLayer("backward"));
+layerForwardBtn?.addEventListener("click", () => moveSelectedLayer("forward"));
+layerBringFrontBtn?.addEventListener("click", () => moveSelectedLayer("front"));
+layerIntoFrameBtn?.addEventListener("click", () => moveSelectedBlockIntoFrame());
+
 
 // == List block dock buttons ==
 const listDeleteBtn  = document.getElementById("listDeleteBtn");
@@ -10757,37 +13161,66 @@ if (listNoteBtn)    listNoteBtn.addEventListener("click", () => withSelectedBloc
 
 // == Image block dock buttons ==
 const imageDeleteBtn  = document.getElementById("imageDeleteBtn");
-const imageBgBtn      = document.getElementById("imageBgBtn");
-const imageBorderBtn  = document.getElementById("imageBorderBtn");
-const imageRadiusBtn  = document.getElementById("imageRadiusBtn");
 const imageReplaceBtn = document.getElementById("imageReplaceBtn");
+const imageCropBtn    = document.getElementById("imageCropBtn");
+const imageFrameBtn   = document.getElementById("imageFrameBtn");
 
 if (imageDeleteBtn)  imageDeleteBtn.addEventListener("click", () => deleteSelectedBlock());
-if (imageBgBtn)      imageBgBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  const state = b.dataset.bgState || "default";
-  if (state === "default") { b.style.backgroundColor = "#23201c"; b.dataset.bgState = "alt"; }
-  else { b.style.backgroundColor = ""; b.dataset.bgState = "default"; }
-}));
-if (imageBorderBtn)  imageBorderBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  toggleCanvasColorPopover("border", imageBorderBtn);
-});
-if (imageRadiusBtn)  imageRadiusBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  const state = b.dataset.radiusState || "rounded";
-  if (state === "rounded") { b.style.borderRadius = "2px"; b.dataset.radiusState = "square"; }
-  else { b.style.borderRadius = "12px"; b.dataset.radiusState = "rounded"; }
-}));
 if (imageReplaceBtn) imageReplaceBtn.addEventListener("click", () => withSelectedBlock((b) => {
   promptImageUploadForBlock(b);
 }));
+if (imageCropBtn) imageCropBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleImageCropPopover(imageCropBtn);
+});
+if (imageFrameBtn) imageFrameBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  toggleImageFramePopover(imageFrameBtn);
+});
 
 // == Container block dock buttons ==
 const containerBgBtn     = document.getElementById("containerBgBtn");
 const containerBorderBtn = document.getElementById("containerBorderBtn");
 const containerRadiusBtn = document.getElementById("containerRadiusBtn");
 const containerDeleteBtn = document.getElementById("containerDeleteBtn");
+const buttonConfigBtn    = document.getElementById("buttonConfigBtn");
+const buttonDeleteBtn    = document.getElementById("buttonDeleteBtn");
 
 if (containerDeleteBtn) containerDeleteBtn.addEventListener("click", () => deleteSelectedBlock());
+if (buttonDeleteBtn)    buttonDeleteBtn.addEventListener("click", () => deleteSelectedBlock());
+if (buttonBgBtn) {
+  buttonBgBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover("bg", buttonBgBtn);
+  });
+}
+if (buttonTextColorBtn) {
+  buttonTextColorBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover("text", buttonTextColorBtn);
+  });
+}
+if (buttonBorderBtn) {
+  buttonBorderBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover("border", buttonBorderBtn);
+  });
+}
+if (buttonRadiusBtn) {
+  buttonRadiusBtn.addEventListener("click", () => withSelectedBlock((b) => {
+    const state = b.dataset.radiusState || "rounded";
+    if (state === "rounded") { b.style.borderRadius = "2px"; b.dataset.radiusState = "square"; }
+    else { b.style.borderRadius = "12px"; b.dataset.radiusState = "rounded"; }
+    window.mountButtonBlock?.(b);
+  }));
+}
+if (buttonConfigBtn) {
+  buttonConfigBtn.addEventListener("click", () => {
+    if (selectedBlock && selectedBlock.dataset.type === "button") {
+      window.openButtonBlockConfig?.(selectedBlock);
+    }
+  });
+}
 if (containerBgBtn) containerBgBtn.addEventListener("click", () => withSelectedBlock((b) => {
   const state = b.dataset.bgState || "default";
   if (state === "default") { b.style.backgroundColor = "#23201c"; b.dataset.bgState = "alt"; }
@@ -11126,6 +13559,7 @@ tableSelectBtn?.addEventListener("click", () => {
 });
 toolDivider?.addEventListener("click", (e) => {
   e.preventDefault();
+  if (document.body.classList.contains("infinite-canvas-page")) return;
   toggleDividerDockMenu(toolDivider);
 });
 
@@ -11301,12 +13735,13 @@ function expandGrid(options = {}) {
     return;
   }
 
-  grid.style.removeProperty("minWidth");
-  clampAllBlocksWithinGrid();
-
-  const { maxBottom } = getGridContentBounds(grid);
+  const { maxRight, maxBottom } = getGridContentBounds(grid);
+  const canvas = document.querySelector(".page-canvas");
+  const viewportWidth = Math.max(0, Math.floor(canvas?.clientWidth || window.innerWidth || 0));
+  const stableWidth = Math.max(viewportWidth, maxRight + 200, GRID_SIZE * 50);
 
   const minHeight = window.innerHeight - 70;
+  grid.style.minWidth = `${stableWidth}px`;
   grid.style.minHeight = `${Math.max(minHeight, maxBottom + 200)}px`;
 }
 
@@ -11594,6 +14029,14 @@ document.addEventListener("keydown", (e) => {
   const item = editable.closest(".frame-item");
   if (!item || !isFrameTextItemEmpty(item)) return;
 
+  const containerBlock = item.closest('.block[data-type="container"]');
+  const siblingItems = Array.from(item.parentElement?.querySelectorAll(":scope > .frame-item") || []);
+  if (siblingItems.length <= 1) {
+    e.preventDefault();
+    focusFrameTextItem(item);
+    return;
+  }
+
   e.preventDefault();
 
   const previousEditable = item.previousElementSibling?.querySelector?.(".frame-item-text-content");
@@ -11614,9 +14057,20 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  prompt?.focus();
+  const typingLine = containerBlock ? ensureFrameTypingLine(containerBlock, { focus: true }) : null;
+  if (!typingLine) prompt?.focus();
 });
 
+document.addEventListener("input", (e) => {
+  const editable = e.target.closest?.(".frame-item-text-content");
+  if (!editable) return;
+
+  const containerBlock = editable.closest('.block[data-type="container"]');
+  if (!containerBlock) return;
+
+  ensureFrameTypingLine(containerBlock);
+  if (typeof autoGrowBlock === "function") autoGrowBlock(containerBlock);
+});
 
 
 

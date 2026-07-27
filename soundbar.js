@@ -119,12 +119,33 @@ function syncLoopButtonUI() {
   if (!btn) return;
   btn.classList.toggle('active', loopTrack);
   btn.title = loopTrack ? 'Loop (on)' : 'Loop';
+  btn.setAttribute('aria-pressed', loopTrack ? 'true' : 'false');
 }
 
 function syncVolumeUI() {
   const input = document.getElementById('soundbarVolume');
   if (!input) return;
   input.value = String(musicPlayer.volume);
+}
+
+function syncSoundbarTrackPresentation(track = null) {
+  const trackNameEl = document.getElementById('soundbarTrackName');
+  const trackMetaEl = document.getElementById('soundbarTrackMeta');
+  const coverEl = document.getElementById('soundbarCover');
+  const name = track ? getSafeTrackName(track.name) : 'No track loaded';
+
+  if (trackNameEl) trackNameEl.textContent = name;
+  if (trackMetaEl) trackMetaEl.textContent = track ? 'Local track' : 'Your local music';
+  if (coverEl) {
+    const fallback = track
+      ? Array.from(name).find((character) => /[\p{L}\p{N}]/u.test(character)) || '♪'
+      : '♪';
+    coverEl.classList.toggle('has-track', !!track);
+    coverEl.innerHTML = '';
+    const fallbackEl = document.createElement('span');
+    fallbackEl.textContent = fallback.toUpperCase();
+    coverEl.appendChild(fallbackEl);
+  }
 }
 
 async function restorePersistedPlaylist() {
@@ -174,8 +195,7 @@ async function restorePersistedPlaylist() {
   playlist = restored;
   if (!playlist.length) {
     currentTrackIndex = -1;
-    const trackNameEl = document.getElementById('soundbarTrackName');
-    if (trackNameEl) trackNameEl.textContent = 'No track loaded';
+    syncSoundbarTrackPresentation();
     return;
   }
 
@@ -450,8 +470,12 @@ function renderPlaylist() {
         if (!playlist.length) {
           currentTrackIndex = -1;
           musicPlayer.src = '';
-          document.getElementById('soundbarTrackName').textContent = 'No track loaded';
-          document.getElementById('soundPlayBtn').textContent = '▶';
+          syncSoundbarTrackPresentation();
+          const playButton = document.getElementById('soundPlayBtn');
+          if (playButton) {
+            playButton.textContent = '▶';
+            playButton.setAttribute('aria-label', 'Play');
+          }
           renderPlaylist();
           writeSoundbarLibrary();
           await flushSoundbarLibrary();
@@ -486,7 +510,7 @@ function loadTrack(index) {
   if (index < 0 || index >= playlist.length) return;
   currentTrackIndex = index;
   musicPlayer.src = playlist[index].url;
-  document.getElementById('soundbarTrackName').textContent = playlist[index].name;
+  syncSoundbarTrackPresentation(playlist[index]);
   renderPlaylist();
   writeSoundbarLibrary();
 }
@@ -495,12 +519,20 @@ function playMusic() {
   if (!playlist.length) return;
   if (currentTrackIndex < 0) loadTrack(0);
   musicPlayer.play().catch(() => {});
-  document.getElementById('soundPlayBtn').textContent = '⏸';
+  const playButton = document.getElementById('soundPlayBtn');
+  if (playButton) {
+    playButton.textContent = '⏸';
+    playButton.setAttribute('aria-label', 'Pause');
+  }
 }
 
 function pauseMusic() {
   musicPlayer.pause();
-  document.getElementById('soundPlayBtn').textContent = '▶';
+  const playButton = document.getElementById('soundPlayBtn');
+  if (playButton) {
+    playButton.textContent = '▶';
+    playButton.setAttribute('aria-label', 'Play');
+  }
 }
 
 musicPlayer.addEventListener('ended', () => {
@@ -511,7 +543,11 @@ musicPlayer.addEventListener('ended', () => {
     loadTrack((currentTrackIndex + 1) % playlist.length);
     playMusic();
   } else {
-    document.getElementById('soundPlayBtn').textContent = '▶';
+    const playButton = document.getElementById('soundPlayBtn');
+    if (playButton) {
+      playButton.textContent = '▶';
+      playButton.setAttribute('aria-label', 'Play');
+    }
   }
 });
 
@@ -573,9 +609,14 @@ document.getElementById('soundbarToggleBtn')?.addEventListener('click', () => {
 
   const isOpen = panel.classList.contains('open');
 
+  const bar = document.getElementById('soundbarBar');
+
   if (isOpen) {
     panel.classList.remove('open');
+    bar?.classList.remove('panel-open');
     btn.textContent = '⌃';
+    btn.setAttribute('aria-label', 'Open music controls');
+    btn.setAttribute('aria-expanded', 'false');
     soundbarExpanded = false;
 
     if (typeof setUIState === "function") {
@@ -588,6 +629,9 @@ document.getElementById('soundbarToggleBtn')?.addEventListener('click', () => {
   }
 
   soundbarExpanded = true;
+  bar?.classList.add('panel-open');
+  btn.setAttribute('aria-label', 'Close music controls');
+  btn.setAttribute('aria-expanded', 'true');
 
   if (typeof openPanel === "function") {
     openPanel('soundbarPanel', panel);
@@ -611,6 +655,7 @@ window.addEventListener('beforeunload', cleanupPlaylistObjectUrls);
 
 async function initSoundbar() {
   renderAmbientGrid();
+  syncSoundbarTrackPresentation();
   await restorePersistedPlaylist();
   renderPlaylist();
   syncLoopButtonUI();

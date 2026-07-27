@@ -24,6 +24,7 @@ const STORAGE_KEYS = {
   pageBlocks: "sanctum_page_blocks",
   pageSettings: "sanctum_page_settings",
   pageActivity: "sanctum_page_activity_v1",
+  journals: "sanctum_journals_v1",
   documents: "sanctum_documents",
   docSettings: "sanctum_doc_settings",
   pageDatabases: "sanctum_page_databases",
@@ -42,7 +43,24 @@ const STORAGE_KEYS = {
   helperActionLog: "sanctum_helper_action_log_v1",
   helperChatLog: "sanctum_helper_chat_log_v1",
   helperUserProfile: "sanctum_helper_user_profile_v1",
-  helperMemoryProfile: "sanctum_helper_memory_profile_v1"
+  helperMemoryProfile: "sanctum_helper_memory_profile_v1",
+  settings: "sanctum_settings",
+  threads: "sanctum_threads",
+  anchors: "sanctum_anchors",
+  annotations: "sanctum_annotations",
+  canvasLines: "sanctum_canvas_lines",
+  pageProps: "sanctum_page_props_v1",
+  relationshipGraphSettings: "sanctum.relationshipGraph.settings.v1",
+  lexicon: "sanctumLexicon",
+  styleKits: "sanctum_style_kits",
+  pagePresets: "sanctum_page_presets",
+  studyActivity: "sanctum.studyActivity.v1",
+  activePageSession: "sanctum_active_page_session_v1",
+  soundbarLibrary: "sanctum_soundbar_library_v1",
+  knowledgeViewState: "sanctum_knowledge_view_state",
+  historyState: "sanctum_v3_state",
+  splitLayout: "sanctum_split_layout_v1",
+  tabsLayout: "sanctum_tabs_layout_v1"
 };
 
 function readStorageJSON(key, fallback) {
@@ -326,13 +344,13 @@ function normalizeCanvasOffset(value = 0) {
 
 function normalizeThemeMode(value = "", fallback = "dark") {
   const safe = String(value || "").trim().toLowerCase();
-  if (safe === "light" || safe === "dark") return safe;
-  return fallback === "light" ? "light" : "dark";
+  if (safe === "light" || safe === "dark" || safe === "black") return safe;
+  return fallback === "light" ? "light" : fallback === "black" ? "black" : "dark";
 }
 
 function normalizePageThemeOverride(value = "") {
   const safe = String(value || "").trim().toLowerCase();
-  return safe === "light" || safe === "dark" ? safe : "";
+  return safe === "light" || safe === "dark" || safe === "black" ? safe : "";
 }
 
 function normalizePageSettings(settings = {}) {
@@ -522,17 +540,340 @@ window.setPageBlocks = setPageBlocks;
 window.readAllDocuments = readAllDocuments;
 window.writeAllDocuments = writeAllDocuments;
 
+function getVaultRecords() {
+  const domains = Array.isArray(window.userDomains)
+    ? window.userDomains
+    : readStorageJSON(STORAGE_KEYS.domains, []);
+  const pages = Array.isArray(window.userPages)
+    ? window.userPages
+    : readStorageJSON(STORAGE_KEYS.pagesRegistry, []);
+  return [
+    ...domains.map((domain) => ({
+      ...domain,
+      type: "domain",
+      parent: "home",
+      isScopeBoundary: true,
+      recordKind: "space",
+      canonicalId: ""
+    })),
+    ...pages.map((page) => {
+      const record = { ...page, type: page.type || "page" };
+      return {
+        ...record,
+        recordKind: getVaultRecordKind(record),
+        canonicalId: normalizeVaultCanonicalId(record.canonicalId || record.canonicalPageId || record.duplicateOf || record.variantOf || "")
+      };
+    })
+  ];
+}
+
+function getVaultRecordById(recordId = "") {
+  const safeId = String(recordId || "").trim();
+  if (!safeId) return null;
+  return getVaultRecords().find((record) => record.id === safeId) || null;
+}
+
+function normalizeVaultAliases(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isVaultScopeBoundary(record) {
+  if (!record?.id) return false;
+  if (record.type === "domain") return true;
+  if (record.isScopeBoundary === true || record.definesScope === true) return true;
+  if (record.isScopeBoundary === false || record.definesScope === false) return false;
+  return record.containerType === "project";
+}
+
+function getVaultScopeId(recordId = "") {
+  const safeId = String(recordId || "").trim();
+  if (!safeId || safeId === "home" || (typeof SYSTEM_PAGES !== "undefined" && SYSTEM_PAGES[safeId])) {
+    return "";
+  }
+
+  const records = new Map(getVaultRecords().map((record) => [record.id, record]));
+  let current = records.get(safeId) || null;
+  const visited = new Set();
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (isVaultScopeBoundary(current)) return current.id;
+    const parentId = current.parent || "";
+    if (!parentId || parentId === "home") return "";
+    current = records.get(parentId) || null;
+  }
+
+  return "";
+}
+
+function getVaultTopLevelScopeId(recordId = "") {
+  return getVaultScopeId(recordId);
+}
+
+function getVaultScopeLabel(scopeId = "") {
+  const scope = getVaultRecordById(scopeId);
+  return scope?.title || "";
+}
+
+function getVaultRecordPath(recordId = "") {
+  const safeId = String(recordId || "").trim();
+  if (!safeId) return [];
+  const records = new Map(getVaultRecords().map((record) => [record.id, record]));
+  const path = [];
+  let current = records.get(safeId) || null;
+  const visited = new Set();
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    path.unshift(current);
+    const parentId = current.parent || "";
+    if (!parentId || parentId === "home") break;
+    current = records.get(parentId) || null;
+  }
+
+  return path;
+}
+
+function getVaultRecordPathLabel(recordId = "", options = {}) {
+  const path = getVaultRecordPath(recordId);
+  const labels = path
+    .filter((record) => !options.omitSelf || record.id !== recordId)
+    .map((record) => record.title || "Untitled")
+    .filter(Boolean);
+  return labels.join(" / ");
+}
+
+function isVaultRecordInScope(recordOrId, scopeId = "") {
+  const safeScopeId = String(scopeId || "").trim();
+  if (!safeScopeId) return true;
+  const recordId = typeof recordOrId === "string" ? recordOrId : recordOrId?.id;
+  if (!recordId) return false;
+  return recordId === safeScopeId || getVaultTopLevelScopeId(recordId) === safeScopeId;
+}
+
+function compareVaultScopedRecords(left, right, scopeId = "") {
+  const safeScopeId = String(scopeId || "").trim();
+  if (safeScopeId) {
+    const leftScoped = isVaultRecordInScope(left, safeScopeId) ? 1 : 0;
+    const rightScoped = isVaultRecordInScope(right, safeScopeId) ? 1 : 0;
+    if (leftScoped !== rightScoped) return rightScoped - leftScoped;
+  }
+
+  const leftTitle = String(left?.title || "").trim();
+  const rightTitle = String(right?.title || "").trim();
+  return leftTitle.localeCompare(rightTitle, undefined, { sensitivity: "base", numeric: true });
+}
+
+function normalizeVaultRecordKind(value = "", fallback = "record") {
+  const safe = String(value || "").trim().toLowerCase();
+  return ["space", "record", "note", "view", "database-row"].includes(safe) ? safe : fallback;
+}
+
+function getDefaultVaultRecordKind(record = {}) {
+  if (record?.type === "domain") return "space";
+  if (record?.containerType === "database-row") return "database-row";
+  if (record?.containerType === "hub" || record?.containerType === "project") return "space";
+  if (record?.containerType === "detail") return "record";
+  if (record?.layout === "sheet") return "view";
+  return "record";
+}
+
+function getVaultRecordKind(record = {}) {
+  return normalizeVaultRecordKind(record?.recordKind || record?.kind || "", getDefaultVaultRecordKind(record));
+}
+
+function normalizeVaultCanonicalId(value = "") {
+  return String(value || "").trim();
+}
+
+function getVaultCanonicalId(recordOrId) {
+  const recordId = typeof recordOrId === "string" ? String(recordOrId || "").trim() : String(recordOrId?.id || "").trim();
+  if (!recordId) return "";
+
+  const records = new Map(getVaultRecords().map((record) => [record.id, record]));
+  let current = records.get(recordId) || null;
+  const visited = new Set();
+
+  while (current?.id && !visited.has(current.id)) {
+    visited.add(current.id);
+    const nextId = normalizeVaultCanonicalId(current.canonicalId || current.canonicalPageId || current.duplicateOf || current.variantOf || "");
+    if (!nextId || nextId === current.id || !records.has(nextId)) return current.id;
+    current = records.get(nextId);
+  }
+
+  return recordId;
+}
+
+function getVaultCanonicalRecord(recordOrId) {
+  const canonicalId = getVaultCanonicalId(recordOrId);
+  return canonicalId ? getVaultRecordById(canonicalId) : null;
+}
+
+function isVaultCanonicalRecord(recordOrId) {
+  const recordId = typeof recordOrId === "string" ? String(recordOrId || "").trim() : String(recordOrId?.id || "").trim();
+  if (!recordId) return false;
+  return getVaultCanonicalId(recordOrId) === recordId;
+}
+
+function normalizeVaultLookupTitle(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/['\u2019]s\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getVaultTitleEditDistance(left = "", right = "") {
+  const a = String(left || "");
+  const b = String(right || "");
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  let prev = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      next[j] = Math.min(
+        next[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+    }
+    prev = next;
+  }
+  return prev[b.length];
+}
+
+function getVaultTitleMatchScore(inputTitle = "", candidateTitle = "") {
+  const input = normalizeVaultLookupTitle(inputTitle);
+  const candidate = normalizeVaultLookupTitle(candidateTitle);
+  if (!input || !candidate) return 0;
+  if (input === candidate) return 100;
+
+  const longerLength = Math.max(input.length, candidate.length);
+  if (longerLength < 8) return 0;
+
+  const inputWords = input.split(" ").filter(Boolean);
+  const candidateWords = candidate.split(" ").filter(Boolean);
+  const inputWordSet = new Set(inputWords);
+  const candidateWordSet = new Set(candidateWords);
+  const sharedWords = [...inputWordSet].filter((word) => candidateWordSet.has(word)).length;
+  const sharedCoverage = sharedWords / Math.max(1, Math.min(inputWordSet.size, candidateWordSet.size));
+  const similarity = 1 - (getVaultTitleEditDistance(input, candidate) / longerLength);
+
+  if (similarity >= 0.9 && sharedCoverage >= 0.5) return Math.round(similarity * 95);
+  if (similarity >= 0.84 && sharedCoverage >= 0.75) return Math.round(similarity * 90);
+  return 0;
+}
+
+function getVaultRecordMatchScore(query = "", record) {
+  const titleScore = getVaultTitleMatchScore(query, record?.title || "");
+  const aliases = normalizeVaultAliases(record?.aliases || record?.alias || "");
+  const aliasScore = aliases.reduce((best, alias) => Math.max(best, getVaultTitleMatchScore(query, alias)), 0);
+  return Math.max(titleScore, Math.max(0, aliasScore - 5));
+}
+
+function getVaultCreateMatchCandidates(options = {}) {
+  const title = String(options.title || "").trim();
+  if (!normalizeVaultLookupTitle(title)) return [];
+
+  const type = options.type === "domain" ? "domain" : "page";
+  const parentId = String(options.parentId || "").trim();
+  const containerType = String(options.containerType || "").trim();
+  const currentPageId = String(options.currentPageId || "").trim();
+  const scopeId = String(options.scopeId || (currentPageId ? getVaultTopLevelScopeId(currentPageId) : "") || "").trim();
+  const includeCurrentPage = options.includeCurrentPage !== false;
+  const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Number(options.limit)) : 6;
+
+  return getVaultRecords()
+    .map((record) => ({ ...record, vaultMatchScore: getVaultRecordMatchScore(title, record) }))
+    .filter((record) => record.vaultMatchScore > 0)
+    .filter((record) => type === "domain" ? record.type === "domain" : record.type !== "domain")
+    .filter((record) => type === "domain" || record.containerType !== "database-row")
+    .filter((record) => {
+      if (includeCurrentPage && currentPageId && record.id === currentPageId) return true;
+      if (parentId && record.parent === parentId) return true;
+      if (scopeId && isVaultRecordInScope(record, scopeId)) return true;
+      return !parentId && !scopeId;
+    })
+    .sort((a, b) => {
+      const aCurrent = includeCurrentPage && currentPageId && a.id === currentPageId ? 1 : 0;
+      const bCurrent = includeCurrentPage && currentPageId && b.id === currentPageId ? 1 : 0;
+      if (aCurrent !== bCurrent) return bCurrent - aCurrent;
+
+      const aSameParent = parentId && a.parent === parentId ? 1 : 0;
+      const bSameParent = parentId && b.parent === parentId ? 1 : 0;
+      if (aSameParent !== bSameParent) return bSameParent - aSameParent;
+
+      const aScoped = scopeId && isVaultRecordInScope(a, scopeId) ? 1 : 0;
+      const bScoped = scopeId && isVaultRecordInScope(b, scopeId) ? 1 : 0;
+      if (aScoped !== bScoped) return bScoped - aScoped;
+
+      if (a.vaultMatchScore !== b.vaultMatchScore) return b.vaultMatchScore - a.vaultMatchScore;
+
+      const aCanonical = isVaultCanonicalRecord(a) ? 1 : 0;
+      const bCanonical = isVaultCanonicalRecord(b) ? 1 : 0;
+      if (aCanonical !== bCanonical) return bCanonical - aCanonical;
+
+      if (containerType) {
+        const aSameType = (a.containerType || "page") === containerType ? 1 : 0;
+        const bSameType = (b.containerType || "page") === containerType ? 1 : 0;
+        if (aSameType !== bSameType) return bSameType - aSameType;
+      }
+
+      return compareVaultScopedRecords(a, b, scopeId);
+    })
+    .slice(0, limit);
+}
+
+function findExistingVaultPageForCreate(options = {}) {
+  const candidate = getVaultCreateMatchCandidates({ ...options, limit: 1 })[0] || null;
+  return getVaultCanonicalRecord(candidate) || candidate;
+}
+
+window.getVaultRecords = getVaultRecords;
+window.getVaultRecordById = getVaultRecordById;
+window.normalizeVaultAliases = normalizeVaultAliases;
+window.isVaultScopeBoundary = isVaultScopeBoundary;
+window.getVaultScopeId = getVaultScopeId;
+window.getVaultTopLevelScopeId = getVaultTopLevelScopeId;
+window.getVaultScopeLabel = getVaultScopeLabel;
+window.getVaultRecordPath = getVaultRecordPath;
+window.getVaultRecordPathLabel = getVaultRecordPathLabel;
+window.isVaultRecordInScope = isVaultRecordInScope;
+window.compareVaultScopedRecords = compareVaultScopedRecords;
+window.normalizeVaultRecordKind = normalizeVaultRecordKind;
+window.getDefaultVaultRecordKind = getDefaultVaultRecordKind;
+window.getVaultRecordKind = getVaultRecordKind;
+window.getVaultCanonicalId = getVaultCanonicalId;
+window.getVaultCanonicalRecord = getVaultCanonicalRecord;
+window.isVaultCanonicalRecord = isVaultCanonicalRecord;
+window.normalizeVaultLookupTitle = normalizeVaultLookupTitle;
+window.getVaultTitleMatchScore = getVaultTitleMatchScore;
+window.getVaultRecordMatchScore = getVaultRecordMatchScore;
+window.getVaultCreateMatchCandidates = getVaultCreateMatchCandidates;
+window.findExistingVaultPageForCreate = findExistingVaultPageForCreate;
+
 function updateLinkedCardTitlesEverywhere(pageId, newTitle) {
   const allBlocks = readAllPageBlocks();
-  let changed = false;
-
-  for (const hostPageId in allBlocks) {
-    const blocks = Array.isArray(allBlocks[hostPageId]) ? allBlocks[hostPageId] : [];
-    allBlocks[hostPageId] = blocks.map((b) => {
-      let nextBlock = b;
-
-      if (b.linkedPageId === pageId) {
-        changed = true;
+  const changed = window.SanctumPageLifecycle.renameLinkedBlocks(
+    allBlocks,
+    pageId,
+    newTitle,
+    {
+      getItems: getSerializedContainerItems,
+      transformDirect: (b) => {
         const dims = getLinkedPageCardDimensions(newTitle, {
           type: b.type || "page",
           padding: b.padding || "",
@@ -541,22 +882,10 @@ function updateLinkedCardTitlesEverywhere(pageId, newTitle) {
           w: b.w || 0,
           h: b.h || 0
         });
-        nextBlock = { ...b, pageCardTitle: newTitle, w: dims.width, h: dims.height };
+        return { ...b, pageCardTitle: newTitle, w: dims.width, h: dims.height };
       }
-
-      const nextItems = getSerializedContainerItems(nextBlock).map((item) => {
-        if (item.linkedPageId !== pageId) return item;
-        changed = true;
-        return { ...item, pageCardTitle: newTitle };
-      });
-
-      if (nextItems.length) {
-        nextBlock = { ...nextBlock, containerItems: nextItems };
-      }
-
-      return nextBlock;
-    });
-  }
+    }
+  );
 
   if (changed) {
     writeAllPageBlocks(allBlocks);
@@ -572,16 +901,10 @@ function updateLinkedCardTitlesEverywhere(pageId, newTitle) {
 }
 
 function updatePinnedPageTitle(pageId, newTitle) {
-  let changed = false;
-  pinnedPages = pinnedPages.map((pin) => {
-    if (pin.id === pageId) {
-      changed = true;
-      return { ...pin, title: newTitle };
-    }
-    return pin;
-  });
+  const result = window.SanctumPageLifecycle.renamePins(pinnedPages, pageId, newTitle);
+  pinnedPages = result.pins;
 
-  if (changed) {
+  if (result.changed) {
     savePins();
     const pinPanel = document.getElementById("pinPanel");
     if (pinPanel?.classList.contains("open")) {
@@ -741,15 +1064,25 @@ function refreshSidebarLabelsAfterRename(pageId) {
   }
 }
 
-function applyPageRenameEverywhere(pageId, newTitle) {
+function applyPageRenameEverywhere(pageId, newTitle, options = {}) {
   const page =
     userDomains.find((d) => d.id === pageId) ||
     userPages.find((p) => p.id === pageId);
 
   if (!page) return;
 
-  page.title = newTitle;
+  window.SanctumPageLifecycle.renameRecord(
+    userDomains.some((domain) => domain.id === pageId) ? userDomains : userPages,
+    pageId,
+    newTitle
+  );
   saveSanctumRegistry();
+  if (options.skipDatabaseSync !== true && typeof window.syncDatabaseRowTitleFromPage === "function") {
+    window.syncDatabaseRowTitleFromPage(pageId);
+  }
+  if (typeof window.invalidateRelationshipGraphCache === "function") {
+    window.invalidateRelationshipGraphCache();
+  }
 
   if (currentPageId === pageId) {
     const titleEl = document.getElementById("pageTitle");
@@ -768,7 +1101,9 @@ function applyPageRenameEverywhere(pageId, newTitle) {
   updateLinkedCardTitlesEverywhere(pageId, newTitle);
   updatePinnedPageTitle(pageId, newTitle);
   refreshSidebarLabelsAfterRename(pageId);
+  if (typeof window.renderTabBar === "function") window.renderTabBar();
 }
+window.applyPageRenameEverywhere = applyPageRenameEverywhere;
 
 function applyPageIconEverywhere(pageId, newIcon) {
   const page =
@@ -811,21 +1146,7 @@ function applyPageIconEverywhere(pageId, newIcon) {
 }
 
 function collectDescendantPageIds(rootId) {
-  const ids = new Set();
-  const stack = [rootId];
-
-  while (stack.length) {
-    const parentId = stack.pop();
-
-    userPages.forEach((page) => {
-      if (page.parent === parentId && !ids.has(page.id)) {
-        ids.add(page.id);
-        stack.push(page.id);
-      }
-    });
-  }
-
-  return Array.from(ids);
+  return window.SanctumPageLifecycle.collectDescendantPageIds(userPages, rootId);
 }
 
 let trashItems = readStorageJSON(STORAGE_KEYS.trash, []);
@@ -867,14 +1188,7 @@ function formatTrashKindLabel(item) {
 }
 
 function mergeUniqueById(existing = [], incoming = []) {
-  const merged = [...existing];
-  incoming.forEach((item) => {
-    if (!item?.id) return;
-    if (!merged.some((entry) => entry.id === item.id)) {
-      merged.push(item);
-    }
-  });
-  return merged;
+  return window.SanctumPageLifecycle.mergeUniqueById(existing, incoming);
 }
 
 function snapshotTrashItem(rootId, kind = "page") {
@@ -887,6 +1201,12 @@ function snapshotTrashItem(rootId, kind = "page") {
   const itemCount = kind === "domain" ? targetIds.length + 1 : targetIds.length;
 
   const allBlocks = readAllPageBlocks();
+  const lifecycleSnapshot = window.SanctumPageLifecycle.snapshotPageTree({
+    pages: userPages,
+    pinnedPages,
+    bookmarks,
+    pageBlocks: allBlocks
+  }, rootId);
   const allDocs = readAllDocuments();
   const pageSettings = readStorageJSON(STORAGE_KEYS.pageSettings, {});
   const docSettings = readStorageJSON(STORAGE_KEYS.docSettings, {});
@@ -906,11 +1226,12 @@ function snapshotTrashItem(rootId, kind = "page") {
     rootContainerType: rootPage?.containerType || null,
     itemCount,
     domain: rootDomain ? { ...rootDomain } : null,
-    pages: userPages.filter((p) => targetIds.includes(p.id)).map((p) => ({ ...p })),
-    pinnedPages: pinnedPages.filter((p) => targetIds.includes(p.id)).map((p) => ({ ...p })),
-    bookmarks: bookmarks.filter((id) => targetIds.includes(id)),
-    pageBlocks: {},
-    linkedBlocksByHost: {},
+    pages: lifecycleSnapshot.pages,
+    pinnedPages: lifecycleSnapshot.pinnedPages,
+    bookmarks: lifecycleSnapshot.bookmarks,
+    pageBlocks: lifecycleSnapshot.pageBlocks,
+    linkedBlocksByHost: lifecycleSnapshot.linkedBlocksByHost,
+    linkedItemsByHost: lifecycleSnapshot.linkedItemsByHost,
     documents: {},
     docSettings: {},
     pageSettings: {},
@@ -921,7 +1242,6 @@ function snapshotTrashItem(rootId, kind = "page") {
   };
 
   targetIds.forEach((id) => {
-    if (Array.isArray(allBlocks[id])) item.pageBlocks[id] = allBlocks[id].map((b) => ({ ...b }));
     if (Object.prototype.hasOwnProperty.call(allDocs, id)) item.documents[id] = allDocs[id];
     if (Object.prototype.hasOwnProperty.call(docSettings, id)) item.docSettings[id] = docSettings[id];
     if (Object.prototype.hasOwnProperty.call(pageSettings, id)) item.pageSettings[id] = pageSettings[id];
@@ -930,15 +1250,6 @@ function snapshotTrashItem(rootId, kind = "page") {
     if (Object.prototype.hasOwnProperty.call(anchors, id)) item.anchors[id] = anchors[id];
     if (Object.prototype.hasOwnProperty.call(legacyAnnotations, id)) item.annotations[id] = legacyAnnotations[id];
   });
-
-  for (const hostId in allBlocks) {
-    if (targetIds.includes(hostId)) continue;
-    const blocks = Array.isArray(allBlocks[hostId]) ? allBlocks[hostId] : [];
-    const linkedBlocks = blocks.filter((b) => targetIds.includes(b.linkedPageId));
-    if (linkedBlocks.length) {
-      item.linkedBlocksByHost[hostId] = linkedBlocks.map((b) => ({ ...b }));
-    }
-  }
 
   const nextTrashItems = [item, ...trashItems];
   if (!saveTrash(nextTrashItems)) {
@@ -974,19 +1285,12 @@ function restoreTrashItem(trashId) {
   }
 
   const allBlocks = readAllPageBlocks();
-  Object.entries(item.pageBlocks || {}).forEach(([hostId, blocks]) => {
-    allBlocks[hostId] = Array.isArray(allBlocks[hostId]) ? allBlocks[hostId] : [];
-    const existingIds = new Set(allBlocks[hostId].map((b) => b.id));
-    const restoredBlocks = blocks.filter((b) => !existingIds.has(b.id)).map((b) => ({ ...b }));
-    allBlocks[hostId] = [...allBlocks[hostId], ...restoredBlocks];
+  window.SanctumPageLifecycle.restoreBlockMap(allBlocks, item.pageBlocks || {});
+  window.SanctumPageLifecycle.restoreBlockMap(allBlocks, item.linkedBlocksByHost || {}, {
+    hasHost: hasRestorableHost
   });
-
-  Object.entries(item.linkedBlocksByHost || {}).forEach(([hostId, blocks]) => {
-    if (!hasRestorableHost(hostId)) return;
-    allBlocks[hostId] = Array.isArray(allBlocks[hostId]) ? allBlocks[hostId] : [];
-    const existingIds = new Set(allBlocks[hostId].map((b) => b.id));
-    const restoredBlocks = blocks.filter((b) => !existingIds.has(b.id)).map((b) => ({ ...b }));
-    allBlocks[hostId] = [...allBlocks[hostId], ...restoredBlocks];
+  window.SanctumPageLifecycle.restoreLinkedItems(allBlocks, item.linkedItemsByHost || {}, {
+    hasHost: hasRestorableHost
   });
   writeAllPageBlocks(allBlocks);
 
@@ -1124,20 +1428,17 @@ function deletePagesAndStoredData(pageIds = []) {
   const ids = Array.from(new Set(pageIds.filter(Boolean)));
   if (!ids.length) return;
 
-  userPages = userPages.filter((p) => !ids.includes(p.id));
-  pinnedPages = pinnedPages.filter((p) => !ids.includes(p.id));
-  bookmarks = bookmarks.filter((id) => !ids.includes(id));
-
   const allBlocks = readAllPageBlocks();
-  ids.forEach((id) => {
-    delete allBlocks[id];
-  });
-
-  for (const hostId in allBlocks) {
-    const blocks = Array.isArray(allBlocks[hostId]) ? allBlocks[hostId] : [];
-    allBlocks[hostId] = blocks.filter((b) => !ids.includes(b.linkedPageId));
-  }
-  writeAllPageBlocks(allBlocks);
+  const deleted = window.SanctumPageLifecycle.removePagesAndLinkedBlocks({
+    pages: userPages,
+    pinnedPages,
+    bookmarks,
+    pageBlocks: allBlocks
+  }, ids);
+  userPages = deleted.pages;
+  pinnedPages = deleted.pinnedPages;
+  bookmarks = deleted.bookmarks;
+  writeAllPageBlocks(deleted.pageBlocks);
 
   const allDocs = readAllDocuments();
   ids.forEach((id) => {
@@ -1145,9 +1446,23 @@ function deletePagesAndStoredData(pageIds = []) {
   });
   writeAllDocuments(allDocs);
 
+  const journals = readStorageJSON(STORAGE_KEYS.journals, {});
+  ids.forEach((id) => {
+    delete journals[id];
+  });
+  writeStorageJSON(STORAGE_KEYS.journals, journals);
+
   const docSettings = readStorageJSON(STORAGE_KEYS.docSettings, {});
   ids.forEach((id) => delete docSettings[id]);
   writeStorageJSON(STORAGE_KEYS.docSettings, docSettings);
+
+  const pageDatabases = readStorageJSON(STORAGE_KEYS.pageDatabases, {});
+  ids.forEach((id) => delete pageDatabases[id]);
+  writeStorageJSON(STORAGE_KEYS.pageDatabases, pageDatabases);
+
+  const legacyCalendarDatabases = readStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, {});
+  ids.forEach((id) => delete legacyCalendarDatabases[id]);
+  writeStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, legacyCalendarDatabases);
 
   const pageSettings = readStorageJSON(STORAGE_KEYS.pageSettings, {});
   ids.forEach((id) => delete pageSettings[id]);
@@ -1175,6 +1490,7 @@ function deletePagesAndStoredData(pageIds = []) {
   renderSidebarDomains();
   renderSidebarPins();
   renderSidebarBookmarks();
+  if (typeof window.syncTabsWithRegistry === "function") window.syncTabsWithRegistry(ids);
 }
 
 function deleteDomainTree(domainId) {
@@ -1187,17 +1503,13 @@ function deleteDomainTree(domainId) {
   deletePagesAndStoredData(childPageIds);
 
   const allBlocks = readAllPageBlocks();
-  if (Array.isArray(allBlocks["home"])) {
-    allBlocks["home"] = allBlocks["home"].filter((b) => b.linkedPageId !== domainId);
-  }
-
-  for (const hostId in allBlocks) {
-    const blocks = Array.isArray(allBlocks[hostId]) ? allBlocks[hostId] : [];
-    allBlocks[hostId] = blocks.filter((b) => b.linkedPageId !== domainId);
-  }
-
-  delete allBlocks[domainId];
-  writeAllPageBlocks(allBlocks);
+  const deletedDomainData = window.SanctumPageLifecycle.removePagesAndLinkedBlocks({
+    pages: userPages,
+    pinnedPages,
+    bookmarks,
+    pageBlocks: allBlocks
+  }, [domainId]);
+  writeAllPageBlocks(deletedDomainData.pageBlocks);
 
   const pageSettings = readStorageJSON(STORAGE_KEYS.pageSettings, {});
   delete pageSettings[domainId];
@@ -1213,6 +1525,9 @@ function deleteDomainTree(domainId) {
   renderSidebarDomains();
   renderSidebarPins();
   renderSidebarBookmarks();
+  if (typeof window.syncTabsWithRegistry === "function") {
+    window.syncTabsWithRegistry([domainId, ...childPageIds]);
+  }
 }
 
 function deleteSinglePageTree(pageId) {

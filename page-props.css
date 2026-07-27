@@ -1,0 +1,334 @@
+/* =====================================================
+   Page Properties Strip
+   Sits between page title and canvas. Canvas stays free.
+   ===================================================== */
+
+#pagePropsStrip {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 48px 14px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.07));
+  flex-shrink: 0;
+  background: transparent;
+}
+
+#pagePropsStrip.active {
+  display: flex;
+}
+
+/* ── Row ─────────────────────────────────────────── */
+
+.pps-row {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 0;
+}
+
+.pps-label {
+  width: 130px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+  user-select: none;
+  padding-right: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Relation chips ──────────────────────────────── */
+
+.pps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 4px;
+  background: var(--hover, rgba(255,255,255,0.07));
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  color: var(--text, #e8e8e8);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.pps-chip:hover {
+  background: var(--hover-strong, rgba(255,255,255,0.12));
+  border-color: var(--border-active, rgba(255,255,255,0.2));
+}
+
+.pps-chip-icon {
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pps-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pps-chip-remove {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+  flex-shrink: 0;
+  padding: 0 0 0 2px;
+  transition: color 0.1s;
+  cursor: pointer;
+}
+
+.pps-chip-remove:hover {
+  color: var(--text, #e8e8e8);
+}
+
+/* ── + Add button ────────────────────────────────── */
+
+.pps-add-btn {
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px dashed var(--border, rgba(255,255,255,0.12));
+  background: transparent;
+  color: var(--text-dim, rgba(255,255,255,0.3));
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.pps-add-btn:hover {
+  color: var(--text, #e8e8e8);
+  border-color: var(--border-active, rgba(255,255,255,0.25));
+}
+
+/* ── Text value ──────────────────────────────────── */
+
+.pps-text-value {
+  font-size: 13px;
+  color: var(--text, #e8e8e8);
+  min-width: 80px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+  cursor: text;
+}
+
+.pps-text-value:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-dim, rgba(255,255,255,0.25));
+  pointer-events: none;
+}
+
+.pps-text-value:focus {
+  border-color: var(--border-active, rgba(255,255,255,0.2));
+  background: var(--hover, rgba(255,255,255,0.04));
+}
+
+/* ── Add Property ────────────────────────────────── */
+
+.pps-add-prop-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 3px 0;
+  background: none;
+  border: none;
+  color: var(--text-dim, rgba(255,255,255,0.25));
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.pps-add-prop-btn:hover {
+  color: var(--text, #e8e8e8);
+}
+
+/* ── Picker popup ────────────────────────────────── */
+
+.pps-picker {
+  z-index: 2000;
+  background: var(--bg-raised, #222);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  width: 260px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pps-picker-search {
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  background: transparent;
+  color: var(--text, #e8e8e8);
+  font-size: 13px;
+  outline: none;
+}
+
+.pps-picker-search::placeholder {
+  color: var(--text-dim, rgba(255,255,255,0.3));
+}
+
+.pps-picker-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px;
+}
+
+.pps-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: none;
+  border: none;
+  color: var(--text, #e8e8e8);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.pps-picker-item:hover {
+  background: var(--hover, rgba(255,255,255,0.07));
+}
+
+.pps-picker-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.pps-picker-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pps-picker-cat {
+  font-size: 10px;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.pps-picker-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-dim, rgba(255,255,255,0.35));
+  font-size: 12px;
+}
+
+/* ── Add Property dialog ─────────────────────────── */
+
+.pps-add-dialog {
+  z-index: 2000;
+  background: var(--bg-raised, #222);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  width: 260px;
+  padding: 16px;
+}
+
+.pps-add-dialog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #e8e8e8);
+  margin-bottom: 10px;
+}
+
+.pps-add-dialog-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: var(--hover, rgba(255,255,255,0.05));
+  color: var(--text, #e8e8e8);
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.pps-add-dialog-input::placeholder {
+  color: var(--text-dim, rgba(255,255,255,0.3));
+}
+
+.pps-add-dialog-types {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.pps-type-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: transparent;
+  color: var(--text-dim, rgba(255,255,255,0.45));
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.pps-type-btn.active {
+  background: var(--accent, rgba(255,255,255,0.12));
+  color: var(--text, #e8e8e8);
+  border-color: var(--border-active, rgba(255,255,255,0.25));
+}
+
+.pps-add-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pps-add-cancel {
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: transparent;
+  color: var(--text-dim, rgba(255,255,255,0.5));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pps-add-confirm {
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: none;
+  background: var(--accent-bg, rgba(255,255,255,0.15));
+  color: var(--text, #e8e8e8);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pps-add-confirm:hover {
+  background: var(--accent-bg-hover, rgba(255,255,255,0.22));
+}

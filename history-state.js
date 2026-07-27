@@ -11,7 +11,10 @@ let isRestoringHistory = false;
 function pushHistory() {
   if (isRestoringHistory) return;
 
-  const state = JSON.stringify(serializeBlocks());
+  const state = JSON.stringify({
+    pageId: typeof currentPageId === "string" ? currentPageId : "",
+    blocks: serializeBlocks()
+  });
 
   if (historyIndex >= 0 && historyStack[historyIndex] === state) {
     return;
@@ -27,22 +30,62 @@ function pushHistory() {
 }
 
 function undo() {
-  if (historyIndex <= 0) return;
-  historyIndex--;
-  restoreHistory();
+  const activePageId = typeof currentPageId === "string" ? currentPageId : "";
+  let nextIndex = historyIndex - 1;
+  while (nextIndex >= 0) {
+    const entry = parseHistoryEntry(historyStack[nextIndex]);
+    if (entry.pageId === activePageId) {
+      historyIndex = nextIndex;
+      restoreHistory();
+      return;
+    }
+    nextIndex--;
+  }
 }
 
 function redo() {
-  if (historyIndex >= historyStack.length - 1) return;
-  historyIndex++;
-  restoreHistory();
+  const activePageId = typeof currentPageId === "string" ? currentPageId : "";
+  let nextIndex = historyIndex + 1;
+  while (nextIndex < historyStack.length) {
+    const entry = parseHistoryEntry(historyStack[nextIndex]);
+    if (entry.pageId === activePageId) {
+      historyIndex = nextIndex;
+      restoreHistory();
+      return;
+    }
+    nextIndex++;
+  }
+}
+
+function parseHistoryEntry(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return {
+        pageId: typeof currentPageId === "string" ? currentPageId : "",
+        blocks: parsed
+      };
+    }
+    return {
+      pageId: String(parsed?.pageId || ""),
+      blocks: Array.isArray(parsed?.blocks) ? parsed.blocks : []
+    };
+  } catch (_error) {
+    return {
+      pageId: "",
+      blocks: []
+    };
+  }
 }
 
 function restoreHistory() {
   if (historyIndex < 0 || historyIndex >= historyStack.length) return;
 
+  const entry = parseHistoryEntry(historyStack[historyIndex]);
+  if (entry.pageId && entry.pageId !== currentPageId) return;
+
   isRestoringHistory = true;
-  const blocks = JSON.parse(historyStack[historyIndex]);
+  const blocks = entry.blocks;
   clearGrid();
   const grid = document.getElementById("grid");
   blocks.forEach((data) => {
@@ -54,6 +97,14 @@ function restoreHistory() {
   saveState(false);
   isRestoringHistory = false;
 }
+
+function resetHistoryForCurrentPage() {
+  historyStack.splice(0);
+  historyIndex = -1;
+  pushHistory();
+}
+
+window.resetHistoryForCurrentPage = resetHistoryForCurrentPage;
 const STORAGE_KEY = "sanctum_v3_state";
 
 // Turn the current blocks into plain data we can store
@@ -66,6 +117,8 @@ function serializeBlocks() {
 
 
 function saveState(recordHistory = true) {
+  const activePage = typeof userPages !== "undefined" ? userPages.find((page) => page.id === currentPageId) : null;
+  if (activePage?.layout === "journal") return true;
   const blocks = serializeBlocks();
   const state = {
     page: document.getElementById("pageTitle")?.textContent || "Home",
@@ -148,10 +201,23 @@ function buildBlockFromData(data) {
     if (data.dbProperties) b.dataset.dbProperties = data.dbProperties;
     if (data.dbRows) b.dataset.dbRows = data.dbRows;
     if (data.dbColumnWidths) b.dataset.dbColumnWidths = data.dbColumnWidths;
+    if (data.dbFilters) b.dataset.dbFilters = data.dbFilters;
+    if (data.dbSorts) b.dataset.dbSorts = data.dbSorts;
+    if (data.dbGroupBy) b.dataset.dbGroupBy = data.dbGroupBy;
     if (data.dbFolderState) b.dataset.dbFolderState = data.dbFolderState;
+    if (data.dbResetConfig) b.dataset.dbResetConfig = data.dbResetConfig;
+    if (data.dbChecklistAutomation) b.dataset.dbChecklistAutomation = data.dbChecklistAutomation;
+    if (data.dbStatusAutomation) b.dataset.dbStatusAutomation = data.dbStatusAutomation;
+    if (data.dbGalleryCardSize) b.dataset.dbGalleryCardSize = data.dbGalleryCardSize;
+    if (data.dbGalleryCardFields) b.dataset.dbGalleryCardFields = data.dbGalleryCardFields;
+    if (data.dbGalleryCardPropertyIds) b.dataset.dbGalleryCardPropertyIds = data.dbGalleryCardPropertyIds;
+    if (data.dbGalleryOpenMode) b.dataset.dbGalleryOpenMode = data.dbGalleryOpenMode;
+    if (data.dbRowPageLayout) b.dataset.dbRowPageLayout = data.dbRowPageLayout;
+    if (data.dbRowPageKind) b.dataset.dbRowPageKind = data.dbRowPageKind;
     if (data.dbSourceKind) b.dataset.dbSourceKind = data.dbSourceKind;
     if (data.dbSourcePageId) b.dataset.dbSourcePageId = data.dbSourcePageId;
     if (data.dbSourceBlockId) b.dataset.dbSourceBlockId = data.dbSourceBlockId;
+    if (data.dbViewTitle) b.dataset.dbViewTitle = data.dbViewTitle;
     if (data.calendarCollapsed) b.dataset.calendarCollapsed = data.calendarCollapsed;
     if (data.calendarExpandedWidth) b.dataset.calendarExpandedWidth = data.calendarExpandedWidth;
 
@@ -178,6 +244,9 @@ function buildBlockFromData(data) {
     if (data.dataCalloutLabelPos) b.dataset.dataCalloutLabelPos = data.dataCalloutLabelPos;
     if ("dataCalloutShowIcon" in data) b.dataset.dataCalloutShowIcon = data.dataCalloutShowIcon;
     if ("dataCalloutIcon" in data) b.dataset.dataCalloutIcon = data.dataCalloutIcon;
+    if ("dataCalloutShowProjectImage" in data) b.dataset.dataCalloutShowProjectImage = data.dataCalloutShowProjectImage;
+    if ("dataCalloutProjectImageLayout" in data) b.dataset.dataCalloutProjectImageLayout = data.dataCalloutProjectImageLayout;
+    if ("dataCalloutProjectImageSize" in data) b.dataset.dataCalloutProjectImageSize = data.dataCalloutProjectImageSize;
 
     requestAnimationFrame(() => {
       window.mountDataCalloutBlock?.(b);
@@ -243,6 +312,15 @@ function buildBlockFromData(data) {
     });
   }
 
+  if (["session-progress", "daily-streak", "recent-answers"].includes(data.type)) {
+    if (data.studyDashboardConfig) b.dataset.studyDashboardConfig = data.studyDashboardConfig;
+    if (data.studySessionId) b.dataset.studySessionId = data.studySessionId;
+
+    requestAnimationFrame(() => {
+      window.mountStudyDashboardBlock?.(b);
+    });
+  }
+
   if (data.type === "clock") {
     b.dataset.clockStyle = data.clockStyle || "digital";
     b.dataset.clockSize = data.clockSize || "md";
@@ -260,6 +338,13 @@ function buildBlockFromData(data) {
     syncWebLinkCardTarget(b, { url: data.externalUrl || "" });
   }
 
+  if (data.type === "button") {
+    if (data.buttonConfig) b.dataset.buttonConfig = data.buttonConfig;
+    requestAnimationFrame(() => {
+      window.mountButtonBlock?.(b);
+    });
+  }
+
   // restore styles if present
   b.dataset.bgState = data.bg ? "alt" : "default";
   b.dataset.borderState = data.borderColor ? "alt" : "default";
@@ -273,6 +358,16 @@ function buildBlockFromData(data) {
   if (data.padding) applyBlockPaddingTone(b, data.padding);
   if (data.radius) b.style.borderRadius = data.radius;
   if (data.hasNote)    b.classList.add("has-note");
+
+  if (data.type === "image") {
+    if (typeof applyImageCropShape === "function") {
+      applyImageCropShape(b, data.imageCropShape || "original", { resize: false, skipSave: true });
+    }
+    if (typeof applyImageFrameStyle === "function") {
+      applyImageFrameStyle(b, data.imageFrameStyle || "none", { skipSave: true });
+    }
+  }
+
   if (data.linkedPageId) b.dataset.linkedPageId = data.linkedPageId;
   if (getPageCardView(data) === "gallery") b.dataset.pageCardView = "gallery";
   b.dataset.pageCardImageMode = getPageCardImageMode(data);
@@ -393,6 +488,14 @@ function getMinHeightForBlock(block) {
     }
     const naturalHeight = paddingTop + fixedHeight + stageHeight + (Math.max(0, visibleChildren.length - 1) * shellGap) + paddingBottom + 4;
     return Math.max(GRID_SIZE * (layout === "focus" ? 8 : 5), Math.ceil(naturalHeight / GRID_SIZE) * GRID_SIZE);
+  }
+
+  if (["session-progress", "daily-streak", "recent-answers"].includes(block?.dataset?.type)) {
+    const shell = block.querySelector(".study-widget-shell");
+    if (!shell) return GRID_SIZE * 3;
+    const shellHeight = Math.max(shell.scrollHeight, shell.getBoundingClientRect().height);
+    const minimumRows = block.dataset.type === "recent-answers" ? 4 : 3;
+    return Math.max(GRID_SIZE * minimumRows, Math.ceil(shellHeight / GRID_SIZE) * GRID_SIZE);
   }
 
   const title = block.querySelector(".block-title");

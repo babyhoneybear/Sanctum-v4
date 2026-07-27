@@ -43,6 +43,13 @@
 			.filter(Boolean);
 	}
 
+	function normalizeAliasList(rawValue = "") {
+		if (typeof window.normalizeVaultAliases === "function") {
+			return window.normalizeVaultAliases(rawValue);
+		}
+		return parsePropertyOptions(rawValue);
+	}
+
 	function createPropertyId() {
 		return `prop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	}
@@ -80,6 +87,45 @@
 			map[record.id] = record;
 		});
 		return map;
+	}
+
+	function getScopedRelationOptions(records, pageId, selectedId = "") {
+		const currentScopeId = typeof window.getVaultTopLevelScopeId === "function"
+			? window.getVaultTopLevelScopeId(pageId)
+			: "";
+		const selected = selectedId ? records.find((item) => item.id === selectedId) : null;
+		const sorted = [...records].sort((left, right) => {
+			if (typeof window.compareVaultScopedRecords === "function") {
+				return window.compareVaultScopedRecords(left, right, currentScopeId);
+			}
+			return String(left.title || "").localeCompare(String(right.title || ""), undefined, { sensitivity: "base", numeric: true });
+		});
+
+		if (!currentScopeId || typeof window.isVaultRecordInScope !== "function") {
+			return sorted.map((item) => `
+				<option value="${escapeHTML(item.id)}"${item.id === selectedId ? " selected" : ""}>${escapeHTML(item.title || "Untitled")}</option>
+			`).join("");
+		}
+
+		const current = sorted.filter((item) => window.isVaultRecordInScope(item, currentScopeId));
+		const outside = sorted.filter((item) => !window.isVaultRecordInScope(item, currentScopeId));
+		const scopeLabel = typeof window.getVaultScopeLabel === "function" ? window.getVaultScopeLabel(currentScopeId) : "";
+		const renderOptions = (items) => items.map((item) => `
+			<option value="${escapeHTML(item.id)}"${item.id === selectedId ? " selected" : ""}>${escapeHTML(item.title || "Untitled")}</option>
+		`).join("");
+		const groups = [];
+
+		if (current.length) {
+			groups.push(`<optgroup label="${escapeHTML(scopeLabel ? `Current area: ${scopeLabel}` : "Current area")}">${renderOptions(current)}</optgroup>`);
+		}
+		if (outside.length) {
+			groups.push(`<optgroup label="Outside current area">${renderOptions(outside)}</optgroup>`);
+		}
+		if (selected && !current.includes(selected) && !outside.includes(selected)) {
+			groups.push(`<optgroup label="Selected">${renderOptions([selected])}</optgroup>`);
+		}
+
+		return groups.join("");
 	}
 
 	function isDocumentPage(pageId) {
@@ -547,20 +593,143 @@
 		return [];
 	}
 
+	function getConnectionTypeLabel(type = "") {
+		const labels = {
+			"page-card": "page card",
+			mention: "mention",
+			relation: "field link",
+			semantic: "smart link",
+			"database-row": "database item"
+		};
+		return labels[type] || "connection";
+	}
+
+	function getConnectionRecordTitle(nodeId = "", pageMap = {}) {
+		if (pageMap[nodeId]) return pageMap[nodeId].title || "Untitled";
+		if (typeof window.getVaultRecordById === "function") {
+			const record = window.getVaultRecordById(nodeId);
+			if (record) return record.title || "Untitled";
+		}
+		const graph = typeof window.buildRelationshipGraphModel === "function" ? window.buildRelationshipGraphModel() : null;
+		const node = graph?.nodes?.find((item) => item.id === nodeId);
+		return node?.title || "Unknown page";
+	}
+
+	function getConnectionPathLabel(nodeId = "") {
+		if (String(nodeId || "").startsWith("dbrow:")) return "Database item";
+		if (typeof window.getVaultRecordPathLabel === "function") {
+			return window.getVaultRecordPathLabel(nodeId, { omitSelf: true });
+		}
+		return "";
+	}
+
+	function buildConnectionRowHTML(item, action = "open-page") {
+		const path = item.path ? `<span class="knowledge-link-meta">${escapeHTML(item.path)}</span>` : "";
+		return `
+			<button
+				class="knowledge-link-row"
+				data-knowledge-action="${escapeHTML(action)}"
+				data-target-page-id="${escapeHTML(item.pageId)}"
+			>
+				<span class="knowledge-link-title">${escapeHTML(item.title)}</span>
+				<span class="knowledge-link-meta">${escapeHTML(item.meta)}</span>
+				${path}
+			</button>
+		`;
+	}
+
+	function mergeConnectionItem(map, key, next) {
+		const existing = map.get(key);
+		if (!existing) {
+			map.set(key, { ...next });
+			return;
+		}
+		existing.count += next.count || 1;
+		const typeSet = new Set([...(existing.types || []), ...(next.types || [])]);
+		existing.types = Array.from(typeSet);
+		existing.meta = `${existing.types.join(", ")}${existing.count > 1 ? ` x${existing.count}` : ""}`;
+	}
+
+	function getGraphConnections(pageId, pageMap) {
+		if (typeof window.buildRelationshipGraphModel !== "function") {
+			return { outgoing: [], incoming: [], database: [] };
+		}
+
+		const model = window.buildRelationshipGraphModel();
+		const outgoing = new Map();
+		const incoming = new Map();
+		const database = new Map();
+		const usableTypes = new Set(["page-card", "mention", "relation", "semantic"]);
+
+		(model.edges || []).forEach((edge) => {
+			if (!edge || edge.type === "contains" || edge.type === "backlink") return;
+			const fromId = edge.from || "";
+			const toId = edge.to || "";
+			const typeLabel = getConnectionTypeLabel(edge.type);
+			const count = Number(edge.count || 1) || 1;
+
+			if (edge.type === "database-row" || fromId.startsWith("dbrow:") || toId.startsWith("dbrow:")) {
+				if (fromId !== pageId && toId !== pageId) return;
+				const dbId = fromId === pageId ? toId : fromId;
+				mergeConnectionItem(database, `${dbId}:${edge.type}`, {
+					pageId: pageId,
+					title: getConnectionRecordTitle(dbId, pageMap),
+					path: getConnectionPathLabel(dbId),
+					types: [typeLabel],
+					count,
+					meta: `${typeLabel}${count > 1 ? ` x${count}` : ""}`
+				});
+				return;
+			}
+
+			if (!usableTypes.has(edge.type)) return;
+
+			if (fromId === pageId && toId !== pageId) {
+				mergeConnectionItem(outgoing, `${toId}:${edge.type}`, {
+					pageId: toId,
+					title: getConnectionRecordTitle(toId, pageMap),
+					path: getConnectionPathLabel(toId),
+					types: [typeLabel],
+					count,
+					meta: `${typeLabel}${count > 1 ? ` x${count}` : ""}`
+				});
+			}
+
+			if (toId === pageId && fromId !== pageId) {
+				mergeConnectionItem(incoming, `${fromId}:${edge.type}`, {
+					pageId: fromId,
+					title: getConnectionRecordTitle(fromId, pageMap),
+					path: getConnectionPathLabel(fromId),
+					types: [typeLabel],
+					count,
+					meta: `${typeLabel}${count > 1 ? ` x${count}` : ""}`
+				});
+			}
+		});
+
+		const sortItems = (items) => items.sort((a, b) => (
+			String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base", numeric: true })
+		));
+
+		return {
+			outgoing: sortItems(Array.from(outgoing.values())),
+			incoming: sortItems(Array.from(incoming.values())),
+			database: sortItems(Array.from(database.values()))
+		};
+	}
+
 	function buildPropertyRowsHTML(pageId, record, pageMap) {
 		const props = Array.isArray(record.knowledgeProperties) ? record.knowledgeProperties : [];
 		if (!props.length) {
-			return `<div class="knowledge-empty">No custom properties yet.</div>`;
+			return `<div class="knowledge-empty">No custom fields yet.</div>`;
 		}
 
 		return props.map((prop) => {
-			const relationOptions = getAllRecords()
-				.filter((item) => item.id !== pageId)
-				.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")))
-				.map((item) => `
-					<option value="${escapeHTML(item.id)}"${item.id === prop.relationPageId ? " selected" : ""}>${escapeHTML(item.title || "Untitled")}</option>
-				`)
-				.join("");
+			const relationOptions = getScopedRelationOptions(
+				getAllRecords().filter((item) => item.id !== pageId),
+				pageId,
+				prop.relationPageId
+			);
 			const anchorOptions = prop.type === "relation" && prop.relationPageId
 				? getAnchorsForPage(prop.relationPageId).map((anchor) => `
 						<option value="${escapeHTML(anchor.id)}"${anchor.id === prop.relationAnchorId ? " selected" : ""}>${escapeHTML(anchor.name)}</option>
@@ -575,7 +744,7 @@
 							class="knowledge-input"
 							data-knowledge-action="prop-name"
 							value="${escapeHTML(prop.name)}"
-							placeholder="Property name"
+							placeholder="Field name"
 						/>
 						<select class="knowledge-select" data-knowledge-action="prop-type">
 							${PROPERTY_TYPES.map((item) => `
@@ -634,6 +803,116 @@
 		if (!chips.length) chips.push("Page");
 
 		return chips.map((chip) => `<span class="knowledge-chip">${escapeHTML(chip)}</span>`).join("");
+	}
+
+	function buildPanelSectionHTML(title, subtitle, bodyHTML, count = "", open = false) {
+		return `
+			<details class="knowledge-panel-section"${open ? " open" : ""}>
+				<summary class="knowledge-panel-summary">
+					<span>
+						<span class="knowledge-panel-title">${escapeHTML(title)}</span>
+						${subtitle ? `<span class="knowledge-panel-subtitle">${escapeHTML(subtitle)}</span>` : ""}
+					</span>
+					${count !== "" ? `<span class="knowledge-panel-count">${escapeHTML(count)}</span>` : ""}
+				</summary>
+				<div class="knowledge-panel-body">
+					${bodyHTML}
+				</div>
+			</details>
+		`;
+	}
+
+	function getDefaultOpenBehavior(category = "", containerType = "") {
+		if (containerType === "detail") return "peek";
+		return ["character", "spell", "item", "location", "event", "medication", "condition"].includes(category) ? "peek" : "open";
+	}
+
+	function getContainerTypeLabel(containerType = "") {
+		const labels = {
+			hub: "Hub",
+			project: "Project area",
+			page: "Page",
+			detail: "Detail record",
+			"database-row": "Database item"
+		};
+		return labels[containerType] || "Page";
+	}
+
+	function isDatabaseRowRecord(record) {
+		const rowRef = record?.databaseRowRef || {};
+		return record?.containerType === "database-row" || !!(rowRef.sourcePageId && rowRef.rowId);
+	}
+
+	function recordDefinesScope(record) {
+		if (!record) return false;
+		if (record.type === "domain") return true;
+		if (record.isScopeBoundary === true || record.definesScope === true) return true;
+		if (record.isScopeBoundary === false || record.definesScope === false) return false;
+		return record.containerType === "project";
+	}
+
+	function buildStructureHTML(pageId, record) {
+		const isDomain = record.type === "domain";
+		const isDatabaseRow = isDatabaseRowRecord(record);
+		const containerType = isDomain ? "domain" : (record.containerType || "page");
+		const aliasesValue = normalizeAliasList(record.aliases || record.alias || "").join(", ");
+		const scopeId = typeof window.getVaultTopLevelScopeId === "function" ? window.getVaultTopLevelScopeId(pageId) : "";
+		const scopeTitle = scopeId === pageId
+			? "This page"
+			: ((typeof window.getVaultScopeLabel === "function" && window.getVaultScopeLabel(scopeId)) || "Global");
+		const scopeChecked = recordDefinesScope(record);
+		const levelOptions = ["page", "hub", "project", "detail"].map((value) => `
+			<option value="${value}"${containerType === value ? " selected" : ""}>${getContainerTypeLabel(value)}</option>
+		`).join("");
+		const levelControl = isDomain || isDatabaseRow
+			? `<div class="knowledge-static-value">${escapeHTML(isDomain ? "Domain" : isDatabaseRow ? "Database row" : getContainerTypeLabel(containerType))}</div>`
+			: `
+				<select class="knowledge-select" data-knowledge-action="structure-container-type">
+					${levelOptions}
+				</select>
+			`;
+
+		return `
+			<div class="knowledge-card">
+				<div class="knowledge-card-head">
+					<div>
+						<div class="knowledge-card-title">Page setup</div>
+						<div class="knowledge-card-subtitle">Role, names, and local area.</div>
+					</div>
+				</div>
+				<div class="knowledge-structure-grid">
+					<label class="knowledge-structure-field">
+						<span>Page type</span>
+						${levelControl}
+					</label>
+					<label class="knowledge-structure-field">
+						<span>Area</span>
+						<div class="knowledge-static-value">${escapeHTML(scopeTitle)}</div>
+					</label>
+					<label class="knowledge-structure-field knowledge-structure-field-wide">
+						<span>Also known as</span>
+						<input
+							class="knowledge-input"
+							data-knowledge-action="structure-aliases"
+							value="${escapeHTML(aliasesValue)}"
+							placeholder="Other names separated by commas"
+						/>
+					</label>
+				</div>
+				<label class="knowledge-check-row">
+					<input
+						type="checkbox"
+						data-knowledge-action="structure-scope-boundary"
+						${scopeChecked ? " checked" : ""}
+						${isDomain ? " disabled" : ""}
+					/>
+					<span>
+						<span class="knowledge-check-title">${isDomain ? "This is an area" : "Make this page an area"}</span>
+						<span class="knowledge-check-help">${isDomain ? "Domains always hold their own pages." : "Links made inside it will prefer pages from here."}</span>
+					</span>
+				</label>
+			</div>
+		`;
 	}
 
 	function buildViewHTML(pageId, currentRecord, collection, state, pageMap) {
@@ -729,35 +1008,19 @@
 	}
 
 	function buildLinksHTML(pageId, record, pageMap, anchors) {
-		const relations = getRelationLinks(record, pageMap);
-		const backlinks = getBacklinks(pageId);
+		const graphConnections = getGraphConnections(pageId, pageMap);
 
-		const relationHTML = relations.length
-			? relations.map((item) => `
-					<button
-						class="knowledge-link-row"
-						data-knowledge-action="open-relation"
-						data-target-page-id="${escapeHTML(item.pageId)}"
-						data-target-anchor-id="${escapeHTML(item.anchorId)}"
-					>
-						<span class="knowledge-link-title">${escapeHTML(item.title)}</span>
-						<span class="knowledge-link-meta">${escapeHTML(item.label)}${item.anchorName ? ` -> ${escapeHTML(item.anchorName)}` : ""}</span>
-					</button>
-				`).join("")
-			: `<div class="knowledge-empty">No relation properties yet.</div>`;
+		const relationHTML = graphConnections.outgoing.length
+			? graphConnections.outgoing.map((item) => buildConnectionRowHTML(item)).join("")
+			: `<div class="knowledge-empty">This page does not link to other pages yet.</div>`;
 
-		const backlinkHTML = backlinks.length
-			? backlinks.map((item) => `
-					<button
-						class="knowledge-link-row"
-						data-knowledge-action="open-page"
-						data-target-page-id="${escapeHTML(item.pageId)}"
-					>
-						<span class="knowledge-link-title">${escapeHTML(item.title)}</span>
-						<span class="knowledge-link-meta">${item.count} reference${item.count === 1 ? "" : "s"}</span>
-					</button>
-				`).join("")
-			: `<div class="knowledge-empty">No backlinks yet.</div>`;
+		const backlinkHTML = graphConnections.incoming.length
+			? graphConnections.incoming.map((item) => buildConnectionRowHTML(item)).join("")
+			: `<div class="knowledge-empty">No other pages connect here yet.</div>`;
+
+		const databaseHTML = graphConnections.database.length
+			? graphConnections.database.map((item) => buildConnectionRowHTML(item, "open-page")).join("")
+			: `<div class="knowledge-empty">No database items connected yet.</div>`;
 
 		const anchorHTML = anchors.length
 			? anchors.map((anchor) => `
@@ -779,29 +1042,34 @@
 						>Copy Link</button>
 					</div>
 				`).join("")
-			: `<div class="knowledge-empty">No document anchors on this page yet.</div>`;
+			: `<div class="knowledge-empty">No saved sections yet.</div>`;
 
 		return `
 			<div class="knowledge-card">
 				<div class="knowledge-card-head">
 					<div>
-						<div class="knowledge-card-title">Links</div>
-						<div class="knowledge-card-subtitle">Outgoing relations, backlinks, and deep anchors.</div>
+						<div class="knowledge-card-title">Connections</div>
+						<div class="knowledge-card-subtitle">Page cards, mentions, fields, and database items.</div>
 					</div>
 				</div>
 
 				<div class="knowledge-stack-section">
-					<div class="knowledge-section-label">Outgoing</div>
+					<div class="knowledge-section-label">This page connects to</div>
 					<div class="knowledge-list">${relationHTML}</div>
 				</div>
 
 				<div class="knowledge-stack-section">
-					<div class="knowledge-section-label">Backlinks</div>
+					<div class="knowledge-section-label">Pages that connect here</div>
 					<div class="knowledge-list">${backlinkHTML}</div>
 				</div>
 
 				<div class="knowledge-stack-section">
-					<div class="knowledge-section-label">Anchors</div>
+					<div class="knowledge-section-label">Database items</div>
+					<div class="knowledge-list">${databaseHTML}</div>
+				</div>
+
+				<div class="knowledge-stack-section">
+					<div class="knowledge-section-label">Saved sections</div>
 					<div class="knowledge-list">${anchorHTML}</div>
 				</div>
 			</div>
@@ -812,34 +1080,34 @@
 		const collection = getContextCollection(pageId);
 		const state = getViewState(pageId);
 		const anchors = getAnchorsForPage(pageId);
+		const props = Array.isArray(record.knowledgeProperties) ? record.knowledgeProperties : [];
+		const graphConnections = getGraphConnections(pageId, pageMap);
+		const linkCount = graphConnections.outgoing.length + graphConnections.incoming.length + graphConnections.database.length + anchors.length;
+		const metaChips = buildBuiltInSummaryHTML(record);
+		const fieldsHTML = `
+			<div class="knowledge-card knowledge-card-flat">
+				<div class="knowledge-card-head">
+					<div>
+						<div class="knowledge-card-title">Page fields</div>
+						<div class="knowledge-card-subtitle">Dates, status, related pages, or other small facts.</div>
+					</div>
+					<button class="knowledge-mini-btn" data-knowledge-action="add-property">+ Add</button>
+				</div>
+				<div class="knowledge-prop-list">
+					${buildPropertyRowsHTML(pageId, record, pageMap)}
+				</div>
+			</div>
+		`;
 
 		return `
 			<section class="knowledge-shell" data-page-id="${escapeHTML(pageId)}">
-				<div class="knowledge-shell-head">
-					<div>
-						<div class="knowledge-shell-title">Page info</div>
-						<div class="knowledge-shell-subtitle">Optional properties and links for this page.</div>
-					</div>
-					<div class="knowledge-chip-row">${buildBuiltInSummaryHTML(record)}</div>
-				</div>
+				${metaChips ? `<div class="knowledge-chip-row">${metaChips}</div>` : ""}
 
 				<div class="knowledge-grid">
-					<div class="knowledge-card">
-						<div class="knowledge-card-head">
-							<div>
-								<div class="knowledge-card-title">Properties</div>
-								<div class="knowledge-card-subtitle">Add structure without losing the freeform canvas.</div>
-							</div>
-							<button class="knowledge-mini-btn" data-knowledge-action="add-property">+ Add</button>
-						</div>
-						<div class="knowledge-prop-list">
-							${buildPropertyRowsHTML(pageId, record, pageMap)}
-						</div>
-					</div>
-
-					${buildViewHTML(pageId, record, collection, state, pageMap)}
-
-					${buildLinksHTML(pageId, record, pageMap, anchors)}
+					${buildStructureHTML(pageId, record)}
+					${buildPanelSectionHTML("Fields", "Small facts saved on this page.", fieldsHTML, String(props.length))}
+					${buildPanelSectionHTML("Pages nearby", collection.label, buildViewHTML(pageId, record, collection, state, pageMap))}
+					${buildPanelSectionHTML("Connections", "Pages this uses or pages that mention it.", buildLinksHTML(pageId, record, pageMap, anchors), String(linkCount))}
 				</div>
 			</section>
 		`;
@@ -867,10 +1135,10 @@
 		drawer.innerHTML = `
 			<div class="knowledge-drawer-header">
 				<div>
-					<div class="knowledge-drawer-title">Page info</div>
+					<div class="knowledge-drawer-title">Page setup</div>
 					<div class="knowledge-drawer-subtitle" id="knowledgeDrawerSubtitle"></div>
 				</div>
-				<button class="knowledge-drawer-close" id="knowledgeDrawerClose" aria-label="Close page info">✕</button>
+				<button class="knowledge-drawer-close" id="knowledgeDrawerClose" aria-label="Close page setup">✕</button>
 			</div>
 			<div class="knowledge-drawer-body" id="knowledgeDrawerBody"></div>
 		`;
@@ -1009,6 +1277,25 @@
 			window.showAppToast?.("Couldn't remove that property yet.", "info");
 			renderKnowledgeUI(pageId);
 		}
+	}
+
+	function updateRecordStructure(pageId, mutateFn) {
+		const record = getPageRecord(pageId);
+		if (!record) return;
+		mutateFn(record);
+		if (record.type !== "domain") {
+			record.containerType = record.containerType || "page";
+			record.openBehavior = getDefaultOpenBehavior(record.category || "none", record.containerType);
+		}
+		if (!saveKnowledgeMutation(record)) {
+			window.showAppToast?.("Couldn't save that structure change yet.", "info");
+			renderKnowledgeUI(pageId);
+			return;
+		}
+		if (typeof window.renderSidebarDomains === "function") window.renderSidebarDomains();
+		if (typeof window.renderSidebarPins === "function") window.renderSidebarPins();
+		if (typeof window.renderSidebarBookmarks === "function") window.renderSidebarBookmarks();
+		renderKnowledgeUI(pageId);
 	}
 
 	function openPageOrAnchor(pageId, anchorId = "") {
@@ -1173,6 +1460,32 @@
 			updateViewState(pageId, {
 				viewMode: "calendar",
 				calendarKey: field.value || ""
+			});
+			return;
+		}
+
+		if (action === "structure-container-type") {
+			updateRecordStructure(pageId, (record) => {
+				const nextType = ["page", "hub", "project", "detail"].includes(field.value) ? field.value : "page";
+				record.containerType = nextType;
+				if (nextType === "project" && record.isScopeBoundary !== false) {
+					record.isScopeBoundary = true;
+				}
+			});
+			return;
+		}
+
+		if (action === "structure-scope-boundary") {
+			updateRecordStructure(pageId, (record) => {
+				record.isScopeBoundary = record.type === "domain" ? true : field.checked === true;
+			});
+			return;
+		}
+
+		if (action === "structure-aliases") {
+			updateRecordStructure(pageId, (record) => {
+				record.aliases = normalizeAliasList(field.value);
+				delete record.alias;
 			});
 			return;
 		}

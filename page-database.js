@@ -69,6 +69,22 @@
     { value: "compare", label: "Compare" },
     { value: "auto-complete", label: "Auto-complete" }
   ];
+  const FORMULA_ADVANCED_FUNCTIONS = [
+    { label: "IF", token: 'if(condition, "Yes", "No")', hint: "Return one value or another." },
+    { label: "AND", token: "and(condition, condition)", hint: "Require all conditions." },
+    { label: "OR", token: "or(condition, condition)", hint: "Accept any condition." },
+    { label: "NOT", token: "not(condition)", hint: "Reverse a condition." },
+    { label: "ROUND", token: "round(value, 0)", hint: "Round a number." },
+    { label: "ABS", token: "abs(value)", hint: "Absolute value." },
+    { label: "MIN", token: "min(value, value)", hint: "Smallest value." },
+    { label: "MAX", token: "max(value, value)", hint: "Largest value." },
+    { label: "CONCAT", token: 'concat(value, " ", value)', hint: "Join text." },
+    { label: "EMPTY", token: "empty(value)", hint: "Check for blank." },
+    { label: "CONTAINS", token: 'contains(value, "text")', hint: "Find text." },
+    { label: "SUM LINKED", token: 'sum("Link", "Number")', hint: "Sum linked rows." },
+    { label: "COUNT LINKED", token: 'count("Link")', hint: "Count linked rows." },
+    { label: "DAYS UNTIL", token: "daysUntil([Date])", hint: "Days until a date." }
+  ];
   const NUMBER_FORMAT_OPTIONS = [
     { value: "number", label: "Number" },
     { value: "currency", label: "Currency" },
@@ -98,10 +114,14 @@
     { value: "summary", label: "Summary" },
     { value: "formula", label: "Formula" },
     { value: "date", label: "Date" },
+    { value: "created-time", label: "Time created" },
+    { value: "edited-time", label: "Last edited" },
     { value: "status", label: "Status" },
     { value: "tag", label: "Tag" },
     { value: "notes", label: "Notes" }
   ];
+  const CREATED_TIME_PROPERTY_ID = "created_at";
+  const EDITED_TIME_PROPERTY_ID = "updated_at";
   const DATABASE_MENU_ID = "sanctum-database-menu";
   const DATABASE_SUBMENU_ID = "sanctum-database-submenu";
   const ROW_MENU_ID = "sanctum-database-row-menu";
@@ -109,6 +129,7 @@
   const PROPERTY_PANEL_ID = "sanctum-database-property-panel";
   const DB_CONTROL_WIDTH = 36;
   const DATABASE_ROW_PAGE_CONTAINER = "database-row";
+  const LAST_OPENED_SORT_PROPERTY_ID = "__last_opened";
   const FOLDER_FIELD_DEFINITIONS = Object.freeze([
     { field: "filename", id: "name", name: "Filename", type: "title", icon: "Aa" },
     { field: "folderPath", id: "folder_path", name: "Folder Path", type: "text", icon: "📁" },
@@ -833,7 +854,12 @@
   }
 
   function isFolderReadonlyProperty(database, property) {
-    return isFolderDatabase(database) && isFolderSystemProperty(property);
+    return property?.readOnly === true || isTimestampProperty(property) || (isFolderDatabase(database) && isFolderSystemProperty(property));
+  }
+
+  function isTimestampProperty(property) {
+    const type = normalizePropertyType(property?.type || "", "");
+    return type === "created-time" || type === "edited-time";
   }
 
   function formatFolderSizeValue(value = "") {
@@ -873,6 +899,20 @@
     const parsed = new Date(safeValue);
     if (Number.isNaN(parsed.getTime())) return "";
     return parsed.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function formatDatabaseDateTimeLabel(value = "") {
+    const safeValue = String(value || "").trim();
+    if (!safeValue) return "\u2014";
+    const parsed = new Date(safeValue);
+    if (Number.isNaN(parsed.getTime())) return safeValue;
+    return parsed.toLocaleString(undefined, {
+      year: "numeric",
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -1031,6 +1071,53 @@
     if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board" || safe === "checklist") return safe;
     if (fallback === "calendar" || fallback === "gallery" || fallback === "board" || fallback === "checklist") return fallback;
     return "table";
+  }
+
+  const DATABASE_ROW_PAGE_LAYOUTS = [
+    { value: "document", label: "Document" },
+    { value: "board-canvas", label: "Board canvas" },
+    { value: "infinite-canvas", label: "Infinite canvas" },
+    { value: "sheet", label: "Database" },
+    { value: "journal", label: "Journal" }
+  ];
+  const DATABASE_ROW_PAGE_KINDS = [
+    { value: DATABASE_ROW_PAGE_CONTAINER, label: "Hidden database row" },
+    { value: "page", label: "Page" },
+    { value: "hub", label: "Hub" },
+    { value: "project", label: "Project" },
+    { value: "detail", label: "Detail" }
+  ];
+
+  function normalizeDatabaseRowPageLayout(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return DATABASE_ROW_PAGE_LAYOUTS.some((entry) => entry.value === safe) ? safe : "document";
+  }
+
+  function getDatabaseRowPageLayoutLabel(value = "") {
+    const layout = normalizeDatabaseRowPageLayout(value);
+    return DATABASE_ROW_PAGE_LAYOUTS.find((entry) => entry.value === layout)?.label || "Document";
+  }
+
+  function normalizeDatabaseRowPageKind(value = "") {
+    const safe = String(value || "").trim().toLowerCase();
+    return DATABASE_ROW_PAGE_KINDS.some((entry) => entry.value === safe) ? safe : DATABASE_ROW_PAGE_CONTAINER;
+  }
+
+  function getDatabaseRowPageKindLabel(value = "") {
+    const kind = normalizeDatabaseRowPageKind(value);
+    return DATABASE_ROW_PAGE_KINDS.find((entry) => entry.value === kind)?.label || "Hidden database row";
+  }
+
+  function normalizeGalleryOpenMode(value = "") {
+    return String(value || "").trim().toLowerCase() === "page" ? "page" : "peek";
+  }
+
+  function getGalleryOpenMode(database) {
+    return normalizeGalleryOpenMode(database?.galleryOpenMode || "peek");
+  }
+
+  function getGalleryOpenModeLabel(database) {
+    return getGalleryOpenMode(database) === "page" ? "Open full page" : "Peek drawer";
   }
 
   function normalizePropertyType(value = "", fallback = "text") {
@@ -1210,7 +1297,10 @@
       kind,
       pageId: typeof raw?.pageId === "string" ? raw.pageId : "",
       blockId: kind === "block" && typeof raw?.blockId === "string" ? raw.blockId : "",
-      label: String(raw?.label || "").trim()
+      label: String(raw?.label || "").trim(),
+      // optional scoped filter — if set, picker only shows rows where filterPropertyId's value contains filterValue
+      filterPropertyId: typeof raw?.filterPropertyId === "string" ? raw.filterPropertyId : "",
+      filterValue: typeof raw?.filterValue === "string" ? raw.filterValue : "",
     };
   }
 
@@ -1392,10 +1482,103 @@
   }
 
   function normalizeChecklistAutomation(raw = {}, properties = []) {
-    const source = raw && typeof raw === "object" ? raw : {};
+    const source = safeParseObject(raw);
     return {
       onCheck: normalizeChecklistAutomationActions(source.onCheck || source.checked || [], properties),
       onUncheck: normalizeChecklistAutomationActions(source.onUncheck || source.unchecked || [], properties)
+    };
+  }
+
+  function isAutomationTargetProperty(property) {
+    return !!property && !["formula", "summary", "relation", "rollup"].includes(property.type);
+  }
+
+  function normalizeAutomationCondition(value = "") {
+    return ["gte", "lte", "between", "equals", "contains", "checked", "not_empty"].includes(value) ? value : "gte";
+  }
+
+  function automationConditionNeedsCompare(condition = "") {
+    return !["checked", "not_empty"].includes(normalizeAutomationCondition(condition));
+  }
+
+  function getDefaultAutomationConditionForProperty(property) {
+    if (property?.type === "checkbox") return "checked";
+    if (property?.type === "number" || property?.type === "formula" || property?.type === "summary") return "gte";
+    return "equals";
+  }
+
+  function normalizeAutomationAction(raw = {}, properties = []) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const property = safeParseArray(properties).find((entry) => entry.id === source.propertyId && isAutomationTargetProperty(entry)) || null;
+    if (!property) return null;
+    return {
+      propertyId: property.id,
+      value: String(source.value ?? "").trim()
+    };
+  }
+
+  function normalizeAutomationActions(raw = [], properties = []) {
+    const items = Array.isArray(raw) ? raw : [];
+    return items
+      .slice(0, 6)
+      .map((item) => normalizeAutomationAction(item, properties))
+      .filter(Boolean);
+  }
+
+  function migrateLegacyStatusAutomationItems(raw = {}, properties = []) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const rawItems = Array.isArray(source.automations)
+      ? source.automations
+      : (source.sourcePropertyId || source.statusPropertyId || Array.isArray(source.rules) ? [source] : []);
+    const migrated = [];
+    rawItems.forEach((item, itemIndex) => {
+      const sourceProperty = safeParseArray(properties).find((property) => property.id === item?.sourcePropertyId) || null;
+      const statusProperty = safeParseArray(properties).find((property) => property.id === item?.statusPropertyId && property.type === "status") || null;
+      if (!sourceProperty || !statusProperty || !Array.isArray(item?.rules)) {
+        migrated.push(item);
+        return;
+      }
+      item.rules.forEach((rule, ruleIndex) => {
+        if (!rule?.value) return;
+        migrated.push({
+          id: item.id ? `${item.id}-${ruleIndex}` : createId("automation"),
+          name: `${item.name || `Automation ${itemIndex + 1}`} ${rule.threshold}+`,
+          enabled: item.enabled !== false,
+          sourcePropertyId: sourceProperty.id,
+          condition: "gte",
+          compareValue: String(rule.threshold ?? [1, 5, 15][ruleIndex] ?? 0),
+          actions: [{ propertyId: statusProperty.id, value: rule.value }]
+        });
+      });
+    });
+    return migrated;
+  }
+
+  function normalizeStatusAutomationItem(raw = {}, properties = [], index = 0) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const sourceProperty = safeParseArray(properties).find((property) => property.id === source.sourcePropertyId) || null;
+    const actions = normalizeAutomationActions(source.actions || (source.statusPropertyId ? [{ propertyId: source.statusPropertyId, value: source.value || "" }] : []), properties);
+    const name = String(source.name || "").trim();
+    return {
+      id: typeof source.id === "string" && source.id.trim() ? source.id.trim() : createId("automation"),
+      name: name || `Automation ${index + 1}`,
+      enabled: source.enabled !== false,
+      sourcePropertyId: sourceProperty?.id || "",
+      condition: normalizeAutomationCondition(source.condition || source.operator || "gte"),
+      compareValue: String(source.compareValue ?? source.threshold ?? "").trim(),
+      actions
+    };
+  }
+
+  function normalizeStatusAutomation(raw = {}, properties = []) {
+    const source = safeParseObject(raw);
+    const rawItems = migrateLegacyStatusAutomationItems(source, properties);
+    const automations = rawItems
+      .slice(0, 24)
+      .map((item, index) => normalizeStatusAutomationItem(item, properties, index));
+    return {
+      enabled: source.enabled !== false && automations.some((item) => item.enabled && item.sourcePropertyId && item.actions.length),
+      automations
     };
   }
 
@@ -1592,6 +1775,8 @@
       summary: "Summary",
       formula: "Formula",
       date: "Date",
+      "created-time": "Time created",
+      "edited-time": "Last edited",
       status: "Status",
       tag: "Tag",
       notes: "Notes"
@@ -1602,15 +1787,20 @@
 
   function normalizeProperty(raw = {}, index = 0) {
     const type = normalizePropertyType(raw.type || "", index === 0 ? "title" : "text");
+    const timestampId = type === "created-time"
+      ? CREATED_TIME_PROPERTY_ID
+      : type === "edited-time"
+        ? EDITED_TIME_PROPERTY_ID
+        : "";
     const property = {
-      id: typeof raw.id === "string" && raw.id ? raw.id : (type === "title" ? "name" : createId("prop")),
+      id: timestampId || (typeof raw.id === "string" && raw.id ? raw.id : (type === "title" ? "name" : createId("prop"))),
       name: normalizePropertyName(raw.name || "", type, index),
       type,
       icon: typeof raw.icon === "string" ? raw.icon : "",
       showIcon: raw.showIcon !== false,
       hidden: raw.hidden === true,
       headerColor: normalizePropertyHeaderColor(raw.headerColor || ""),
-      readOnly: raw.readOnly === true,
+      readOnly: raw.readOnly === true || !!timestampId,
       folderField: normalizeFolderField(raw.folderField || ""),
       folderAutoFill: normalizeFolderAutoFill(raw.folderAutoFill || "", type)
     };
@@ -1677,6 +1867,9 @@
     if (property.type === "formula") {
       return "";
     }
+    if (isTimestampProperty(property)) {
+      return "";
+    }
     if (property.type === "checkbox") {
       return value === true || value === "true" || value === 1 || value === "1" || value === "on" ? "true" : "";
     }
@@ -1699,9 +1892,14 @@
   }
 
   function normalizeRow(raw = {}, properties = [createNameProperty()]) {
+    const now = new Date().toISOString();
+    const createdAt = normalizeISODateTime(raw.createdAt || raw.created_at || raw.createdTime || raw.created || "") || now;
+    const updatedAt = normalizeISODateTime(raw.updatedAt || raw.updated_at || raw.lastEditedAt || raw.lastEdited || raw.editedAt || "") || createdAt;
     const row = {
       id: typeof raw.id === "string" && raw.id ? raw.id : createId("row"),
       pageId: typeof raw.pageId === "string" ? raw.pageId : "",
+      createdAt,
+      updatedAt,
       archived: !!raw.archived,
       archivedAt: normalizeISODateTime(raw.archivedAt || ""),
       checklistChecked: raw?.checklistChecked === true || raw?.checklistChecked === "true" || raw?.checked === true || raw?.checked === "true",
@@ -1956,6 +2154,14 @@
       .filter((entry) => propertyIds.has(entry) && entry !== "name");
   }
 
+  function normalizeGalleryCardPropertyIds(value = [], properties = []) {
+    const propertyIds = new Set(safeParseArray(properties).map((property) => property?.id).filter(Boolean));
+    return safeParseArray(value)
+      .map((entry) => String(entry || "").trim())
+      .filter((entry, index, array) => entry && array.indexOf(entry) === index)
+      .filter((entry) => propertyIds.has(entry) && entry !== "name");
+  }
+
   function normalizeResetConfig(rawValue = {}, properties = []) {
     const raw = safeParseObject(rawValue);
     const frequency = normalizeResetFrequency(raw.frequency || "none");
@@ -2017,6 +2223,7 @@
       checklistTextColor: normalizeChecklistToneColor(raw.checklistTextColor || ""),
       checklistProgressColor: normalizeChecklistToneColor(raw.checklistProgressColor || ""),
       checklistAutomation: normalizeChecklistAutomation(raw.checklistAutomation || {}, properties),
+      statusAutomation: normalizeStatusAutomation(raw.statusAutomation || {}, properties),
       checklistSidePropertyIds: normalizeChecklistSidePropertyIds(raw.checklistSidePropertyIds || raw.checklistFields || [], properties),
       showPageIcon: !!raw.showPageIcon,
       boardCardPreview: normalizeBoardCardPreview(raw.boardCardPreview || "none"),
@@ -2024,6 +2231,10 @@
       boardCardLayout: normalizeBoardCardLayout(raw.boardCardLayout || "default"),
       galleryCardSize: normalizeGalleryCardSize(raw.galleryCardSize || "medium"),
       galleryCardFields: normalizeGalleryCardFieldCount(raw.galleryCardFields),
+      galleryCardPropertyIds: normalizeGalleryCardPropertyIds(raw.galleryCardPropertyIds || [], properties),
+      galleryOpenMode: normalizeGalleryOpenMode(raw.galleryOpenMode || raw.galleryCardOpenMode || "peek"),
+      rowPageLayout: normalizeDatabaseRowPageLayout(raw.rowPageLayout || raw.galleryRowPageLayout || "document"),
+      rowPageKind: normalizeDatabaseRowPageKind(raw.rowPageKind || raw.galleryRowPageKind || DATABASE_ROW_PAGE_CONTAINER),
       filters: normalizeFilters(raw.filters || []),
       sorts: normalizeSorts(raw.sorts || []),
       groupBy: typeof raw.groupBy === "string" ? raw.groupBy : "",
@@ -2044,6 +2255,45 @@
 
   function getCurrentPageRecord(pageId = getCurrentPageId()) {
     return (Array.isArray(window.userPages) ? window.userPages : []).find((page) => page.id === pageId) || null;
+  }
+
+  function getVaultRecord(pageId = "") {
+    if (typeof window.getVaultRecordById === "function") {
+      return window.getVaultRecordById(pageId);
+    }
+    return getCurrentPageRecord(pageId);
+  }
+
+  function getSourceScopeId(source = {}) {
+    return typeof window.getVaultTopLevelScopeId === "function"
+      ? window.getVaultTopLevelScopeId(source.pageId || "")
+      : "";
+  }
+
+  function compareDatabaseSourcesByScope(left, right, currentPageId = getCurrentPageId()) {
+    const currentScopeId = typeof window.getVaultTopLevelScopeId === "function"
+      ? window.getVaultTopLevelScopeId(currentPageId)
+      : "";
+    if (currentScopeId && typeof window.isVaultRecordInScope === "function") {
+      const leftScoped = window.isVaultRecordInScope(left.pageId || "", currentScopeId) ? 1 : 0;
+      const rightScoped = window.isVaultRecordInScope(right.pageId || "", currentScopeId) ? 1 : 0;
+      if (leftScoped !== rightScoped) return rightScoped - leftScoped;
+    }
+    return String(left.label || "").localeCompare(String(right.label || ""), undefined, { sensitivity: "base", numeric: true });
+  }
+
+  function getDatabaseSourceMenuLabel(source = {}, currentPageId = getCurrentPageId()) {
+    const label = source.label || "Database";
+    const currentScopeId = typeof window.getVaultTopLevelScopeId === "function"
+      ? window.getVaultTopLevelScopeId(currentPageId)
+      : "";
+    if (!currentScopeId || typeof window.isVaultRecordInScope !== "function" || window.isVaultRecordInScope(source.pageId || "", currentScopeId)) {
+      return label;
+    }
+
+    const sourceScopeId = getSourceScopeId(source);
+    const scopeLabel = typeof window.getVaultScopeLabel === "function" ? window.getVaultScopeLabel(sourceScopeId) : "";
+    return scopeLabel ? `${label} · outside: ${scopeLabel}` : `${label} · outside current area`;
   }
 
   function isCalendarDatabasePage(pageId = getCurrentPageId()) {
@@ -2097,6 +2347,29 @@
     writePageDatabases(all);
   }
 
+  window.SanctumAssistantPageDatabaseStore = {
+    read() {
+      const all = readPageDatabases();
+      return typeof structuredClone === "function"
+        ? structuredClone(all)
+        : JSON.parse(JSON.stringify(all));
+    },
+    write(nextDatabases) {
+      const safeValue = nextDatabases && typeof nextDatabases === "object" && !Array.isArray(nextDatabases)
+        ? nextDatabases
+        : {};
+      const wrote = writePageDatabases(
+        typeof structuredClone === "function"
+          ? structuredClone(safeValue)
+          : JSON.parse(JSON.stringify(safeValue))
+      );
+      if (wrote && isCalendarDatabasePage(getCurrentPageId())) {
+        window.requestAnimationFrame(() => renderPageCalendarDatabase(getCurrentPageId()));
+      }
+      return wrote;
+    }
+  };
+
   function serializeLegacyItems(database) {
     const titleProperty = getTitleProperty(database);
     const dateProperty = getDateProperty(database);
@@ -2123,7 +2396,16 @@
         return normalizeDatabase({
           ...sourceDatabase,
           title: sourceDatabase.title || getInlineDatabaseSourceLabel(source),
-          view: normalizeEmbedView(block?.dataset?.calendarView || sourceDatabase.view || "table", "table")
+          view: normalizeEmbedView(block?.dataset?.calendarView || sourceDatabase.view || "table", "table"),
+          filters: block?.dataset?.dbFilters || "[]",
+          sorts: block?.dataset?.dbSorts || "[]",
+          groupBy: block?.dataset?.dbGroupBy || "",
+          galleryCardSize: block?.dataset?.dbGalleryCardSize || sourceDatabase.galleryCardSize || "",
+          galleryCardFields: block?.dataset?.dbGalleryCardFields || sourceDatabase.galleryCardFields || "",
+          galleryCardPropertyIds: block?.dataset?.dbGalleryCardPropertyIds || "[]",
+          galleryOpenMode: block?.dataset?.dbGalleryOpenMode || sourceDatabase.galleryOpenMode || "",
+          rowPageLayout: block?.dataset?.dbRowPageLayout || sourceDatabase.rowPageLayout || "",
+          rowPageKind: block?.dataset?.dbRowPageKind || sourceDatabase.rowPageKind || ""
         }, { defaultView: "table" });
       }
     }
@@ -2137,6 +2419,17 @@
       columnWidths: block?.dataset?.dbColumnWidths || "{}",
       folderState: block?.dataset?.dbFolderState || "{}",
       resetConfig: block?.dataset?.dbResetConfig || "{}",
+      checklistAutomation: block?.dataset?.dbChecklistAutomation || "{}",
+      statusAutomation: block?.dataset?.dbStatusAutomation || "{}",
+      galleryCardSize: block?.dataset?.dbGalleryCardSize || "",
+      galleryCardFields: block?.dataset?.dbGalleryCardFields || "",
+      galleryCardPropertyIds: block?.dataset?.dbGalleryCardPropertyIds || "[]",
+      galleryOpenMode: block?.dataset?.dbGalleryOpenMode || "",
+      rowPageLayout: block?.dataset?.dbRowPageLayout || "",
+      rowPageKind: block?.dataset?.dbRowPageKind || "",
+      filters: block?.dataset?.dbFilters || "[]",
+      sorts: block?.dataset?.dbSorts || "[]",
+      groupBy: block?.dataset?.dbGroupBy || "",
       items: block?.dataset?.calendarItems || "[]"
     }, { defaultView: "table" });
   }
@@ -2145,18 +2438,36 @@
     if (!block) return;
     const normalized = normalizeDatabase(database, { defaultView: "table" });
     const stored = serializeDatabaseForStorage(normalized);
+    const source = getEmbedSourceTarget(block);
+    const blockId = String(block.id || block.dataset?.frameChildId || "").trim();
+    const ownsBlockSource = source?.kind === "block"
+      && source.pageId === getCurrentPageId()
+      && source.blockId === blockId;
     block.dataset.calendarTitle = normalized.title;
     block.dataset.calendarView = normalizeEmbedView(normalized.view, "table");
     block.dataset.dbResetConfig = JSON.stringify(normalized.resetConfig || {});
-    if (!isSourceBoundDatabaseRecord(block)) {
+    block.dataset.dbGalleryCardSize = normalized.galleryCardSize || "medium";
+    block.dataset.dbGalleryCardFields = String(normalized.galleryCardFields || 0);
+    block.dataset.dbGalleryCardPropertyIds = JSON.stringify(normalized.galleryCardPropertyIds || []);
+    block.dataset.dbGalleryOpenMode = normalized.galleryOpenMode || "peek";
+    block.dataset.dbRowPageLayout = normalized.rowPageLayout || "document";
+    block.dataset.dbRowPageKind = normalized.rowPageKind || DATABASE_ROW_PAGE_CONTAINER;
+    block.dataset.dbFilters = JSON.stringify(normalized.filters || []);
+    block.dataset.dbSorts = JSON.stringify(normalized.sorts || []);
+    block.dataset.dbGroupBy = normalized.groupBy || "";
+    if (!source || ownsBlockSource) {
       block.dataset.calendarMonth = normalized.month;
       block.dataset.dbProperties = JSON.stringify(stored.properties || []);
       block.dataset.dbRows = JSON.stringify(stored.rows || []);
       block.dataset.dbColumnWidths = JSON.stringify(stored.columnWidths || {});
       block.dataset.dbFolderState = JSON.stringify(stored.folderState || {});
+      block.dataset.dbChecklistAutomation = JSON.stringify(stored.checklistAutomation || {});
+      block.dataset.dbStatusAutomation = JSON.stringify(stored.statusAutomation || {});
       block.dataset.calendarItems = JSON.stringify(serializeLegacyItems(normalized));
     } else {
       delete block.dataset.dbFolderState;
+      delete block.dataset.dbChecklistAutomation;
+      delete block.dataset.dbStatusAutomation;
     }
     if (typeof saveState === "function") saveState();
   }
@@ -2198,7 +2509,16 @@
         return normalizeDatabase({
           ...sourceDatabase,
           title: sourceDatabase.title || getInlineDatabaseSourceLabel(source),
-          view: normalizeEmbedView(blockData?.calendarView || sourceDatabase.view || "table", "table")
+          view: normalizeEmbedView(blockData?.calendarView || sourceDatabase.view || "table", "table"),
+          filters: blockData?.dbFilters || "[]",
+          sorts: blockData?.dbSorts || "[]",
+          groupBy: blockData?.dbGroupBy || "",
+          galleryCardSize: blockData?.dbGalleryCardSize || sourceDatabase.galleryCardSize || "",
+          galleryCardFields: blockData?.dbGalleryCardFields || sourceDatabase.galleryCardFields || "",
+          galleryCardPropertyIds: blockData?.dbGalleryCardPropertyIds || "[]",
+          galleryOpenMode: blockData?.dbGalleryOpenMode || sourceDatabase.galleryOpenMode || "",
+          rowPageLayout: blockData?.dbRowPageLayout || sourceDatabase.rowPageLayout || "",
+          rowPageKind: blockData?.dbRowPageKind || sourceDatabase.rowPageKind || ""
         }, { defaultView: "table" });
       }
     }
@@ -2211,6 +2531,17 @@
       rows: blockData?.dbRows || "[]",
       folderState: blockData?.dbFolderState || "{}",
       resetConfig: blockData?.dbResetConfig || "{}",
+      checklistAutomation: blockData?.dbChecklistAutomation || "{}",
+      statusAutomation: blockData?.dbStatusAutomation || "{}",
+      galleryCardSize: blockData?.dbGalleryCardSize || "",
+      galleryCardFields: blockData?.dbGalleryCardFields || "",
+      galleryCardPropertyIds: blockData?.dbGalleryCardPropertyIds || "[]",
+      galleryOpenMode: blockData?.dbGalleryOpenMode || "",
+      rowPageLayout: blockData?.dbRowPageLayout || "",
+      rowPageKind: blockData?.dbRowPageKind || "",
+      filters: blockData?.dbFilters || "[]",
+      sorts: blockData?.dbSorts || "[]",
+      groupBy: blockData?.dbGroupBy || "",
       items: blockData?.calendarItems || "[]"
     }, { defaultView: "table" });
   }
@@ -2238,10 +2569,14 @@
 
     const allBlocks = typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {};
     Object.entries(allBlocks || {}).forEach(([hostPageId, blocks]) => {
-      const hostTitle = getCurrentPageRecord(hostPageId)?.title || "Page";
+      const hostTitle = getVaultRecord(hostPageId)?.title || "Page";
       safeParseArray(blocks).forEach((blockData) => {
         if (!blockData || blockData.type !== "calendar") return;
-        if (isSourceBoundDatabaseRecord(blockData)) return;
+        const boundSource = getEmbedSourceTarget(blockData);
+        const ownsBlockSource = boundSource?.kind === "block"
+          && boundSource.pageId === hostPageId
+          && boundSource.blockId === blockData.id;
+        if (boundSource && !ownsBlockSource) return;
         const title = String(blockData.calendarTitle || stripHTML(blockData.titleHTML || "") || "Database view").trim() || "Database view";
         const source = {
           kind: "block",
@@ -2258,7 +2593,13 @@
       });
     });
 
-    return sources.sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base", numeric: true }));
+    return sources
+      .map((source) => ({
+        ...source,
+        scopeId: getSourceScopeId(source),
+        scopeLabel: typeof window.getVaultScopeLabel === "function" ? window.getVaultScopeLabel(getSourceScopeId(source)) : ""
+      }))
+      .sort((left, right) => compareDatabaseSourcesByScope(left, right));
   }
 
   function getDatabasePageSources() {
@@ -2276,8 +2617,22 @@
     if (source.kind === "page") {
       return getPageDatabase(source.pageId || "");
     }
+    if (source.pageId === getCurrentPageId() && source.blockId) {
+      const liveBlock = document.getElementById(source.blockId);
+      if (liveBlock?.dataset?.type === "calendar") {
+        return getBlockDatabase(liveBlock);
+      }
+    }
     const allBlocks = typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {};
-    const blockData = safeParseArray(allBlocks?.[source.pageId] || []).find((entry) => entry?.id === source.blockId) || null;
+    const blocks = safeParseArray(allBlocks?.[source.pageId] || []);
+    let blockData = blocks.find((entry) => entry?.id === source.blockId) || null;
+    if (!blockData) {
+      const blockIndex = resolveStoredBlockIndex(blocks, source);
+      if (blockIndex !== -1) {
+        blockData = blocks[blockIndex];
+        if (blockData?.id) source.blockId = blockData.id;
+      }
+    }
     const nestedSource = getEmbedSourceTarget(blockData || {});
     if (nestedSource && nestedSource.kind === "block" && nestedSource.pageId === source.pageId && nestedSource.blockId === source.blockId) {
       return normalizeDatabase({
@@ -2288,6 +2643,17 @@
         rows: blockData?.dbRows || "[]",
         folderState: blockData?.dbFolderState || "{}",
         resetConfig: blockData?.dbResetConfig || "{}",
+        checklistAutomation: blockData?.dbChecklistAutomation || "{}",
+        statusAutomation: blockData?.dbStatusAutomation || "{}",
+        galleryCardSize: blockData?.dbGalleryCardSize || "",
+        galleryCardFields: blockData?.dbGalleryCardFields || "",
+        galleryCardPropertyIds: blockData?.dbGalleryCardPropertyIds || "[]",
+        galleryOpenMode: blockData?.dbGalleryOpenMode || "",
+        rowPageLayout: blockData?.dbRowPageLayout || "",
+        rowPageKind: blockData?.dbRowPageKind || "",
+        filters: blockData?.dbFilters || "[]",
+        sorts: blockData?.dbSorts || "[]",
+        groupBy: blockData?.dbGroupBy || "",
         items: blockData?.calendarItems || "[]"
       }, { defaultView: "table" });
     }
@@ -2320,6 +2686,7 @@
       source,
       database: {
         title: String(normalized.title || "Database").trim() || "Database",
+        view: normalizeViewMode(normalized.view || "table", "table"),
         properties: safeParseArray(normalized.properties || []).map((property) => {
           const type = normalizePropertyType(property.type || "text", "text");
           return {
@@ -2328,12 +2695,20 @@
             type,
             selectOptions: type === "select" ? normalizeSelectOptions(property.selectOptions || []) : [],
             tagOptions: type === "tag" ? normalizeTagOptions(property.tagOptions || []) : [],
-            statusGroups: type === "status" ? normalizeStatusGroups(property.statusGroups || []) : []
+            statusGroups: type === "status" ? normalizeStatusGroups(property.statusGroups || []) : [],
+            relationTarget: type === "relation" ? normalizeRelationTarget(property.relationTarget || {}) : null,
+            summaryConfig: type === "summary" ? normalizeSummaryConfig(property.summaryConfig || {}) : null,
+            formulaConfig: type === "formula" ? normalizeFormulaConfig(property.formulaConfig || {}) : null
           };
         }),
         rows: safeParseArray(normalized.rows || []).map((row) => ({
           id: row.id,
           title: getRowTitle(normalized, row),
+          pageId: row.pageId || "",
+          createdAt: row.createdAt || "",
+          updatedAt: row.updatedAt || "",
+          archived: row.archived === true,
+          checklistChecked: row.checklistChecked === true,
           values: { ...(row?.values || {}) }
         }))
       }
@@ -2365,8 +2740,64 @@
       changed = true;
     });
 
+    if (applyStatusAutomation(normalized, row)) changed = true;
     if (!changed) return true;
     return saveDatabaseToSource(source, normalized);
+  }
+
+  function updateDatabaseRowScore(sourceInput = {}, rowId = "", fieldNameOrId = "", valueChange = 0) {
+    const source = {
+      kind: sourceInput?.kind === "block" ? "block" : "page",
+      pageId: String(sourceInput?.pageId || "").trim(),
+      blockId: sourceInput?.kind === "block" ? String(sourceInput?.blockId || "").trim() : ""
+    };
+    const safeRowId = String(rowId || "").trim();
+    const fieldRef = String(fieldNameOrId || "").trim();
+    const delta = Number(valueChange);
+    if (!source.pageId || !safeRowId || !fieldRef || !Number.isFinite(delta)) return false;
+
+    const database = getDatabaseFromSource(source);
+    if (!database) return false;
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    const row = getRowById(normalized, safeRowId);
+    const matchProperty = (reference) => {
+      const key = String(reference || "").trim().toLowerCase();
+      return normalized.properties.find((property) => property.id === reference)
+        || normalized.properties.find((property) => String(property.name || "").trim().toLowerCase() === key)
+        || null;
+    };
+    const scoreProperty = matchProperty(fieldRef);
+    if (!row || !scoreProperty || scoreProperty.type !== "number") return false;
+
+    const currentScore = Number(String(row.values?.[scoreProperty.id] || "0").replace(/,/g, ""));
+    const nextScore = Math.max(0, (Number.isFinite(currentScore) ? currentScore : 0) + delta);
+    const patch = { [scoreProperty.id]: String(nextScore) };
+    Object.entries(patch).forEach(([propertyId, value]) => {
+      const property = getPropertyById(normalized, propertyId);
+      if (!property || property.type === "formula" || property.type === "rollup") return;
+      row.values[property.id] = normalizeCellValue(property, value);
+    });
+    applyStatusAutomation(normalized, row);
+    return saveDatabaseToSource(source, normalized);
+  }
+
+  function resolveStoredBlockIndex(blocks = [], source = {}, database = {}) {
+    const safeBlocks = safeParseArray(blocks);
+    let blockIndex = safeBlocks.findIndex((entry) => entry?.id === source.blockId);
+    if (blockIndex !== -1) return blockIndex;
+
+    const calendarBlocks = safeBlocks
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry?.type === "calendar");
+    if (!calendarBlocks.length) return -1;
+    if (calendarBlocks.length === 1) return calendarBlocks[0].index;
+
+    const rowIds = new Set(safeParseArray(database?.rows).map((row) => row?.id).filter(Boolean));
+    const matched = calendarBlocks.find(({ entry }) => {
+      const stored = getStoredBlockDatabase(entry);
+      return safeParseArray(stored?.rows).some((row) => rowIds.has(row?.id));
+    });
+    return matched ? matched.index : calendarBlocks[0].index;
   }
 
   function saveDatabaseToSource(source, database) {
@@ -2387,8 +2818,11 @@
 
     const allBlocks = window.readAllPageBlocks() || {};
     const blocks = safeParseArray(allBlocks[source.pageId] || []);
-    const blockIndex = blocks.findIndex((entry) => entry?.id === source.blockId);
+    const blockIndex = resolveStoredBlockIndex(blocks, source, database);
     if (blockIndex === -1) return false;
+    if (blocks[blockIndex]?.id && blocks[blockIndex].id !== source.blockId) {
+      source.blockId = blocks[blockIndex].id;
+    }
 
     const normalized = normalizeDatabase(database, { defaultView: "table" });
     const stored = serializeDatabaseForStorage(normalized);
@@ -2402,7 +2836,18 @@
       dbRows: JSON.stringify(stored.rows || []),
       dbColumnWidths: JSON.stringify(stored.columnWidths || {}),
       dbFolderState: JSON.stringify(stored.folderState || {}),
-      dbResetConfig: JSON.stringify(normalized.resetConfig || {})
+      dbResetConfig: JSON.stringify(normalized.resetConfig || {}),
+      dbChecklistAutomation: JSON.stringify(stored.checklistAutomation || {}),
+      dbStatusAutomation: JSON.stringify(stored.statusAutomation || {}),
+      dbGalleryCardSize: normalized.galleryCardSize || "medium",
+      dbGalleryCardFields: String(normalized.galleryCardFields || 0),
+      dbGalleryCardPropertyIds: JSON.stringify(normalized.galleryCardPropertyIds || []),
+      dbGalleryOpenMode: normalized.galleryOpenMode || "peek",
+      dbRowPageLayout: normalized.rowPageLayout || "document",
+      dbRowPageKind: normalized.rowPageKind || DATABASE_ROW_PAGE_CONTAINER,
+      dbFilters: JSON.stringify(normalized.filters || []),
+      dbSorts: JSON.stringify(normalized.sorts || []),
+      dbGroupBy: normalized.groupBy || ""
     };
 
     blocks[blockIndex] = nextBlock;
@@ -2414,6 +2859,138 @@
       blockId: source.blockId || ""
     });
     return true;
+  }
+
+  function getCanonicalDatabasePageId(hostPageId = "", blockId = "") {
+    const token = `${String(hostPageId || "").trim()}-${String(blockId || "").trim()}`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 145) || `database-${Date.now()}`;
+    return `page-database-${token}`;
+  }
+
+  function migrateLegacyInlineDatabasesToPages() {
+    if (
+      typeof window.readAllPageBlocks !== "function"
+      || typeof window.writeAllPageBlocks !== "function"
+      || !window.SanctumAssistantPageRegistryStore?.create
+    ) {
+      return 0;
+    }
+
+    const allBlocks = window.readAllPageBlocks() || {};
+    const storedPageDatabases = readPageDatabases();
+    const candidates = [];
+    const canonicalPageHosts = new Map();
+    Object.entries(allBlocks).forEach(([hostPageId, blocks]) => {
+      safeParseArray(blocks).forEach((block) => {
+        if (block?.type !== "calendar" || !block?.id) return;
+        const source = getEmbedSourceTarget(block);
+        if (
+          source?.kind === "page"
+          && Object.prototype.hasOwnProperty.call(storedPageDatabases, source.pageId)
+          && !canonicalPageHosts.has(source.pageId)
+        ) {
+          canonicalPageHosts.set(source.pageId, hostPageId);
+        }
+        const hasLocalData = safeParseArray(block.dbProperties || "[]").length > 0
+          || safeParseArray(block.dbRows || "[]").length > 0;
+        const isSelfBound = source?.kind === "block"
+          && source.pageId === hostPageId
+          && source.blockId === block.id;
+        if (!isSelfBound && !(hasLocalData && !source)) return;
+        candidates.push({
+          hostPageId,
+          blockId: block.id,
+          database: getStoredBlockDatabase(block)
+        });
+      });
+    });
+
+    canonicalPageHosts.forEach((hostPageId, databasePageId) => {
+      const database = storedPageDatabases[databasePageId] || {};
+      window.SanctumAssistantPageRegistryStore.ensureDatabasePage?.({
+        pageId: databasePageId,
+        title: database.title || "Database",
+        parentId: hostPageId
+      });
+    });
+    if (!candidates.length) return 0;
+
+    let migrated = 0;
+    candidates.forEach((candidate) => {
+      const databasePageId = getCanonicalDatabasePageId(candidate.hostPageId, candidate.blockId);
+      let databasePage = window.SanctumAssistantPageRegistryStore.get?.(databasePageId) || null;
+      if (!databasePage) {
+        databasePage = window.SanctumAssistantPageRegistryStore.create({
+          pageId: databasePageId,
+          title: candidate.database?.title || "Database",
+          parentId: candidate.hostPageId,
+          layout: "sheet",
+          category: "none",
+          containerType: "page",
+          recordKind: "database"
+        });
+      }
+      if (!databasePage?.id || databasePage.layout !== "sheet") return;
+      if (!Object.prototype.hasOwnProperty.call(allBlocks, databasePageId)) {
+        allBlocks[databasePageId] = [];
+      }
+
+      const canonicalDatabase = normalizeDatabase({
+        ...(candidate.database || {}),
+        title: databasePage.title || candidate.database?.title || "Database",
+        view: "table",
+        filters: [],
+        sorts: [],
+        groupBy: ""
+      }, { defaultView: "table" });
+      savePageDatabase(databasePageId, canonicalDatabase);
+
+      Object.entries(allBlocks).forEach(([pageId, blocks]) => {
+        allBlocks[pageId] = safeParseArray(blocks).map((block) => {
+          if (block?.type !== "calendar") return block;
+          const source = getEmbedSourceTarget(block);
+          const isSourceBlock = pageId === candidate.hostPageId && block.id === candidate.blockId;
+          const pointsAtSourceBlock = source?.kind === "block"
+            && source.pageId === candidate.hostPageId
+            && source.blockId === candidate.blockId;
+          if (!isSourceBlock && !pointsAtSourceBlock) return block;
+          return {
+            ...block,
+            dbSourceKind: "page",
+            dbSourcePageId: databasePageId,
+            dbSourceBlockId: "",
+            dbProperties: "[]",
+            dbRows: "[]",
+            calendarItems: "[]"
+          };
+        });
+      });
+
+      const rowPageIds = safeParseArray(canonicalDatabase.rows)
+        .map((row) => String(row?.pageId || "").trim())
+        .filter(Boolean);
+      if (rowPageIds.length) {
+        window.SanctumAssistantPageRegistryStore.retargetDatabaseRowPages?.({
+          pageIds: rowPageIds,
+          parentId: databasePageId,
+          sourceKind: "page",
+          sourcePageId: databasePageId,
+          sourceBlockId: ""
+        });
+      }
+      migrated += 1;
+    });
+
+    if (migrated) {
+      const wrote = window.SanctumAssistantPageBlockStore?.write
+        ? window.SanctumAssistantPageBlockStore.write(allBlocks)
+        : window.writeAllPageBlocks(allBlocks);
+      if (wrote === false) return 0;
+    }
+    return migrated;
   }
 
   function getContextDatabaseSource(context) {
@@ -2590,7 +3167,9 @@
   }
 
   function isDatabaseRowPageRecord(page) {
-    return String(page?.containerType || "").trim() === DATABASE_ROW_PAGE_CONTAINER;
+    const ref = normalizeDatabaseRowPageRef(page?.databaseRowRef || {});
+    return String(page?.containerType || "").trim() === DATABASE_ROW_PAGE_CONTAINER
+      || !!(ref.sourcePageId && ref.rowId);
   }
 
   function normalizeDatabaseRowPageRef(raw = {}) {
@@ -2632,6 +3211,9 @@
     const title = getRowTitle(database, row);
     const icon = getDatabaseRowPageIcon(row);
     const parentId = source.pageId || getCurrentPageId();
+    const rowPageLayout = normalizeDatabaseRowPageLayout(database.rowPageLayout || "document");
+    const rowPageKind = normalizeDatabaseRowPageKind(database.rowPageKind || DATABASE_ROW_PAGE_CONTAINER);
+    const isHiddenRowPage = rowPageKind === DATABASE_ROW_PAGE_CONTAINER;
     const ref = {
       sourceKind: source.kind === "block" ? "block" : "page",
       sourcePageId: source.pageId || "",
@@ -2645,14 +3227,14 @@
         id: row.pageId,
         title,
         parent: parentId,
-        layout: "document",
-        category: DATABASE_ROW_PAGE_CONTAINER,
-        containerType: DATABASE_ROW_PAGE_CONTAINER,
-        openBehavior: "peek",
+        layout: rowPageLayout,
+        category: isHiddenRowPage ? DATABASE_ROW_PAGE_CONTAINER : rowPageKind,
+        containerType: rowPageKind,
+        openBehavior: isHiddenRowPage ? "peek" : "",
         icon,
         summary: "",
         tags: [],
-        hiddenInSidebar: true,
+        hiddenInSidebar: isHiddenRowPage,
         databaseRowRef: ref
       });
       return { databaseChanged, registryChanged: true };
@@ -2661,36 +3243,34 @@
     let registryChanged = false;
     const currentRef = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
 
-    if ((page.title || "") !== title) {
-      page.title = title;
-      registryChanged = true;
-    }
     if ((page.parent || "") !== parentId) {
       page.parent = parentId;
       registryChanged = true;
     }
-    if ((page.layout || "") !== "document") {
-      page.layout = "document";
+    if ((page.layout || "") !== rowPageLayout) {
+      page.layout = rowPageLayout;
       registryChanged = true;
     }
-    if ((page.category || "") !== DATABASE_ROW_PAGE_CONTAINER) {
-      page.category = DATABASE_ROW_PAGE_CONTAINER;
+    const nextCategory = isHiddenRowPage ? DATABASE_ROW_PAGE_CONTAINER : rowPageKind;
+    if ((page.category || "") !== nextCategory) {
+      page.category = nextCategory;
       registryChanged = true;
     }
-    if ((page.containerType || "") !== DATABASE_ROW_PAGE_CONTAINER) {
-      page.containerType = DATABASE_ROW_PAGE_CONTAINER;
+    if ((page.containerType || "") !== rowPageKind) {
+      page.containerType = rowPageKind;
       registryChanged = true;
     }
-    if ((page.openBehavior || "") !== "peek") {
-      page.openBehavior = "peek";
+    const nextOpenBehavior = isHiddenRowPage ? "peek" : "";
+    if ((page.openBehavior || "") !== nextOpenBehavior) {
+      page.openBehavior = nextOpenBehavior;
       registryChanged = true;
     }
     if ((page.icon || "") !== icon) {
       page.icon = icon;
       registryChanged = true;
     }
-    if (page.hiddenInSidebar !== true) {
-      page.hiddenInSidebar = true;
+    if (page.hiddenInSidebar !== isHiddenRowPage) {
+      page.hiddenInSidebar = isHiddenRowPage;
       registryChanged = true;
     }
     if (typeof page.summary !== "string") {
@@ -2749,10 +3329,59 @@
     return databaseChanged;
   }
 
+  function syncDatabaseRowRefFromSource(page = {}, source = {}, row = {}) {
+    if (!page?.id || !source?.pageId || !Array.isArray(window.userPages)) return false;
+    const ref = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
+    const nextRef = {
+      sourceKind: source.kind === "block" ? "block" : "page",
+      sourcePageId: source.pageId || "",
+      sourceBlockId: source.kind === "block" ? source.blockId || "" : "",
+      rowId: ref.rowId || row?.id || ""
+    };
+    if (
+      ref.sourceKind === nextRef.sourceKind
+      && ref.sourcePageId === nextRef.sourcePageId
+      && ref.sourceBlockId === nextRef.sourceBlockId
+      && ref.rowId === nextRef.rowId
+    ) {
+      return false;
+    }
+    page.databaseRowRef = nextRef;
+    return true;
+  }
+
+  function syncDatabaseRowPageTitleFromRow(pageId = "", row = null, database = null) {
+    const page = getCurrentPageRecord(pageId);
+    if (!page || !row || !database) return false;
+
+    const nextTitle = String(getRowTitle(database, row) || "").trim();
+    if (!nextTitle) return false;
+
+    const currentTitle = String(page.title || "").trim();
+    if (currentTitle === nextTitle) return true;
+
+    if (typeof window.applyPageRenameEverywhere === "function") {
+      window.applyPageRenameEverywhere(pageId, nextTitle, { skipDatabaseSync: true });
+      return true;
+    }
+
+    page.title = nextTitle;
+    saveDatabaseRowPageRegistry();
+    if (typeof window.invalidateRelationshipGraphCache === "function") {
+      window.invalidateRelationshipGraphCache();
+    }
+    return true;
+  }
+
   function syncDatabaseRowPageForRow(context, database, rowId = "") {
     if (!rowId) return false;
     if (isFolderDatabase(database)) return false;
-    return syncDatabaseRowPages(context, database, [rowId]);
+    const changed = syncDatabaseRowPages(context, database, [rowId]);
+    const row = getRowById(database, rowId);
+    if (row?.pageId) {
+      syncDatabaseRowPageTitleFromRow(row.pageId, row, database);
+    }
+    return changed;
   }
 
   function removeDatabaseRowPageRecord(row) {
@@ -2896,6 +3525,18 @@
     };
   }
 
+  function findDatabaseRowForPage(page = {}, database = null, ref = null) {
+    const safeRef = normalizeDatabaseRowPageRef(ref || page?.databaseRowRef || {});
+    if (!database) return null;
+
+    let row = safeRef.rowId ? getRowById(database, safeRef.rowId) : null;
+    const pageId = String(page?.id || "").trim();
+    if (!row && pageId) {
+      row = safeParseArray(database.rows).find((entry) => String(entry?.pageId || "").trim() === pageId) || null;
+    }
+    return row;
+  }
+
   function getDatabaseRowPeekSourceState(pageId = "") {
     const page = getCurrentPageRecord(pageId);
     if (!page || !isDatabaseRowPageRecord(page)) return null;
@@ -2907,7 +3548,7 @@
       ? { kind: "block", pageId: ref.sourcePageId, blockId: ref.sourceBlockId }
       : { kind: "page", pageId: ref.sourcePageId, blockId: "" };
     const database = getDatabaseFromSource(source);
-    const row = getRowById(database, ref.rowId);
+    const row = findDatabaseRowForPage(page, database, ref);
     if (!database || !row) return null;
 
     const blockEl = source.kind === "block" ? document.getElementById(source.blockId || "") : null;
@@ -2931,8 +3572,110 @@
             blockId: source.blockId,
             blockEl,
             surfaceEl
-          }
+      }
     };
+  }
+
+  function findDatabaseRowSourcesForPage(pageId = "") {
+    const page = getCurrentPageRecord(pageId);
+    if (!page) return [];
+
+    const safePageId = String(pageId || page.id || "").trim();
+    if (!safePageId) return [];
+
+    const ref = normalizeDatabaseRowPageRef(page.databaseRowRef || {});
+    const matches = [];
+    const seen = new Set();
+    const addMatch = (source, database, row) => {
+      if (!source || !database || !row) return;
+      const key = `${source.kind}:${source.pageId}:${source.blockId || ""}:${row.id || ""}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      matches.push({ source, database, row });
+    };
+
+    if (ref.sourcePageId) {
+      const directSource = ref.sourceKind === "block"
+        ? { kind: "block", pageId: ref.sourcePageId, blockId: ref.sourceBlockId }
+        : { kind: "page", pageId: ref.sourcePageId, blockId: "" };
+      const directDatabase = getDatabaseFromSource(directSource);
+      const directRow = findDatabaseRowForPage(page, directDatabase, ref);
+      if (directDatabase && directRow) addMatch(directSource, directDatabase, directRow);
+    }
+
+    if (typeof window.readAllPageBlocks === "function") {
+      const allBlocks = window.readAllPageBlocks() || {};
+      Object.entries(allBlocks).forEach(([hostPageId, blocks]) => {
+        safeParseArray(blocks).forEach((block) => {
+          if (!block || block.type !== "calendar" || !block.id) return;
+          const source = { kind: "block", pageId: hostPageId, blockId: block.id };
+          const database = getStoredBlockDatabase(block);
+          if (!database) return;
+          safeParseArray(database.rows).forEach((row) => {
+            const rowPageId = String(row?.pageId || "").trim();
+            const matchesPage = rowPageId === safePageId;
+            const matchesRef = ref.rowId && row?.id === ref.rowId
+              && (!ref.sourcePageId || ref.sourcePageId === hostPageId);
+            if (matchesPage || matchesRef) addMatch(source, database, row);
+          });
+        });
+      });
+    }
+
+    Object.entries(readPageDatabases()).forEach(([hostPageId, value]) => {
+      const database = normalizeDatabase(value?.database ? value.database : value, { defaultView: "table" });
+      if (!database) return;
+      const source = { kind: "page", pageId: hostPageId, blockId: "" };
+      safeParseArray(database.rows).forEach((row) => {
+        const rowPageId = String(row?.pageId || "").trim();
+        const matchesPage = rowPageId === safePageId;
+        const matchesRef = ref.rowId && row?.id === ref.rowId
+          && (!ref.sourcePageId || ref.sourcePageId === hostPageId);
+        if (matchesPage || matchesRef) addMatch(source, database, row);
+      });
+    });
+
+    return matches;
+  }
+
+  function syncDatabaseRowTitleFromPage(pageId = "") {
+    const page = getCurrentPageRecord(pageId);
+    if (!page || !isDatabaseRowPageRecord(page)) return false;
+
+    const nextTitle = String(page.title || "").trim();
+    if (!nextTitle) return false;
+
+    const matches = findDatabaseRowSourcesForPage(pageId);
+    if (!matches.length) return false;
+
+    let changed = false;
+    matches.forEach(({ source, database, row }) => {
+      const titleProperty = getTitleProperty(database);
+      if (!titleProperty) return;
+
+      const currentTitle = String(getRowValue(row, titleProperty.id) || "").trim();
+      if (currentTitle === nextTitle) return;
+
+      row.values[titleProperty.id] = normalizeCellValue(titleProperty, nextTitle);
+      row.updatedAt = new Date().toISOString();
+      if (!row.pageId && page.id) row.pageId = page.id;
+      applyStatusAutomation(database, row);
+      if (saveDatabaseToSource(source, database)) {
+        changed = true;
+        if (syncDatabaseRowRefFromSource(page, source, row)) {
+          saveDatabaseRowPageRegistry();
+        }
+      }
+      rerenderDatabaseSourceIfVisible(source);
+    });
+
+    if (changed && typeof window.invalidateRelationshipGraphCache === "function") {
+      window.invalidateRelationshipGraphCache();
+    }
+    return changed || matches.some(({ database, row }) => {
+      const titleProperty = getTitleProperty(database);
+      return String(getRowValue(row, titleProperty?.id) || "").trim() === nextTitle;
+    });
   }
 
   function openDatabaseRowPropertyComposer(pageId = "", anchorEl) {
@@ -2968,7 +3711,26 @@
     const safePageId = String(pageId || "").trim();
     if (!safePageId || typeof window.openPeek !== "function") return;
     closeDatabaseMenus();
+    if (typeof window.markPageActivityOpened === "function") {
+      window.markPageActivityOpened(safePageId);
+    }
     window.openPeek(safePageId);
+  }
+
+  function openDatabaseRowAsPage(context, database, rowId = "", fallbackPageId = "") {
+    const row = rowId ? getRowById(database, rowId) : null;
+    if (row?.id) {
+      const changed = syncDatabaseRowPageForRow(context, database, row.id);
+      if (changed) saveDatabaseForContext(context, database);
+    }
+    const pageId = String(row?.pageId || fallbackPageId || "").trim();
+    if (!pageId || typeof window.openPage !== "function") {
+      openDatabaseRowPeek(fallbackPageId || row?.pageId || "");
+      return;
+    }
+    closeDatabaseMenus();
+    document.getElementById("peekDrawer")?.classList.remove("open");
+    window.openPage(pageId, { revealSidebarPath: false });
   }
 
   function rerenderDatabaseSourceIfVisible(source) {
@@ -3323,7 +4085,7 @@
     const simpleType = normalizeFormulaSimpleType(config.simpleType || "sum");
 
     if (config.mode === "advanced") {
-      return "Advanced formulas support field refs like [Budget], math, comparisons, and the listed helper functions. They do not allow browser or JavaScript API access.";
+      return "Use fields like [Score], math, conditions, and functions. Formulas calculate from your data only.";
     }
 
     if (["sum", "average"].includes(simpleType)) {
@@ -3392,7 +4154,17 @@
 
     const prepared = expression
       .replace(/\[([^\]]+)\]/g, (_match, label) => `__field(${JSON.stringify(String(label || "").trim())})`)
-      .replace(/\bif\s*\(/gi, "ifFn(");
+      .replace(/\bif\s*\(/gi, "ifFn(")
+      .replace(/\band\s*\(/gi, "andFn(")
+      .replace(/\bor\s*\(/gi, "orFn(")
+      .replace(/\bnot\s*\(/gi, "notFn(")
+      .replace(/\bround\s*\(/gi, "roundFn(")
+      .replace(/\babs\s*\(/gi, "absFn(")
+      .replace(/\bmin\s*\(/gi, "minFn(")
+      .replace(/\bmax\s*\(/gi, "maxFn(")
+      .replace(/\bconcat\s*\(/gi, "concatFn(")
+      .replace(/\bempty\s*\(/gi, "emptyFn(")
+      .replace(/\bcontains\s*\(/gi, "containsFn(");
 
     const countFn = (relationRef, checkboxRef = "") => {
       const entries = getFormulaRelationEntries(database, row, relationRef);
@@ -3435,6 +4207,16 @@
       const entries = getFormulaRelationEntries(database, row, relationRef);
       return entries.length > 0 && entries.every((entry) => isCheckboxCheckedValue(resolveFormulaValueReference(entry.database, entry.row, checkboxRef, visited)));
     };
+    const toNumber = (value) => {
+      const numeric = Number(String(value ?? "").replace(/%$/, ""));
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+    const toText = (value) => value === null || typeof value === "undefined" ? "" : String(value);
+    const roundFn = (value, decimals = 0) => {
+      const places = Math.max(0, Math.min(10, Math.round(toNumber(decimals))));
+      const factor = 10 ** places;
+      return Math.round(toNumber(value) * factor) / factor;
+    };
 
     try {
       const evaluator = new Function(
@@ -3448,6 +4230,16 @@
         "checked",
         "allChecked",
         "ifFn",
+        "andFn",
+        "orFn",
+        "notFn",
+        "roundFn",
+        "absFn",
+        "minFn",
+        "maxFn",
+        "concatFn",
+        "emptyFn",
+        "containsFn",
         `"use strict"; return (${prepared});`
       );
 
@@ -3461,7 +4253,17 @@
         compareFn,
         checkedFn,
         allCheckedFn,
-        (condition, whenTrue, whenFalse) => condition ? whenTrue : whenFalse
+        (condition, whenTrue, whenFalse) => condition ? whenTrue : whenFalse,
+        (...conditions) => conditions.every(Boolean),
+        (...conditions) => conditions.some(Boolean),
+        (condition) => !condition,
+        roundFn,
+        (value) => Math.abs(toNumber(value)),
+        (...values) => Math.min(...values.map(toNumber)),
+        (...values) => Math.max(...values.map(toNumber)),
+        (...values) => values.map(toText).join(""),
+        (value) => !toText(value).trim(),
+        (value, search) => toText(value).toLowerCase().includes(toText(search).toLowerCase())
       );
 
       if (result === null || typeof result === "undefined") return "";
@@ -3612,18 +4414,25 @@
     } else {
       const blockEl = context.blockEl || document.getElementById(context.blockId);
       const linkedSource = getEmbedSourceTarget(blockEl);
-      if (linkedSource?.kind === "page") {
-        const linkedDatabase = getPageDatabase(linkedSource.pageId);
-        savePageDatabase(linkedSource.pageId, {
-          ...database,
-          view: linkedDatabase.view,
-          month: linkedDatabase.month
+      if (linkedSource?.pageId) {
+        const linkedDatabase = getDatabaseFromSource(linkedSource) || normalizeDatabase({});
+        saveDatabaseToSource(linkedSource, {
+          ...linkedDatabase,
+          title: database.title || linkedDatabase.title,
+          properties: database.properties,
+          rows: database.rows,
+          columnWidths: database.columnWidths,
+          folderState: database.folderState,
+          resetConfig: database.resetConfig,
+          checklistAutomation: database.checklistAutomation,
+          statusAutomation: database.statusAutomation,
+          calculations: database.calculations
         });
         saveBlockDatabase(blockEl, database);
         emitDatabaseSourceUpdated({
-          kind: "page",
+          kind: linkedSource.kind === "block" ? "block" : "page",
           pageId: linkedSource.pageId || "",
-          blockId: ""
+          blockId: linkedSource.kind === "block" ? linkedSource.blockId || "" : ""
         });
       } else {
         saveBlockDatabase(blockEl, database);
@@ -3921,6 +4730,8 @@
   }
 
   function getRowValue(row, propertyId = "") {
+    if (propertyId === CREATED_TIME_PROPERTY_ID) return row?.createdAt || "";
+    if (propertyId === EDITED_TIME_PROPERTY_ID) return row?.updatedAt || "";
     return row?.values?.[propertyId] ?? "";
   }
 
@@ -3977,6 +4788,10 @@
 
     if (property?.type === "date") {
       return formatDateValueLabel(safeValue) || "—";
+    }
+
+    if (property?.type === "created-time" || property?.type === "edited-time") {
+      return formatDatabaseDateTimeLabel(safeValue);
     }
 
     if (property?.type === "number") {
@@ -4069,6 +4884,45 @@
     if (normalized === 0) return "Title only";
     if (normalized === 1) return "1 property";
     return `${normalized} properties`;
+  }
+
+  function getGallerySelectableProperties(database) {
+    return safeParseArray(database?.properties || []).filter((property) => property?.id && property.type !== "title");
+  }
+
+  function getGalleryCardPropertyIds(database) {
+    const selectedIds = normalizeGalleryCardPropertyIds(database?.galleryCardPropertyIds || [], database?.properties || []);
+    if (selectedIds.length) return selectedIds;
+
+    const fallbackCount = getGalleryCardFieldCount(database);
+    if (!fallbackCount) return [];
+    return getGallerySelectableProperties(database)
+      .filter((property) => isPropertyVisibleInTable(property))
+      .slice(0, fallbackCount)
+      .map((property) => property.id);
+  }
+
+  function getGalleryCardProperties(database) {
+    const ids = getGalleryCardPropertyIds(database);
+    return ids.map((propertyId) => getPropertyById(database, propertyId)).filter(Boolean);
+  }
+
+  function getGalleryCardPropertiesLabel(database) {
+    const properties = getGalleryCardProperties(database);
+    if (!properties.length) return "None";
+    if (properties.length === 1) return properties[0].name;
+    return `${properties[0].name} +${properties.length - 1}`;
+  }
+
+  function toggleGalleryCardProperty(database, propertyId = "") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.type === "title") return;
+    const current = getGalleryCardPropertyIds(database);
+    database.galleryCardPropertyIds = current.includes(property.id)
+      ? current.filter((entry) => entry !== property.id)
+      : [...current, property.id];
+    database.galleryCardPropertyIds = normalizeGalleryCardPropertyIds(database.galleryCardPropertyIds, database.properties || []);
+    database.galleryCardFields = Math.min(3, database.galleryCardPropertyIds.length);
   }
 
   function getChecklistProgressStyle(database) {
@@ -4216,6 +5070,75 @@
     }, database.properties || []);
   }
 
+  function getStatusAutomation(database) {
+    return normalizeStatusAutomation(database?.statusAutomation || {}, database?.properties || []);
+  }
+
+  function applyStatusAutomation(database, row) {
+    if (!database || !row) return false;
+    const automation = getStatusAutomation(database);
+    if (!automation.enabled) return false;
+    let changed = false;
+    safeParseArray(automation.automations).forEach((item) => {
+      if (!item.enabled || !item.sourcePropertyId || !item.actions?.length) return;
+      const sourceProperty = getPropertyById(database, item.sourcePropertyId);
+      if (!sourceProperty) return;
+      const rawValue = getComputedPropertyRawValue(database, row, sourceProperty);
+      if (!doesAutomationConditionMatch(sourceProperty, rawValue, item)) return;
+      safeParseArray(item.actions).forEach((action) => {
+        const targetProperty = getPropertyById(database, action.propertyId);
+        if (!isAutomationTargetProperty(targetProperty)) return;
+        const nextValue = resolveAutomationActionValue(targetProperty, action.value);
+        if (row.values[targetProperty.id] === nextValue) return;
+        row.values[targetProperty.id] = nextValue;
+        changed = true;
+      });
+    });
+    return changed;
+  }
+
+  function doesAutomationConditionMatch(property, rawValue = "", automation = {}) {
+    const condition = normalizeAutomationCondition(automation.condition || "");
+    const compareValue = String(automation.compareValue || "").trim();
+    const textValue = String(rawValue ?? "").trim();
+    if (condition === "not_empty") return !!textValue;
+    if (condition === "checked") return isCheckboxCheckedValue(rawValue);
+    if (condition === "contains") return !!compareValue && textValue.toLowerCase().includes(compareValue.toLowerCase());
+    if (condition === "equals") return textValue.toLowerCase() === compareValue.toLowerCase();
+    const numericValue = Number(textValue.replace(/,/g, "").replace(/%$/, ""));
+    if (!Number.isFinite(numericValue)) return false;
+    if (condition === "between") {
+      const [minText = "", maxText = ""] = compareValue.split("..");
+      const minValue = Number(minText.trim().replace(/,/g, "").replace(/%$/, ""));
+      const maxValue = Number(maxText.trim().replace(/,/g, "").replace(/%$/, ""));
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return false;
+      return numericValue >= Math.min(minValue, maxValue) && numericValue <= Math.max(minValue, maxValue);
+    }
+    const numericCompare = Number(compareValue.replace(/,/g, "").replace(/%$/, ""));
+    if (!Number.isFinite(numericCompare)) return false;
+    if (condition === "lte") return numericValue <= numericCompare;
+    return numericValue >= numericCompare;
+  }
+
+  function resolveAutomationActionValue(property, value = "") {
+    const safeValue = String(value ?? "").trim();
+    if (property?.type === "date" && safeValue.toLowerCase() === "today") {
+      return serializeDateCellValue({ start: toDayKey(new Date()) });
+    }
+    if (property?.type === "checkbox") {
+      return ["true", "yes", "1", "checked", "done"].includes(safeValue.toLowerCase()) ? "true" : "";
+    }
+    return normalizeCellValue(property, safeValue);
+  }
+
+  function applyStatusAutomationToAllRows(database) {
+    let changed = false;
+    safeParseArray(database?.rows || []).forEach((row) => {
+      if (applyStatusAutomation(database, row)) changed = true;
+    });
+    return changed;
+  }
+
   function resolveChecklistAutomationValue(property, value = "") {
     if (property?.type === "date" && String(value || "").trim() === "__today__") {
       return serializeDateCellValue({ start: toDayKey(new Date()) });
@@ -4272,20 +5195,62 @@
 
   function openGalleryLayoutSettingsMenu(anchorEl, context, database) {
     return openPropertySubmenu(anchorEl, "Layout", (submenuEl) => {
+      const saveAndStayOpen = () => {
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
+        window.requestAnimationFrame(() => openGalleryLayoutSettingsMenu(anchorEl, context, database));
+      };
+
+      appendMenuLabel(submenuEl, `Cards open: ${getGalleryOpenModeLabel(database)}`);
+      [
+        ["peek", "Peek drawer"],
+        ["page", "Open full page"]
+      ].forEach(([mode, label]) => {
+        appendMenuButton(submenuEl, label, () => {
+          database.galleryOpenMode = mode;
+          saveAndStayOpen();
+        }, { active: getGalleryOpenMode(database) === mode });
+      });
+      appendMenuDivider(submenuEl);
+      appendMenuLabel(submenuEl, `Row page type: ${getDatabaseRowPageLayoutLabel(database.rowPageLayout)}`);
+      DATABASE_ROW_PAGE_LAYOUTS.forEach((layout) => {
+        appendMenuButton(submenuEl, layout.label, () => {
+          database.rowPageLayout = layout.value;
+          syncDatabaseRowPages(context, database);
+          saveAndStayOpen();
+        }, { active: normalizeDatabaseRowPageLayout(database.rowPageLayout) === layout.value });
+      });
+      appendMenuDivider(submenuEl);
+      appendMenuLabel(submenuEl, `Row page kind: ${getDatabaseRowPageKindLabel(database.rowPageKind)}`);
+      DATABASE_ROW_PAGE_KINDS.forEach((kind) => {
+        appendMenuButton(submenuEl, kind.label, () => {
+          database.rowPageKind = kind.value;
+          syncDatabaseRowPages(context, database);
+          saveAndStayOpen();
+        }, { active: normalizeDatabaseRowPageKind(database.rowPageKind) === kind.value });
+      });
+      appendMenuDivider(submenuEl);
       appendMenuLabel(submenuEl, `Card size: ${getGalleryCardSizeLabel(getGalleryCardSize(database))}`);
       ["large", "medium", "small"].forEach((size) => {
         appendMenuButton(submenuEl, getGalleryCardSizeLabel(size), () => {
           database.galleryCardSize = size;
-          saveAndRerenderDatabaseSettings(context, database);
+          saveAndStayOpen();
         }, { active: getGalleryCardSize(database) === size });
       });
       appendMenuDivider(submenuEl);
-      appendMenuLabel(submenuEl, `Properties: ${getGalleryCardContentLabel(getGalleryCardFieldCount(database))}`);
-      [0, 1, 2, 3].forEach((count) => {
-        appendMenuButton(submenuEl, getGalleryCardContentLabel(count), () => {
-          database.galleryCardFields = count;
-          saveAndRerenderDatabaseSettings(context, database);
-        }, { active: getGalleryCardFieldCount(database) === count });
+      appendMenuLabel(submenuEl, `Card properties: ${getGalleryCardPropertiesLabel(database)}`);
+      appendMenuButton(submenuEl, "None", () => {
+        database.galleryCardPropertyIds = [];
+        database.galleryCardFields = 0;
+        saveAndStayOpen();
+      }, { active: !getGalleryCardPropertyIds(database).length });
+      const properties = getGallerySelectableProperties(database);
+      if (properties.length) appendMenuDivider(submenuEl);
+      properties.forEach((property) => {
+        appendMenuButton(submenuEl, property.name, () => {
+          toggleGalleryCardProperty(database, property.id);
+          saveAndStayOpen();
+        }, { active: getGalleryCardPropertyIds(database).includes(property.id) });
       });
     });
   }
@@ -4515,6 +5480,8 @@
   }
 
   function getPropertyDefaultIcon(property) {
+    if (property?.type === "created-time") return "Ct";
+    if (property?.type === "edited-time") return "Ed";
     if (property?.type === "title") return "Aa";
     if (property?.type === "number") return "#";
     if (property?.type === "select") return "≣";
@@ -4812,6 +5779,13 @@
     });
   }
 
+  function getRowLastOpenedTime(row = {}, activityData = {}) {
+    const pageId = String(row?.pageId || "").trim();
+    if (!pageId) return 0;
+    const date = new Date(activityData?.[pageId]?.lastOpenedAt || "");
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  }
+
   function rowMatchesFilter(database, row, filter) {
     const property = getPropertyById(database, filter.propertyId);
     if (!property) return true;
@@ -4879,6 +5853,9 @@
 
   function getVisibleRows(database) {
     let rows = Array.isArray(database.rows) ? database.rows.slice() : [];
+    const activityData = typeof window.readStorageJSON === "function"
+      ? window.readStorageJSON(window.STORAGE_KEYS?.pageActivity || "sanctum_page_activity_v1", {})
+      : {};
 
     if (!database?.showHistory) {
       rows = rows.filter((row) => !row?.archived);
@@ -4891,6 +5868,11 @@
     if (Array.isArray(database.sorts) && database.sorts.length) {
       rows.sort((left, right) => {
         for (const sort of database.sorts) {
+          if (sort.propertyId === LAST_OPENED_SORT_PROPERTY_ID) {
+            const result = getRowLastOpenedTime(left, activityData) - getRowLastOpenedTime(right, activityData);
+            if (result !== 0) return sort.direction === "desc" ? -result : result;
+            continue;
+          }
           const property = getPropertyById(database, sort.propertyId);
           if (!property) continue;
           const result = comparePropertyValues(
@@ -4959,6 +5941,15 @@
       values.add(value);
     });
     return Array.from(values).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function getFilterChoiceValues(database, property) {
+    if (!property) return [];
+    if (property.type === "status") return getStatusOptions(property).map((option) => option.name);
+    if (property.type === "select") return getPropertySelectOptions(property).map((option) => option.name);
+    if (property.type === "tag") return getPropertyTagOptions(property).map((option) => option.name);
+    if (property.type === "checkbox") return ["Checked", "Unchecked"];
+    return getDistinctPropertyValues(database, property.id);
   }
 
   function commitCellValue(context, database, rowId = "", propertyId = "", value = "", options = {}) {
@@ -5033,7 +6024,8 @@
         button.innerHTML = buildValuePillHTML(property, option.name);
         button.addEventListener("click", (event) => {
           event.stopPropagation();
-          commitCellValue(context, database, row.id, property.id, currentValue === option.name ? "" : option.name);
+          commitCellValue(context, database, row.id, property.id, currentValue === option.name ? "" : option.name, { closeMenus: false });
+          window.requestAnimationFrame(() => openStatusValueMenu(anchorEl, context, database, getRowById(database, row.id) || row, property));
         });
         menuEl.appendChild(button);
       });
@@ -5044,6 +6036,7 @@
     appendMenuButton(menuEl, "Edit property", () => {
       openPropertyPanel(context, database, property.id);
     });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
   }
 
   function openTagColorMenu(anchorEl, context, database, propertyId = "", tagName = "", options = {}) {
@@ -5073,6 +6066,7 @@
       });
       menuEl.appendChild(button);
     });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "right", offset: 2 });
   }
 
   function openTagValueMenu(anchorEl, context, database, row, property) {
@@ -5104,7 +6098,9 @@
         createButton.addEventListener("click", (event) => {
           event.stopPropagation();
           ensureTagValueInProperty(property, query);
-          commitCellValue(context, database, row.id, property.id, addTagValue(getCurrentValue(), query));
+          commitCellValue(context, database, row.id, property.id, addTagValue(getCurrentValue(), query), { closeMenus: false });
+          searchEl.value = "";
+          renderOptions();
         });
         listEl.appendChild(createButton);
       }
@@ -5114,6 +6110,7 @@
         empty.className = "page-database-value-empty";
         empty.textContent = "Select an option or create one";
         listEl.appendChild(empty);
+        positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
         return;
       }
 
@@ -5127,7 +6124,8 @@
         selectButton.innerHTML = buildValuePillHTML(property, option.name);
         selectButton.addEventListener("click", (event) => {
           event.stopPropagation();
-          commitCellValue(context, database, row.id, property.id, toggleTagValue(getCurrentValue(), option.name));
+          commitCellValue(context, database, row.id, property.id, toggleTagValue(getCurrentValue(), option.name), { closeMenus: false });
+          renderOptions();
         });
 
         const colorButton = document.createElement("button");
@@ -5143,6 +6141,7 @@
         rowEl.appendChild(colorButton);
         listEl.appendChild(rowEl);
       });
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     };
 
     searchEl?.addEventListener("input", renderOptions);
@@ -5152,7 +6151,9 @@
         const query = String(searchEl.value || "").trim();
         if (query) {
           ensureTagValueInProperty(property, query);
-          commitCellValue(context, database, row.id, property.id, addTagValue(getCurrentValue(), query));
+          commitCellValue(context, database, row.id, property.id, addTagValue(getCurrentValue(), query), { closeMenus: false });
+          searchEl.value = "";
+          renderOptions();
         }
       }
       if (event.key === "Escape") {
@@ -5162,6 +6163,11 @@
     });
 
     renderOptions();
+    appendMenuDivider(menuEl);
+    appendMenuButton(menuEl, "Edit property", () => {
+      openPropertyPanel(context, database, property.id);
+    });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     requestAnimationFrame(() => searchEl?.focus());
   }
 
@@ -5192,6 +6198,7 @@
       });
       menuEl.appendChild(button);
     });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "right", offset: 2 });
   }
 
   function openSelectValueMenu(anchorEl, context, database, row, property) {
@@ -5223,7 +6230,9 @@
         createButton.addEventListener("click", (event) => {
           event.stopPropagation();
           ensureSelectValueInProperty(property, query);
-          commitCellValue(context, database, row.id, property.id, query);
+          commitCellValue(context, database, row.id, property.id, query, { closeMenus: false });
+          searchEl.value = "";
+          renderOptions();
         });
         listEl.appendChild(createButton);
       }
@@ -5233,6 +6242,7 @@
         empty.className = "page-database-value-empty";
         empty.textContent = "Select an option or create one";
         listEl.appendChild(empty);
+        positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
         return;
       }
 
@@ -5246,7 +6256,8 @@
         selectButton.innerHTML = buildValuePillHTML(property, option.name);
         selectButton.addEventListener("click", (event) => {
           event.stopPropagation();
-          commitCellValue(context, database, row.id, property.id, currentValue === option.name ? "" : option.name);
+          commitCellValue(context, database, row.id, property.id, currentValue === option.name ? "" : option.name, { closeMenus: false });
+          renderOptions();
         });
 
         const colorButton = document.createElement("button");
@@ -5262,6 +6273,7 @@
         rowEl.appendChild(colorButton);
         listEl.appendChild(rowEl);
       });
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     };
 
     searchEl?.addEventListener("input", renderOptions);
@@ -5271,7 +6283,9 @@
         const query = String(searchEl.value || "").trim();
         if (query) {
           ensureSelectValueInProperty(property, query);
-          commitCellValue(context, database, row.id, property.id, query);
+          commitCellValue(context, database, row.id, property.id, query, { closeMenus: false });
+          searchEl.value = "";
+          renderOptions();
         }
       }
       if (event.key === "Escape") {
@@ -5281,6 +6295,11 @@
     });
 
     renderOptions();
+    appendMenuDivider(menuEl);
+    appendMenuButton(menuEl, "Edit property", () => {
+      openPropertyPanel(context, database, property.id);
+    });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     requestAnimationFrame(() => searchEl?.focus());
   }
 
@@ -5295,6 +6314,7 @@
       appendMenuButton(menuEl, "Edit property", () => {
         openPropertyPanel(context, database, property.id);
       });
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
       return;
     }
 
@@ -5310,9 +6330,21 @@
 
     const renderOptions = () => {
       const query = String(searchEl?.value || "").trim().toLowerCase();
+      const filterPropId = String(property.relationTarget?.filterPropertyId || "").trim();
+      const filterVal = String(property.relationTarget?.filterValue || "").trim().toLowerCase();
       const rows = getVisibleRows(sourceDatabase)
         .map((entry) => ({ row: entry, label: getRowTitle(sourceDatabase, entry) }))
-        .filter((entry) => !query || entry.label.toLowerCase().includes(query));
+        .filter((entry) => {
+          // apply scope filter if configured
+          if (filterPropId && filterVal) {
+            const filterProp = getPropertyById(sourceDatabase, filterPropId);
+            if (filterProp) {
+              const cellVal = String(getComparablePropertyValue(sourceDatabase, entry.row, filterProp) || "").toLowerCase();
+              if (!cellVal.includes(filterVal)) return false;
+            }
+          }
+          return !query || entry.label.toLowerCase().includes(query);
+        });
 
       listEl.innerHTML = "";
       if (!rows.length) {
@@ -5320,6 +6352,7 @@
         empty.className = "page-database-value-empty";
         empty.textContent = query ? "No matching rows" : "No rows in this table yet";
         listEl.appendChild(empty);
+        positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
         return;
       }
 
@@ -5335,6 +6368,7 @@
         });
         listEl.appendChild(button);
       });
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     };
 
     searchEl?.addEventListener("input", renderOptions);
@@ -5350,6 +6384,7 @@
     appendMenuButton(menuEl, "Edit property", () => {
       openPropertyPanel(context, database, property.id);
     });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "left" });
     requestAnimationFrame(() => searchEl?.focus());
   }
 
@@ -5656,7 +6691,20 @@
     const safeType = normalizePropertyType(nextType, property.type);
     if (safeType === "title") return;
 
+    const previousId = property.id;
     property.type = safeType;
+    if (safeType === "created-time" || safeType === "edited-time") {
+      const nextId = safeType === "created-time" ? CREATED_TIME_PROPERTY_ID : EDITED_TIME_PROPERTY_ID;
+      const idTaken = database.properties.some((entry) => entry.id === nextId && entry !== property);
+      if (!idTaken) {
+        property.id = nextId;
+        if (database.columnWidths?.[previousId] && !database.columnWidths[nextId]) {
+          database.columnWidths[nextId] = database.columnWidths[previousId];
+          delete database.columnWidths[previousId];
+        }
+      }
+    }
+    property.readOnly = isTimestampProperty(property);
   if (safeType === "number") property.numberConfig = normalizeNumberConfig(property.numberConfig || {});
   else delete property.numberConfig;
     if (safeType === "status") property.statusGroups = normalizeStatusGroups(property.statusGroups || []);
@@ -5738,6 +6786,72 @@
       ...(nextConfig || {})
     });
     database.rows = database.rows.map((row) => normalizeRow(row, database.properties));
+    applyStatusAutomationToAllRows(database);
+  }
+
+  function updateAdvancedFormulaFeedback(panel, database, propertyId = "") {
+    const property = getPropertyById(database, propertyId);
+    const feedbackEl = panel?.querySelector("[data-formula-feedback]");
+    if (!property || !feedbackEl) return;
+    const feedback = getFormulaAdvancedFeedback(database, property);
+    feedbackEl.className = `page-database-formula-feedback is-${feedback.tone}`;
+    feedbackEl.textContent = feedback.text;
+  }
+
+  function insertAdvancedFormulaToken(panel, token = "") {
+    const input = panel?.querySelector('[data-db-action="formula-expression"]');
+    if (!input || !token) return;
+    const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+    const end = Number.isFinite(input.selectionEnd) ? input.selectionEnd : input.value.length;
+    const spacerBefore = start > 0 && !/\s|\(|,/.test(input.value.charAt(start - 1)) ? " " : "";
+    const spacerAfter = end < input.value.length && !/\s|\)|,/.test(input.value.charAt(end)) ? " " : "";
+    const insertion = `${spacerBefore}${token}${spacerAfter}`;
+    input.value = `${input.value.slice(0, start)}${insertion}${input.value.slice(end)}`;
+    const cursor = start + insertion.length;
+    input.focus();
+    input.setSelectionRange(cursor, cursor);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  async function generateAdvancedFormulaDraft(panel, context, database, propertyId = "") {
+    const property = getPropertyById(database, propertyId);
+    const promptEl = panel?.querySelector(".page-database-formula-ai-prompt");
+    const statusEl = panel?.querySelector("[data-formula-ai-status]");
+    const resultEl = panel?.querySelector("[data-formula-ai-result]");
+    const expressionEl = panel?.querySelector("[data-formula-ai-expression]");
+    const explanationEl = panel?.querySelector("[data-formula-ai-explanation]");
+    const request = String(promptEl?.value || "").trim();
+    if (!property || !request || !statusEl || !resultEl || !expressionEl || !explanationEl) {
+      if (statusEl) statusEl.textContent = "Describe what you want the formula to calculate first.";
+      return;
+    }
+    statusEl.textContent = "Drafting formula...";
+    resultEl.hidden = true;
+    try {
+      const apiPath = ((window.SANCTUM_API_BASE || "") + "/api/assistant/formula").replace(/\/\/api/, "/api");
+      const response = await fetch(apiPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request,
+          formulaName: property.name || "Formula",
+          currentExpression: normalizeFormulaConfig(property.formulaConfig || {}).expression || "",
+          fields: safeParseArray(database.properties || []).filter((entry) => entry.id !== property.id).map((entry) => ({
+            name: entry.name || "Field",
+            type: entry.type || "text"
+          }))
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.expression) throw new Error(payload.error || "No formula draft returned.");
+      expressionEl.textContent = String(payload.expression);
+      expressionEl.dataset.expression = String(payload.expression);
+      explanationEl.textContent = String(payload.explanation || "");
+      resultEl.hidden = false;
+      statusEl.textContent = "Review the draft before applying it.";
+    } catch (error) {
+      statusEl.textContent = error?.message || "AI could not draft a formula right now.";
+    }
   }
 
   function setStatusGroups(database, propertyId = "", groups = []) {
@@ -5839,6 +6953,43 @@
     const option = options.find((entry) => entry.name === String(tagName || "").trim());
     if (!option) return;
     option.color = TAG_COLOR_OPTIONS.some((entry) => entry.value === color) ? color : "none";
+    setTagOptions(database, propertyId, options);
+  }
+
+  function updateTagOptionName(database, propertyId = "", optionIndex = -1, name = "") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.type !== "tag") return;
+    const options = cloneTagOptions(property.tagOptions || []);
+    const option = options[optionIndex];
+    if (!option) return;
+    const previousName = option.name;
+    const nextName = String(name || "").trim() || previousName;
+    option.name = nextName;
+    property.tagOptions = normalizeTagOptions(options);
+    database.rows = database.rows.map((row) => {
+      const nextRow = normalizeRow(row, database.properties);
+      const currentValue = String(nextRow.values?.[property.id] || "").trim();
+      if (currentValue) {
+        nextRow.values[property.id] = joinTagValues(parseTagValues(currentValue).map((entry) => entry === previousName ? nextName : entry));
+      }
+      return nextRow;
+    });
+  }
+
+  function addTagOption(database, propertyId = "") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.type !== "tag") return;
+    const options = cloneTagOptions(property.tagOptions || []);
+    options.push({ id: createId("tag"), name: "New tag", color: getNextTagColor(property) });
+    setTagOptions(database, propertyId, options);
+  }
+
+  function deleteTagOption(database, propertyId = "", optionIndex = -1) {
+    const property = getPropertyById(database, propertyId);
+    if (!property || property.type !== "tag") return;
+    const options = cloneTagOptions(property.tagOptions || []);
+    if (!options[optionIndex]) return;
+    options.splice(optionIndex, 1);
     setTagOptions(database, propertyId, options);
   }
 
@@ -5980,7 +7131,8 @@
   function addRowToDatabase(database, defaults = {}) {
     if (isFolderDatabase(database)) return null;
     database.properties = ensureTitleProperty(database.properties);
-    const row = normalizeRow({ id: createId("row"), values: defaults }, database.properties);
+    const now = new Date().toISOString();
+    const row = normalizeRow({ id: createId("row"), createdAt: now, updatedAt: now, values: defaults }, database.properties);
     database.rows.push(row);
     return row;
   }
@@ -5992,6 +7144,8 @@
 
     const duplicate = normalizeRow({
       id: createId("row"),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       icon: source.icon || "",
       color: source.color || "",
       checklistChecked: !!source.checklistChecked,
@@ -6013,7 +7167,10 @@
     const row = getRowById(database, rowId);
     const property = getPropertyById(database, propertyId);
     if (!row || !property) return;
+    if (isTimestampProperty(property)) return;
+    const previousValue = getRowValue(row, propertyId);
     const normalizedValue = normalizeCellValue(property, value);
+    if (previousValue === normalizedValue) return;
     if (isFolderDatabase(database)) {
       if (isFolderSystemProperty(property)) return;
       const metadata = getFolderMetadataEntry(database, row);
@@ -6037,12 +7194,16 @@
       }
     }
     row.values[propertyId] = normalizedValue;
+    row.updatedAt = new Date().toISOString();
+    applyStatusAutomation(database, row);
   }
 
   function setRowChecklistChecked(database, rowId = "", checked = false) {
     const row = getRowById(database, rowId);
     if (!row) return;
+    const previousChecked = !!row.checklistChecked;
     row.checklistChecked = !!checked;
+    if (previousChecked !== row.checklistChecked) row.updatedAt = new Date().toISOString();
     applyChecklistAutomation(database, row, row.checklistChecked ? "onCheck" : "onUncheck");
 
     if (isFolderDatabase(database)) {
@@ -6085,6 +7246,7 @@
     const progressStyle = getChecklistProgressStyle(database);
     const density = getChecklistDensity(database);
     const sideProperties = getChecklistSideProperties(database);
+    const titleProperty = getTitleProperty(database);
     const checklistStyleVars = [
       ["--page-db-checklist-row-bg", getChecklistToneColor(database, "checklistRowBgColor")],
       ["--page-db-checklist-checkbox", getChecklistToneColor(database, "checklistCheckboxColor")],
@@ -6109,7 +7271,11 @@
             <button type="button" class="page-database-checklist-checkbox${row.checklistChecked ? " checked" : ""}" data-db-action="toggle-checklist-row" data-row-id="${escapeHTML(row.id)}" aria-label="${row.checklistChecked ? "Uncheck" : "Check"} ${escapeHTML(getRowTitle(database, row))}"${readOnly ? " disabled" : ""}>
               <span>${row.checklistChecked ? "✓" : ""}</span>
             </button>
-            <button type="button" class="page-database-checklist-title" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}">${escapeHTML(getRowTitle(database, row))}</button>
+            ${readOnly ? `
+              <button type="button" class="page-database-checklist-title" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}">${escapeHTML(getRowTitle(database, row))}</button>
+            ` : `
+              <input type="text" class="page-database-checklist-title-input" data-db-row-id="${escapeHTML(row.id)}" data-db-prop-id="${escapeHTML(titleProperty.id)}" value="${escapeHTML(getRowValue(row, titleProperty.id))}" placeholder="New checklist item" spellcheck="false">
+            `}
             ${sideHTML ? `<div class="page-database-checklist-side-values">${sideHTML}</div>` : ""}
           </div>
         `;
@@ -6141,6 +7307,12 @@
       bodyHTML: `
         <div class="page-database-checklist size-${escapeHTML(progressStyle)} density-${escapeHTML(density)}"${checklistStyleVars ? ` style="${escapeHTML(checklistStyleVars)}"` : ""}>
           <div class="page-database-checklist-list">${listHTML}</div>
+          ${readOnly || isFolderDatabase(database) ? "" : `
+            <button type="button" class="page-database-checklist-add-row" data-db-action="add-row">
+              <span>+</span>
+              <strong>New checklist item</strong>
+            </button>
+          `}
           <div class="page-database-checklist-progress" aria-label="Checklist progress">
             ${progressHTML}
             <div class="page-database-checklist-count">${checkedCount}/${totalCount} done</div>
@@ -6632,10 +7804,8 @@
     };
   }
 
-  function getGalleryCardFields(database, row, limit = 2) {
-    return (database.properties || [])
-      .filter((property) => isPropertyVisibleInTable(property))
-      .filter((property) => property.type !== "title")
+  function getGalleryCardFields(database, row) {
+    return getGalleryCardProperties(database)
       .map((property) => {
         const rawValue = property.type === "summary"
           ? getComputedPropertyRawValue(database, row, property)
@@ -6660,18 +7830,18 @@
         };
       })
       .filter(Boolean)
-      .slice(0, limit);
+      .slice(0, 6);
   }
 
   function buildGalleryCardHTML(database, row) {
     const previewSource = getBoardCardPreviewSource(row);
     const cardSize = getGalleryCardSize(database);
-    const cardFields = getGalleryCardFields(database, row, getGalleryCardFieldCount(database));
+    const cardFields = getGalleryCardFields(database, row);
     const showAddCoverButton = !previewSource;
 
     return `
       <div class="page-database-gallery-card-shell${showAddCoverButton ? " can-add-cover" : ""}${row.archived ? " is-archived" : ""}">
-        <button type="button" class="page-database-gallery-card size-${escapeHTML(cardSize)}${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-row-id="${escapeHTML(row.id)}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
+        <div role="button" tabindex="0" class="page-database-gallery-card size-${escapeHTML(cardSize)}${previewSource ? " has-preview" : ""}${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-action="open-row-peek" data-db-row-page-id="${escapeHTML(row.pageId || "")}" data-row-id="${escapeHTML(row.id)}" data-item-id="${escapeHTML(row.id)}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
           ${previewSource
             ? `<div class="page-database-gallery-card-preview"><img src="${escapeHTML(previewSource)}" alt="" /></div>`
             : ""}
@@ -6686,7 +7856,7 @@
                 `).join("")}</div>`
               : ""}
           </div>
-        </button>
+        </div>
         <button type="button" class="page-database-gallery-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
         ${showAddCoverButton
           ? `<button type="button" class="page-database-gallery-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
@@ -6705,13 +7875,20 @@
           <div class="page-calendar-empty">
             <div class="page-calendar-empty-title">This view is empty.</div>
             <div class="page-calendar-empty-copy">Rows are created on the source database page and can be shown here as a view.</div>
-            ${readOnly ? "" : `<button type="button" class="page-calendar-add-btn" data-db-action="add-row">+ New row</button>`}
           </div>
+        `;
+    const addCardHTML = readOnly || isFolderDatabase(database)
+      ? ""
+      : `
+          <button type="button" class="page-database-gallery-add-card size-${escapeHTML(cardSize)}" data-db-action="add-row" data-open-new-row="page">
+            <span class="page-database-gallery-add-plus">+</span>
+            <span>New page</span>
+          </button>
         `;
 
     return {
       weekdaysHTML: "",
-      bodyHTML: `<div class="page-database-gallery size-${escapeHTML(cardSize)}">${cardsHTML}</div>`,
+      bodyHTML: `<div class="page-database-gallery size-${escapeHTML(cardSize)}">${cardsHTML}${addCardHTML}</div>`,
       metaText: `${visibleRows.length} row${visibleRows.length === 1 ? "" : "s"} in this view`,
       monthLabel: "Gallery view"
     };
@@ -6902,14 +8079,16 @@
   function refreshPropertyPanel(context, database, propertyId = "") {
     const panel = document.getElementById(PROPERTY_PANEL_ID);
     const property = getPropertyById(database, propertyId);
-    if (!panel || !property || !["status", "select", "relation", "summary", "formula"].includes(property.type)) return;
+    if (!panel || !property || !["status", "select", "tag", "relation", "summary", "formula"].includes(property.type)) return;
     panel.dataset.propertyId = propertyId;
     panel.innerHTML = property.type === "status"
       ? buildStatusPropertyPanelHTML(property, database)
       : property.type === "select"
         ? buildSelectPropertyPanelHTML(property, database)
-        : property.type === "relation"
-          ? buildRelationPropertyPanelHTML(property, database)
+        : property.type === "tag"
+          ? buildTagPropertyPanelHTML(property, database)
+      : property.type === "relation"
+        ? buildRelationPropertyPanelHTML(property, database)
           : property.type === "summary"
             ? buildSummaryPropertyPanelHTML(property, database)
             : buildFormulaPropertyPanelHTML(property, database);
@@ -6921,14 +8100,21 @@
     document.getElementById(ROW_MENU_ID)?.remove();
     document.getElementById(PROPERTY_COMPOSER_ID)?.remove();
     document.getElementById(PROPERTY_PANEL_ID)?.remove();
+    document.getElementById("page-database-status-automation-panel")?.remove();
   }
 
   function positionDatabaseFloatingEl(floatingEl, anchorEl, { align = "left", offset = 6 } = {}) {
     if (!floatingEl || !anchorEl) return;
+    floatingEl.style.maxHeight = "";
+    floatingEl.style.overflowY = "visible";
     const rect = anchorEl.getBoundingClientRect();
     const width = floatingEl.offsetWidth || 280;
     const height = floatingEl.offsetHeight || 240;
     const viewportPadding = 12;
+    const viewportWidth = Math.max(window.innerWidth || 0, viewportPadding * 2 + width);
+    const viewportHeight = Math.max(window.innerHeight || 0, viewportPadding * 2 + 160);
+    const viewportRight = viewportWidth - viewportPadding;
+    const viewportBottom = viewportHeight - viewportPadding;
 
     let left = rect.left;
     let top = rect.bottom + offset;
@@ -6940,21 +8126,30 @@
     if (align === "submenu-right") {
       left = rect.right + offset;
       top = rect.top;
-      if (left + width > window.innerWidth - viewportPadding) {
+      if (left + width > viewportRight) {
         left = rect.left - width - offset;
       }
     }
 
-    left = Math.max(viewportPadding, Math.min(window.innerWidth - width - viewportPadding, left));
+    left = Math.max(viewportPadding, Math.min(viewportRight - width, left));
 
     if (align === "submenu-right") {
-      top = Math.max(viewportPadding, Math.min(window.innerHeight - height - viewportPadding, top));
-    } else if (top + height > window.innerHeight - viewportPadding) {
-      top = Math.max(viewportPadding, rect.top - height - offset);
+      top = Math.max(viewportPadding, Math.min(viewportBottom - height, top));
+    } else if (top + height > viewportBottom) {
+      const topAbove = rect.top - height - offset;
+      const spaceBelow = viewportBottom - rect.bottom - offset;
+      const spaceAbove = rect.top - viewportPadding - offset;
+      top = spaceAbove > spaceBelow ? topAbove : viewportPadding;
+      top = Math.max(viewportPadding, Math.min(viewportBottom - Math.min(height, viewportBottom - viewportPadding), top));
     }
 
     floatingEl.style.left = `${left}px`;
     floatingEl.style.top = `${top}px`;
+    const availableHeight = Math.max(160, viewportBottom - top);
+    const maxHeight = Math.min(520, availableHeight);
+    floatingEl.style.maxHeight = `${maxHeight}px`;
+    const needsScroll = floatingEl.scrollHeight > maxHeight + 1;
+    floatingEl.style.overflowY = needsScroll ? "auto" : (floatingEl.classList.contains("page-database-submenu") ? "visible" : "auto");
   }
 
   function mountDatabaseFloatingEl(id, className, anchorEl, { align = "left", offset = 6, closeAll = true } = {}) {
@@ -7016,6 +8211,7 @@
     });
     appendMenuLabel(submenuEl, label);
     buildItems?.(submenuEl);
+    positionDatabaseFloatingEl(submenuEl, anchorEl, { align: "submenu-right", offset: 4 });
     return submenuEl;
   }
 
@@ -7344,6 +8540,7 @@
   function openInlinePageMenu(anchorEl, context) {
     const hostEl = getInlineDatabaseHost(context);
     const source = getEmbedSourceTarget(hostEl);
+    const database = getDatabaseForContext(context);
     const menuEl = mountDatabaseFloatingEl(DATABASE_MENU_ID, "topbar-dropdown page-database-floating-menu", anchorEl, {
       align: "left",
       closeAll: true
@@ -7351,12 +8548,41 @@
 
     appendMenuLabel(menuEl, "Page");
 
-    if (source?.kind === "page") {
+    if (source?.pageId) {
       appendMenuButton(menuEl, "Open as page", () => {
         closeDatabaseMenus();
         if (typeof window.openPage === "function") {
           window.openPage(source.pageId);
         }
+      });
+      if (source.kind === "page") {
+        appendMenuButton(menuEl, "Rename", () => {
+          closeDatabaseMenus();
+          if (typeof window.openRenameModal === "function") {
+            window.openRenameModal(source.pageId, getPageTitleText(source.pageId, "Untitled"));
+          }
+        });
+      }
+      appendMenuDivider(menuEl);
+      appendMenuButton(menuEl, "View settings", () => {
+        openDatabaseSummaryMenu(anchorEl, context, database);
+      });
+      appendMenuSubmenuButton(menuEl, `Property visibility (${getVisibleTableProperties(database).length}/${database.properties.length})`, (buttonEl) => {
+        openPropertyVisibilityMenu(buttonEl, context, database);
+      });
+      appendMenuSubmenuButton(menuEl, `Edit properties (${database.properties.length})`, (buttonEl) => {
+        openPropertySubmenu(buttonEl, "Edit properties", (submenuEl) => {
+          database.properties.forEach((property) => {
+            appendMenuButton(submenuEl, property.name, () => {
+              closeDatabaseMenus();
+              openPropertyPanel(context, database, property.id);
+            });
+          });
+        });
+      });
+      appendMenuDivider(menuEl);
+      appendMenuSubmenuButton(menuEl, "Source", (submenuAnchor) => {
+        openInlineSourceMenu(submenuAnchor, context, { submenu: true });
       });
       return;
     }
@@ -7555,6 +8781,11 @@
     }, {
       active: normalizeResetConfig(database.resetConfig || {}).enabled
     });
+    const statusAutomation = getStatusAutomation(database);
+    const automationCount = safeParseArray(statusAutomation.automations).filter((item) => item.sourcePropertyId && item.actions?.length).length;
+    appendMenuButton(menuEl, `Database automations${automationCount ? ` (${automationCount})` : ""}`, () => {
+      openDatabaseStatusAutomationPanel(context, database);
+    }, { active: statusAutomation.enabled });
 
     appendMenuDivider(menuEl);
     appendMenuLabel(menuEl, "Cleanup");
@@ -7588,6 +8819,453 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { active: hasCalculations });
+  }
+
+  function buildStatusAutomationDraft(database) {
+    const current = getStatusAutomation(database);
+    const automations = safeParseArray(current.automations).map((item, index) => ({
+      id: item.id || createId("automation"),
+      name: item.name || `Automation ${index + 1}`,
+      enabled: item.enabled !== false,
+      sourcePropertyId: item.sourcePropertyId || "",
+      condition: normalizeAutomationCondition(item.condition || ""),
+      compareValue: item.compareValue || "",
+      actions: safeParseArray(item.actions).length ? safeParseArray(item.actions).map((action) => ({
+        propertyId: action.propertyId || "",
+        value: action.value || ""
+      })) : [createDefaultAutomationActionDraft(database)]
+    }));
+    if (!automations.length) automations.push(createDefaultStatusAutomationDraft(database, 0));
+    return { automations };
+  }
+
+  function createDefaultStatusAutomationDraft(database, index = 0) {
+    const sourceProperty = safeParseArray(database?.properties || []).find((property) => ["number", "formula", "summary"].includes(property.type))
+      || safeParseArray(database?.properties || [])[0]
+      || null;
+    return {
+      id: createId("automation"),
+      name: `Automation ${index + 1}`,
+      enabled: true,
+      sourcePropertyId: sourceProperty?.id || "",
+      condition: getDefaultAutomationConditionForProperty(sourceProperty),
+      compareValue: ["number", "formula", "summary"].includes(sourceProperty?.type) ? "1" : "",
+      actions: [createDefaultAutomationActionDraft(database)]
+    };
+  }
+
+  function createDefaultAutomationActionDraft(database) {
+    const property = safeParseArray(database?.properties || []).find((entry) => entry.type === "status")
+      || safeParseArray(database?.properties || []).find((entry) => isAutomationTargetProperty(entry) && entry.type !== "title")
+      || null;
+    const options = getAutomationChoiceOptions(property);
+    return {
+      propertyId: property?.id || "",
+      value: property?.type === "checkbox" ? "true" : options[0]?.name || ""
+    };
+  }
+
+  function getAutomationChoiceOptions(property) {
+    if (property?.type === "status") return getStatusOptions(property);
+    if (property?.type === "select") return getPropertySelectOptions(property);
+    if (property?.type === "tag") return getPropertyTagOptions(property);
+    return [];
+  }
+
+  function findAutomationPropertyByName(properties = [], name = "", allowedTypes = []) {
+    const safeName = String(name || "").trim().toLowerCase();
+    if (!safeName) return null;
+    return safeParseArray(properties).find((property) => {
+      if (allowedTypes.length && !allowedTypes.includes(property.type)) return false;
+      return String(property.name || "").trim().toLowerCase() === safeName || String(property.id || "").trim().toLowerCase() === safeName;
+    }) || null;
+  }
+
+  function applyStatusAutomationAIDraft(database, draft, payload = {}) {
+    const properties = safeParseArray(database?.properties || []);
+    const sourceProperties = properties.filter((property) => !["relation", "rollup"].includes(property?.type));
+    const sourceProperty = findAutomationPropertyByName(sourceProperties, payload.sourceField || payload.sourceProperty || "", [])
+      || sourceProperties[0]
+      || null;
+    const rawActions = Array.isArray(payload.actions) ? payload.actions : [];
+    const actions = rawActions.map((action) => {
+      const property = findAutomationPropertyByName(properties, action.field || action.property || action.propertyName || "", []);
+      if (!isAutomationTargetProperty(property)) return null;
+      return {
+        propertyId: property.id,
+        value: String(action.value ?? "").trim()
+      };
+    }).filter(Boolean);
+    const nextItem = {
+      id: createId("automation"),
+      name: String(payload.name || "AI draft automation").trim() || "AI draft automation",
+      enabled: true,
+      sourcePropertyId: sourceProperty?.id || "",
+      condition: normalizeAutomationCondition(payload.condition || payload.operator || "gte"),
+      compareValue: String(payload.compareValue ?? payload.threshold ?? "").trim(),
+      actions: actions.length ? actions : [createDefaultAutomationActionDraft(database)]
+    };
+    draft.automations.push(nextItem);
+    return nextItem;
+  }
+
+  async function generateStatusAutomationDraft(panel, database, draft, render) {
+    const promptEl = panel?.querySelector("[data-status-automation-ai-prompt]");
+    const statusEl = panel?.querySelector("[data-status-automation-ai-status]");
+    const request = String(promptEl?.value || "").trim();
+    if (!request) {
+      if (statusEl) statusEl.textContent = "Describe the automation you want first.";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "Drafting automation...";
+    try {
+      const apiPath = ((window.SANCTUM_API_BASE || "") + "/api/assistant/status-automation").replace(/\/\/api/, "/api");
+      const response = await fetch(apiPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request,
+          fields: safeParseArray(database?.properties || []).filter((property) => !["relation", "rollup"].includes(property?.type)).map((property) => ({
+            name: property.name || "Field",
+            type: property.type || "text",
+            options: getAutomationChoiceOptions(property).map((option) => option.name)
+          }))
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "AI could not draft that automation.");
+      applyStatusAutomationAIDraft(database, draft, payload);
+      render();
+      const nextStatusEl = panel?.querySelector("[data-status-automation-ai-status]");
+      if (nextStatusEl) nextStatusEl.textContent = payload.explanation || "Draft added. Review it before saving.";
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "AI could not draft that automation right now.";
+    }
+  }
+
+  function openDatabaseStatusAutomationPanel(context, database) {
+    closeDatabaseMenus();
+    document.getElementById("page-database-status-automation-panel")?.remove();
+    const sourceProperties = safeParseArray(database.properties).filter((property) => !["relation", "rollup"].includes(property?.type));
+    const targetProperties = safeParseArray(database.properties).filter((property) => isAutomationTargetProperty(property));
+    const draft = buildStatusAutomationDraft(database);
+    const panel = document.createElement("div");
+    panel.id = "page-database-status-automation-panel";
+    panel.className = "page-database-automation-panel";
+    panel.addEventListener("mousedown", (event) => event.stopPropagation());
+    document.body.appendChild(panel);
+
+    const sourceOptionsHTML = (selectedId = "") => `
+      <option value="">Choose field</option>
+      ${sourceProperties.map((property) => `<option value="${escapeHTML(property.id)}"${property.id === selectedId ? " selected" : ""}>${escapeHTML(property.name)} (${escapeHTML(getPropertyTypeLabel(property.type))})</option>`).join("")}
+    `;
+    const targetFieldOptionsHTML = (selectedId = "") => `
+      <option value="">Choose property</option>
+      ${targetProperties.map((property) => `<option value="${escapeHTML(property.id)}"${property.id === selectedId ? " selected" : ""}>${escapeHTML(property.name)} (${escapeHTML(getPropertyTypeLabel(property.type))})</option>`).join("")}
+    `;
+    const conditionOptionsHTML = (selected = "") => [
+      ["gte", "is at least"],
+      ["lte", "is at most"],
+      ["between", "is between"],
+      ["equals", "equals"],
+      ["contains", "contains"],
+      ["checked", "is checked"],
+      ["not_empty", "is not empty"]
+    ].map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`).join("");
+    const conditionLabel = (condition = "") => ({
+      gte: "is at least",
+      lte: "is at most",
+      between: "is between",
+      equals: "equals",
+      contains: "contains",
+      checked: "is checked",
+      not_empty: "is not empty"
+    })[normalizeAutomationCondition(condition)] || "matches";
+    const getComparePlaceholder = (property, condition = "") => {
+      const safeCondition = normalizeAutomationCondition(condition);
+      if (!automationConditionNeedsCompare(safeCondition)) return "Not needed";
+      if (safeCondition === "between") return "0.1..4.99";
+      if (safeCondition === "contains") return "text to find";
+      if (property?.type === "number" || property?.type === "formula" || property?.type === "summary") return "5";
+      if (property?.type === "date") return "today or YYYY-MM-DD";
+      const options = getAutomationChoiceOptions(property);
+      return options[0]?.name || "value to match";
+    };
+    const automationPreviewHTML = (item = {}) => {
+      const sourceProperty = getPropertyById(database, item.sourcePropertyId || "");
+      const condition = normalizeAutomationCondition(item.condition || "");
+      let compareText = "";
+      if (automationConditionNeedsCompare(condition) && String(item.compareValue || "").trim()) {
+        if (condition === "between") {
+          const [minText = "", maxText = ""] = String(item.compareValue || "").split("..");
+          compareText = ` ${escapeHTML(minText.trim())} and ${escapeHTML(maxText.trim())}`;
+        } else {
+          compareText = ` ${escapeHTML(String(item.compareValue || "").trim())}`;
+        }
+      }
+      const whenText = sourceProperty
+        ? `When ${sourceProperty.name} ${conditionLabel(condition)}${compareText}`
+        : "Choose a field to watch";
+      const actions = safeParseArray(item.actions || [])
+        .map((action) => {
+          const property = getPropertyById(database, action.propertyId || "");
+          if (!property) return "";
+          const value = resolveAutomationActionValue(property, action.value || "");
+          const valueLabel = property.type === "checkbox"
+            ? (value === "true" ? "Checked" : "Unchecked")
+            : formatCellDisplay(property, value) || value || "Empty";
+          return `${property.name} → ${valueLabel}`;
+        })
+        .filter(Boolean);
+      return `${escapeHTML(whenText)}<span>${escapeHTML(actions.length ? `Then ${actions.join(", ")}` : "Choose what to update")}</span>`;
+    };
+    const actionValueControlHTML = (propertyId = "", value = "", actionIndex = 0) => {
+      const property = getPropertyById(database, propertyId);
+      if (property?.type === "checkbox") {
+        return `<select data-status-automation-input="action-value-${actionIndex}"><option value="true"${value === "true" ? " selected" : ""}>Checked</option><option value=""${value !== "true" ? " selected" : ""}>Unchecked</option></select>`;
+      }
+      const options = getAutomationChoiceOptions(property);
+      if (options.length) {
+        return `<select data-status-automation-input="action-value-${actionIndex}"><option value="">Clear</option>${options.map((option) => `<option value="${escapeHTML(option.name)}"${option.name === value ? " selected" : ""}>${escapeHTML(option.name)}</option>`).join("")}</select>`;
+      }
+      const type = property?.type === "number" ? "number" : "text";
+      const placeholder = property?.type === "date" ? "today or YYYY-MM-DD" : "Value";
+      return `<input type="${type}" value="${escapeHTML(value)}" placeholder="${escapeHTML(placeholder)}" data-status-automation-input="action-value-${actionIndex}" />`;
+    };
+    const compareValueControlHTML = (item = {}) => {
+      const condition = normalizeAutomationCondition(item.condition || "");
+      const sourceProperty = getPropertyById(database, item.sourcePropertyId || "");
+      if (condition === "between") {
+        const [minText = "", maxText = ""] = String(item.compareValue || "").split("..");
+        return `
+          <div class="page-database-automation-range">
+            <input type="text" value="${escapeHTML(minText.trim())}" placeholder="Minimum" data-status-automation-input="compare-min" />
+            <span class="page-database-automation-range-label">to</span>
+            <input type="text" value="${escapeHTML(maxText.trim())}" placeholder="Maximum" data-status-automation-input="compare-max" />
+          </div>
+        `;
+      }
+      return `<input type="text" value="${escapeHTML(item.compareValue || "")}" placeholder="${escapeHTML(getComparePlaceholder(sourceProperty, condition))}" data-status-automation-input="compare" />`;
+    };
+
+    const syncDraftFromPanel = () => {
+      panel.querySelectorAll("[data-automation-index]").forEach((card) => {
+        const index = Number(card.dataset.automationIndex);
+        const item = draft.automations[index];
+        if (!item) return;
+        item.name = card.querySelector('[data-status-automation-input="name"]')?.value || item.name;
+        item.enabled = card.querySelector('[data-status-automation-input="enabled"]')?.checked !== false;
+        item.sourcePropertyId = card.querySelector('[data-status-automation-input="source"]')?.value || "";
+        item.condition = normalizeAutomationCondition(card.querySelector('[data-status-automation-input="condition"]')?.value || "");
+        if (!automationConditionNeedsCompare(item.condition)) {
+          item.compareValue = "";
+        } else if (item.condition === "between") {
+          const fallbackValue = card.querySelector('[data-status-automation-input="compare"]')?.value || "";
+          const minValue = card.querySelector('[data-status-automation-input="compare-min"]')?.value || fallbackValue;
+          const maxValue = card.querySelector('[data-status-automation-input="compare-max"]')?.value || "";
+          item.compareValue = `${minValue}..${maxValue}`;
+        } else {
+          item.compareValue = card.querySelector('[data-status-automation-input="compare"]')?.value || "";
+        }
+        item.actions = Array.from(card.querySelectorAll("[data-automation-action-index]")).map((actionEl) => {
+          const actionIndex = Number(actionEl.dataset.automationActionIndex);
+          return {
+            propertyId: actionEl.querySelector(`[data-status-automation-input="action-property-${actionIndex}"]`)?.value || "",
+            value: actionEl.querySelector(`[data-status-automation-input="action-value-${actionIndex}"]`)?.value || ""
+          };
+        });
+      });
+    };
+
+    const render = () => {
+      panel.innerHTML = `
+        <div class="page-database-automation-backdrop" data-status-automation-action="close"></div>
+        <section class="page-database-automation-sheet" role="dialog" aria-modal="true" aria-label="Database automations">
+          <header class="page-database-automation-head">
+            <div>
+              <div class="page-database-automation-title">Automations</div>
+              <div class="page-database-automation-subtitle">Build rules like: when one field matches something, update one or more other fields on the same row.</div>
+            </div>
+            <button type="button" class="page-database-automation-icon-btn" data-status-automation-action="close" aria-label="Close">&times;</button>
+          </header>
+          <div class="page-database-automation-body">
+            <details class="page-database-automation-ai">
+              <summary>Ask AI to draft a rule</summary>
+              <div class="page-database-automation-ai-body">
+                <textarea data-status-automation-ai-prompt placeholder="Example: when Score is between 0.1 and 4.99, set Status to New. Or when Done is checked, set Finished Date to today."></textarea>
+                <button type="button" class="page-database-automation-secondary" data-status-automation-action="ai-draft">Draft automation</button>
+                <div class="page-database-automation-ai-status" data-status-automation-ai-status></div>
+              </div>
+            </details>
+            ${!sourceProperties.length || !targetProperties.length ? `
+              <div class="page-database-automation-empty">
+                Add at least one field to watch and one editable property to update before turning this on.
+              </div>
+            ` : ""}
+            <div class="page-database-automation-list">
+              ${draft.automations.map((item, index) => `
+                <article class="page-database-automation-card" data-automation-index="${index}">
+                  <div class="page-database-automation-card-head">
+                    <label class="page-database-automation-name">
+                      <span>Rule name</span>
+                      <input type="text" value="${escapeHTML(item.name)}" data-status-automation-input="name" />
+                    </label>
+                    <label class="page-database-automation-toggle">
+                      <input type="checkbox" data-status-automation-input="enabled"${item.enabled ? " checked" : ""} />
+                      <span>On</span>
+                    </label>
+                  </div>
+                  <div class="page-database-automation-grid">
+                    <label>
+                      <span>Watch field</span>
+                      <select data-status-automation-input="source">${sourceOptionsHTML(item.sourcePropertyId)}</select>
+                    </label>
+                    <label>
+                      <span>When it</span>
+                      <select data-status-automation-input="condition">${conditionOptionsHTML(item.condition || "gte")}</select>
+                    </label>
+                  </div>
+                  <label class="page-database-automation-compare${automationConditionNeedsCompare(item.condition || "") ? "" : " is-hidden"}">
+                    <span>Compare against</span>
+                    ${compareValueControlHTML(item)}
+                  </label>
+                  <div class="page-database-automation-preview">${automationPreviewHTML(item)}</div>
+                  <div class="page-database-automation-rule-title">Then update</div>
+                  <div class="page-database-automation-rules">
+                    ${safeParseArray(item.actions).map((action, actionIndex) => `
+                      <div class="page-database-automation-rule" data-automation-action-index="${actionIndex}">
+                        <span>Set</span>
+                        <select data-status-automation-input="action-property-${actionIndex}">${targetFieldOptionsHTML(action.propertyId)}</select>
+                        <span>to</span>
+                        ${actionValueControlHTML(action.propertyId, action.value || "", actionIndex)}
+                        <button type="button" class="page-database-automation-mini-btn" data-status-automation-action="delete-action" data-index="${index}" data-action-index="${actionIndex}" aria-label="Delete action">&times;</button>
+                      </div>
+                    `).join("")}
+                  </div>
+                  <div class="page-database-automation-card-actions">
+                    <button type="button" class="page-database-automation-link" data-status-automation-action="add-action" data-index="${index}">+ Add action</button>
+                    <button type="button" class="page-database-automation-link danger" data-status-automation-action="delete" data-index="${index}">Delete automation</button>
+                  </div>
+                </article>
+              `).join("")}
+            </div>
+            <button type="button" class="page-database-automation-add" data-status-automation-action="add">+ Add automation</button>
+          </div>
+          <footer class="page-database-automation-footer">
+            <button type="button" class="page-database-automation-secondary" data-status-automation-action="close">Cancel</button>
+            <button type="button" class="page-database-automation-primary" data-status-automation-action="save">Save automations</button>
+          </footer>
+        </section>
+      `;
+    };
+
+    render();
+    panel.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.matches('[data-status-automation-input="source"]')) {
+        syncDraftFromPanel();
+        const card = target.closest("[data-automation-index]");
+        const index = Number(card?.dataset.automationIndex);
+        const item = draft.automations[index];
+        const property = getPropertyById(database, item?.sourcePropertyId || "");
+        if (item) {
+          item.condition = getDefaultAutomationConditionForProperty(property);
+          item.compareValue = "";
+        }
+        render();
+        return;
+      }
+      if (target.matches('[data-status-automation-input="condition"]')) {
+        syncDraftFromPanel();
+        const card = target.closest("[data-automation-index]");
+        const index = Number(card?.dataset.automationIndex);
+        const item = draft.automations[index];
+        if (item && !automationConditionNeedsCompare(item.condition)) item.compareValue = "";
+        render();
+        return;
+      }
+      if (target.matches('[data-status-automation-input^="action-property-"]')) {
+        syncDraftFromPanel();
+        const card = target.closest("[data-automation-index]");
+        const index = Number(card?.dataset.automationIndex);
+        const item = draft.automations[index];
+        if (item) {
+          item.actions = item.actions.map((action) => {
+            const property = getPropertyById(database, action.propertyId || "");
+            const options = getAutomationChoiceOptions(property);
+            return {
+              ...action,
+              value: property?.type === "checkbox" ? "true" : options[0]?.name || ""
+            };
+          });
+        }
+        render();
+      }
+    });
+    panel.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const actionEl = target.closest("[data-status-automation-action]");
+      if (!(actionEl instanceof HTMLElement)) return;
+      const action = actionEl.dataset.statusAutomationAction;
+      if (action === "close") {
+        panel.remove();
+        return;
+      }
+      if (action === "add") {
+        syncDraftFromPanel();
+        draft.automations.push(createDefaultStatusAutomationDraft(database, draft.automations.length));
+        render();
+        return;
+      }
+      if (action === "delete") {
+        syncDraftFromPanel();
+        const index = Number(actionEl.dataset.index);
+        draft.automations.splice(index, 1);
+        if (!draft.automations.length) draft.automations.push(createDefaultStatusAutomationDraft(database, 0));
+        render();
+        return;
+      }
+      if (action === "add-action") {
+        syncDraftFromPanel();
+        const index = Number(actionEl.dataset.index);
+        if (draft.automations[index]) {
+          draft.automations[index].actions = safeParseArray(draft.automations[index].actions);
+          draft.automations[index].actions.push(createDefaultAutomationActionDraft(database));
+        }
+        render();
+        return;
+      }
+      if (action === "delete-action") {
+        syncDraftFromPanel();
+        const index = Number(actionEl.dataset.index);
+        const actionIndex = Number(actionEl.dataset.actionIndex);
+        if (draft.automations[index]) {
+          draft.automations[index].actions = safeParseArray(draft.automations[index].actions).filter((_item, currentIndex) => currentIndex !== actionIndex);
+          if (!draft.automations[index].actions.length) draft.automations[index].actions.push(createDefaultAutomationActionDraft(database));
+        }
+        render();
+        return;
+      }
+      if (action === "ai-draft") {
+        syncDraftFromPanel();
+        void generateStatusAutomationDraft(panel, database, draft, render);
+        return;
+      }
+      if (action === "save") {
+        syncDraftFromPanel();
+        database.statusAutomation = normalizeStatusAutomation({
+          enabled: true,
+          automations: draft.automations
+        }, database.properties || []);
+        applyStatusAutomationToAllRows(database);
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
+        panel.remove();
+        window.showAppToast?.(database.statusAutomation.enabled ? "Database automations saved." : "Saved with no active database automations.", "success");
+      }
+    });
   }
 
   function openDatabaseResetScheduleMenu(anchorEl, context, database) {
@@ -7789,7 +9467,7 @@
             closeDatabaseMenus();
           }, { active: !getPropertyFilter(database, property.id) });
 
-          getDistinctPropertyValues(database, property.id).slice(0, 6).forEach((value) => {
+          getFilterChoiceValues(database, property).slice(0, 24).forEach((value) => {
             const active = getPropertyFilter(database, property.id)?.mode === "equals" && getPropertyFilter(database, property.id)?.value === value;
             appendMenuButton(submenuEl, formatCellDisplay(property, value), () => {
               setPropertyFilter(database, property.id, active ? "" : "equals", value);
@@ -7815,6 +9493,30 @@
       });
       appendMenuDivider(menuEl);
     }
+
+    appendMenuSubmenuButton(menuEl, "Last opened", (buttonEl) => {
+      openPropertySubmenu(buttonEl, "Last opened", (submenuEl) => {
+        appendMenuButton(submenuEl, "Most recent first", () => {
+          setPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID, "desc");
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: getPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID)?.direction === "desc" });
+        appendMenuButton(submenuEl, "Oldest first", () => {
+          setPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID, "asc");
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: getPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID)?.direction === "asc" });
+        appendMenuButton(submenuEl, "Clear sort", () => {
+          setPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID, "");
+          saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context);
+          closeDatabaseMenus();
+        }, { active: !getPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID) });
+      });
+    }, { active: !!getPropertySort(database, LAST_OPENED_SORT_PROPERTY_ID) });
+    appendMenuDivider(menuEl);
 
     database.properties.forEach((property) => {
       appendMenuSubmenuButton(menuEl, property.name, (buttonEl) => {
@@ -7961,6 +9663,7 @@
       });
       menuEl.appendChild(button);
     });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "right", offset: 2 });
   }
 
   function buildStatusPropertyPanelHTML(property, database) {
@@ -8020,6 +9723,72 @@
         <button type="button" class="page-database-status-inline-btn" data-db-action="open-select-color-menu" data-select-option-index="${optionIndex}" aria-label="Choose select color">›</button>
         <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-select-option" data-select-option-index="${optionIndex}">×</button>
       </div>
+    `;
+  }
+
+  function buildTagEditorOptionRow(option, optionIndex) {
+    return `
+      <div class="page-database-status-option-row page-database-select-option-row" data-tag-option-index="${optionIndex}">
+        <span class="page-database-status-grip">&vellip;&vellip;</span>
+        <span class="page-database-status-chip-btn page-database-select-chip-preview">${buildValuePillHTML({ type: "tag", tagOptions: [option] }, option.name)}</span>
+        <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="tag-option-name" data-tag-option-index="${optionIndex}" />
+        <span class="page-database-status-default-badge"></span>
+        <button type="button" class="page-database-status-inline-btn" data-db-action="open-tag-color-menu" data-tag-option-index="${optionIndex}" aria-label="Choose tag color">&rsaquo;</button>
+        <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-tag-option" data-tag-option-index="${optionIndex}">&times;</button>
+      </div>
+    `;
+  }
+
+  function buildTagPropertyPanelHTML(property, database) {
+    const options = getPropertyTagOptions(property);
+    const showFolderAutoFill = isFolderDatabase(database) && !isFolderSystemProperty(property) && getSupportedFolderAutoFillOptions(property.type).length > 1;
+    return `
+      <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
+      <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
+        <div class="page-database-property-panel-header">
+          <button type="button" class="page-database-property-panel-back" data-db-action="close-property-panel">&larr;</button>
+          <div class="page-database-property-panel-title">Edit property</div>
+          <button type="button" class="page-database-property-panel-close" data-db-action="close-property-panel">&times;</button>
+        </div>
+        <div class="page-database-property-panel-body">
+          <div class="page-database-property-name-row">
+            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
+          </div>
+          <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
+            <span>Type</span>
+            <span class="page-database-property-panel-item-meta">${escapeHTML(getPropertyTypeLabel(property.type))}</span>
+          </button>
+          <button type="button" class="page-database-property-panel-item" data-db-action="open-property-icon-menu" data-prop-id="${escapeHTML(property.id)}">
+            <span>Icon</span>
+            <span class="page-database-property-panel-item-meta">${escapeHTML(getPropertyIconLabel(property))}</span>
+          </button>
+          ${showFolderAutoFill ? `
+            <button type="button" class="page-database-property-panel-item" data-db-action="open-folder-autofill-menu" data-prop-id="${escapeHTML(property.id)}">
+              <span>Folder autofill</span>
+              <span class="page-database-property-panel-item-meta">${escapeHTML(getFolderAutoFillLabel(property.folderAutoFill || "", property.type))}</span>
+            </button>
+          ` : ""}
+          <section class="page-database-status-group page-database-select-group">
+            <div class="page-database-status-group-head page-database-select-group-head">
+              <span>Tags</span>
+              <button type="button" class="page-database-status-add-btn" data-db-action="add-tag-option">+</button>
+            </div>
+            <div class="page-database-status-group-list page-database-select-group-list">
+              ${options.length
+                ? options.map((option, optionIndex) => buildTagEditorOptionRow(option, optionIndex)).join("")
+                : `<div class="page-database-value-empty">No tags yet.</div>`}
+            </div>
+          </section>
+          <div class="page-database-property-panel-divider"></div>
+          <button type="button" class="page-database-property-panel-toggle${isPropertyUnwrapped(database, property.id) ? " active" : ""}" data-db-action="toggle-property-wrap" data-prop-id="${escapeHTML(property.id)}">
+            <span>Wrap content</span>
+            <span class="page-database-menu-toggle-switch"><span></span></span>
+          </button>
+          <button type="button" class="page-database-property-panel-item" data-db-action="duplicate-property-panel" data-prop-id="${escapeHTML(property.id)}">Duplicate property</button>
+          <button type="button" class="page-database-property-panel-item danger" data-db-action="delete-property-panel" data-prop-id="${escapeHTML(property.id)}">Delete property</button>
+        </div>
+      </aside>
     `;
   }
 
@@ -8102,6 +9871,14 @@
             <span>Link</span>
             <span class="page-database-property-panel-item-meta">${escapeHTML(source?.label || "Choose table")}</span>
           </button>
+          <button type="button" class="page-database-property-panel-item" data-db-action="open-relation-filter-menu" data-prop-id="${escapeHTML(property.id)}">
+            <span>Filter</span>
+            <span class="page-database-property-panel-item-meta">${escapeHTML(
+              property.relationTarget?.filterPropertyId && property.relationTarget?.filterValue
+                ? `${(() => { const p = getDatabaseFromSource(getRelationSource(property)); const fp = p ? getPropertyById(p, property.relationTarget.filterPropertyId) : null; return fp ? fp.name : "Field"; })()}: ${property.relationTarget.filterValue}`
+                : "None"
+            )}</span>
+          </button>
           <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
           <div class="page-database-property-panel-divider"></div>
           <button type="button" class="page-database-property-panel-toggle${isPropertyUnwrapped(database, property.id) ? " active" : ""}" data-db-action="toggle-property-wrap" data-prop-id="${escapeHTML(property.id)}">
@@ -8176,6 +9953,22 @@
     return "Choose what this formula should do.";
   }
 
+  function getFormulaAdvancedFeedback(database, property) {
+    const expression = normalizeFormulaConfig(property?.formulaConfig || {}).expression || "";
+    if (!expression) return { tone: "idle", text: "Write a formula or ask AI for a draft." };
+    const validation = validateAdvancedFormulaExpression(expression);
+    if (!validation.ok) return { tone: "error", text: validation.reason };
+    const sampleRow = safeParseArray(database?.rows || [])[0] || null;
+    if (!sampleRow) return { tone: "valid", text: "Formula is valid. Add a row to preview a result." };
+    const result = getComputedFormulaRawValue(database, sampleRow, property);
+    const label = String(sampleRow.title || "First row").trim() || "First row";
+    return { tone: "valid", text: `Preview - ${label}: ${getFormulaDisplayValue(database, sampleRow, property) || result || "Empty"}` };
+  }
+
+  function buildFormulaTokenButton(token = "", label = "", className = "") {
+    return `<button type="button" class="page-database-formula-token ${className}" data-db-action="insert-formula-token" data-formula-token="${escapeHTML(token)}">${escapeHTML(label)}</button>`;
+  }
+
   function buildFormulaPropertyPanelHTML(property, database) {
     const config = normalizeFormulaConfig(property.formulaConfig || {});
     const simpleType = normalizeFormulaSimpleType(config.simpleType || "sum");
@@ -8193,9 +9986,11 @@
     const needsPair = ["subtract", "percentage", "compare"].includes(simpleType);
     const needsDate = simpleType === "days-until-date";
     const setupStatus = getFormulaSetupStatus(database, property);
+    const formulaFields = safeParseArray(database?.properties || []).filter((entry) => entry.id !== property.id);
+    const feedback = getFormulaAdvancedFeedback(database, property);
     return `
       <div class="page-database-property-panel-backdrop" data-db-action="close-property-panel"></div>
-      <aside class="page-database-property-panel-sheet" role="dialog" aria-label="Edit property">
+      <aside class="page-database-property-panel-sheet${config.mode === "advanced" ? " page-database-formula-sheet" : ""}" role="dialog" aria-label="Edit property">
         <div class="page-database-property-panel-header">
           <button type="button" class="page-database-property-panel-back" data-db-action="close-property-panel">←</button>
           <div class="page-database-property-panel-title">Edit property</div>
@@ -8259,11 +10054,44 @@
             ` : ""}
             <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
           ` : `
-            <label class="page-database-formula-advanced">
-              <span class="page-database-formula-advanced-label">Formula</span>
-              <textarea class="page-database-formula-advanced-input" data-db-action="formula-expression" placeholder="Example: percent([Spent], [Budget])">${escapeHTML(config.expression || "")}</textarea>
-            </label>
-            <div class="page-database-property-panel-note">${escapeHTML(setupStatus)} Use helpers like sum("Tasks", "Hours"), count("Tasks"), average("Tasks", "Hours"), percent([Done], [Total]), daysUntil([Due]), compare([Budget], [Actual]), and if(allChecked("Tasks", "Done"), "Complete", "In progress").</div>
+            <section class="page-database-formula-advanced">
+              <div class="page-database-formula-workspace-head">
+                <div>
+                  <div class="page-database-formula-advanced-label">Formula</div>
+                  <div class="page-database-formula-subtitle">Spreadsheet-style calculation</div>
+                </div>
+                <button type="button" class="page-database-formula-ai-button" data-db-action="toggle-formula-ai">Ask AI</button>
+              </div>
+              <textarea class="page-database-formula-advanced-input" data-db-action="formula-expression" placeholder="Example: round([Correct] / [Attempts] * 100, 0)">${escapeHTML(config.expression || "")}</textarea>
+              <div class="page-database-formula-feedback is-${escapeHTML(feedback.tone)}" data-formula-feedback>${escapeHTML(feedback.text)}</div>
+              <div class="page-database-formula-tool-section">
+                <span class="page-database-formula-advanced-label">Fields</span>
+                <div class="page-database-formula-tokens">
+                  ${formulaFields.length
+                    ? formulaFields.map((entry) => buildFormulaTokenButton(`[${entry.name}]`, entry.name, "is-field")).join("")
+                    : `<span class="page-database-property-panel-note">No other fields yet.</span>`}
+                </div>
+              </div>
+              <details class="page-database-formula-functions" open>
+                <summary>Functions</summary>
+                <div class="page-database-formula-tokens">
+                  ${FORMULA_ADVANCED_FUNCTIONS.map((entry) => buildFormulaTokenButton(entry.token, entry.label)).join("")}
+                </div>
+              </details>
+              <div class="page-database-formula-ai" data-formula-ai-panel hidden>
+                <label class="page-database-formula-advanced-label" for="page-database-formula-ai-prompt">Describe the calculation</label>
+                <textarea id="page-database-formula-ai-prompt" class="page-database-formula-ai-prompt" placeholder="Example: calculate my accuracy as a percent from Correct divided by Attempts."></textarea>
+                <div class="page-database-formula-ai-disclosure">Sends this request and field names to your configured AI provider. Row contents are not included.</div>
+                <button type="button" class="page-database-formula-ai-generate" data-db-action="generate-formula-ai">Draft formula</button>
+                <div class="page-database-formula-ai-result" data-formula-ai-result hidden>
+                  <code data-formula-ai-expression></code>
+                  <p data-formula-ai-explanation></p>
+                  <button type="button" data-db-action="apply-formula-ai">Use this formula</button>
+                </div>
+                <div class="page-database-formula-ai-status" data-formula-ai-status></div>
+              </div>
+              <div class="page-database-property-panel-note">${escapeHTML(setupStatus)} Use Database automations in the database settings when a formula result should update real row properties.</div>
+            </section>
           `}
           <button type="button" class="page-database-property-panel-link page-database-property-panel-link-quiet" data-db-action="toggle-formula-mode" data-prop-id="${escapeHTML(property.id)}">${config.mode === "advanced" ? "Back to simple" : "Advanced"}</button>
           <div class="page-database-property-panel-divider"></div>
@@ -8276,7 +10104,7 @@
 
   function openPropertyPanel(context, database, propertyId = "") {
     const property = getPropertyById(database, propertyId);
-    if (!property || !["status", "select", "relation", "summary", "formula"].includes(property.type)) return;
+    if (!property || !["status", "select", "tag", "relation", "summary", "formula"].includes(property.type)) return;
     closeDatabaseMenus();
     const panel = document.createElement("div");
     panel.id = PROPERTY_PANEL_ID;
@@ -8289,7 +10117,9 @@
       ? buildStatusPropertyPanelHTML(property, database)
       : property.type === "select"
         ? buildSelectPropertyPanelHTML(property, database)
-        : property.type === "relation"
+        : property.type === "tag"
+          ? buildTagPropertyPanelHTML(property, database)
+          : property.type === "relation"
           ? buildRelationPropertyPanelHTML(property, database)
           : property.type === "summary"
             ? buildSummaryPropertyPanelHTML(property, database)
@@ -8303,7 +10133,7 @@
     const property = getPropertyById(database, propertyId);
     if (!property) return;
 
-    if (["status", "select", "relation", "summary", "formula"].includes(property.type)) {
+    if (["status", "select", "tag", "relation", "summary", "formula"].includes(property.type)) {
       openPropertyPanel(context, database, property.id);
       return;
     }
@@ -8656,7 +10486,8 @@
     }
 
     if (titleEl) {
-      titleEl.textContent = source ? getInlineDatabaseSourceLabel(source) : "Untitled";
+      titleEl.textContent = surfaceEl.dataset.dbViewTitle
+        || (source ? getInlineDatabaseSourceLabel(source) : "Untitled");
       titleEl.classList.toggle("is-empty", !source);
     }
 
@@ -8756,6 +10587,7 @@
 
   function renderDatabaseSurface(surfaceEl, database) {
     if (!surfaceEl) return;
+    recoverLocalInlineDatabaseSource(surfaceEl);
     const normalized = normalizeDatabase(database, {
       defaultView: surfaceEl.dataset.calendarScope === "page" ? "table" : "table"
     });
@@ -8771,6 +10603,77 @@
     }
 
     renderBlockViewSurface(surfaceEl, normalized);
+    window.requestAnimationFrame(() => separateOverlappingLinkedDatabaseViews(surfaceEl));
+  }
+
+  function recoverLocalInlineDatabaseSource(hostEl) {
+    if (!hostEl || hostEl.dataset.calendarScope === "page") return false;
+    const existingSource = getEmbedSourceTarget(hostEl);
+    const localProperties = safeParseArray(hostEl.dataset.dbProperties || "[]");
+    const localRows = safeParseArray(hostEl.dataset.dbRows || "[]");
+    const isSelfBound = existingSource?.kind === "block"
+      && existingSource.pageId === getCurrentPageId()
+      && existingSource.blockId === hostEl.id;
+    if (
+      !hostEl.id
+      || (existingSource && !isSelfBound)
+      || (!isSelfBound && !localProperties.length && !localRows.length)
+    ) {
+      return false;
+    }
+
+    if (!migrateLegacyInlineDatabasesToPages()) return false;
+    const allBlocks = typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {};
+    const stored = safeParseArray(allBlocks?.[getCurrentPageId()] || [])
+      .find((block) => block?.id === hostEl.id);
+    if (!stored || stored.dbSourceKind !== "page" || !stored.dbSourcePageId) return false;
+    hostEl.dataset.dbSourceKind = "page";
+    hostEl.dataset.dbSourcePageId = stored.dbSourcePageId;
+    delete hostEl.dataset.dbSourceBlockId;
+    hostEl.dataset.dbProperties = "[]";
+    hostEl.dataset.dbRows = "[]";
+    hostEl.dataset.calendarItems = "[]";
+    return true;
+  }
+
+  function separateOverlappingLinkedDatabaseViews(sourceEl) {
+    if (!sourceEl?.id || sourceEl.dataset.calendarScope === "page") return false;
+    const sourceTarget = getEmbedSourceTarget(sourceEl);
+    const currentPageId = String(getCurrentPageId() || "").trim();
+    const isSelfSource = sourceTarget?.kind === "block"
+      && sourceTarget.pageId === currentPageId
+      && sourceTarget.blockId === sourceEl.id;
+    if (!isSelfSource) return false;
+
+    const sourceX = parseInt(sourceEl.style.left || "0", 10) || 0;
+    const sourceY = parseInt(sourceEl.style.top || "0", 10) || 0;
+    const sourceWidth = parseInt(sourceEl.style.width || "0", 10) || sourceEl.offsetWidth || 720;
+    const sourceHeight = parseInt(sourceEl.style.height || "0", 10) || sourceEl.offsetHeight || 432;
+    const sourceRight = sourceX + sourceWidth;
+    const sourceBottom = sourceY + sourceHeight;
+    let changed = false;
+
+    document.querySelectorAll('.block[data-type="calendar"][data-db-source-kind="block"]').forEach((viewEl) => {
+      if (viewEl === sourceEl) return;
+      if (viewEl.dataset.dbSourcePageId !== currentPageId || viewEl.dataset.dbSourceBlockId !== sourceEl.id) return;
+
+      const viewX = parseInt(viewEl.style.left || "0", 10) || 0;
+      const viewY = parseInt(viewEl.style.top || "0", 10) || 0;
+      const viewWidth = parseInt(viewEl.style.width || "0", 10) || viewEl.offsetWidth || 720;
+      const viewHeight = parseInt(viewEl.style.height || "0", 10) || viewEl.offsetHeight || 432;
+      const overlaps = viewX < sourceRight
+        && viewX + viewWidth > sourceX
+        && viewY < sourceBottom
+        && viewY + viewHeight > sourceY;
+      if (!overlaps) return;
+
+      viewEl.style.left = `${Math.ceil((sourceRight + 24) / 24) * 24}px`;
+      viewEl.style.top = `${Math.round(sourceY / 24) * 24}px`;
+      changed = true;
+    });
+
+    if (changed && typeof saveState === "function") saveState();
+    return changed;
   }
 
   function getViewPillLabel(database) {
@@ -8885,7 +10788,7 @@
       return;
     }
 
-    if (!event.target.closest(`#${DATABASE_MENU_ID}, #${DATABASE_SUBMENU_ID}, #${ROW_MENU_ID}, #${PROPERTY_COMPOSER_ID}`) && !event.target.closest("[data-db-action]")) {
+    if (!event.target.closest(`#${DATABASE_MENU_ID}, #${DATABASE_SUBMENU_ID}, #${ROW_MENU_ID}, #${PROPERTY_COMPOSER_ID}, #page-database-status-automation-panel`) && !event.target.closest("[data-db-action]")) {
       closeDatabaseMenus();
     }
     const interactive = event.target.closest(".page-calendar-shell, .page-database-block-shell");
@@ -8997,8 +10900,14 @@
         }
 
         const row = addRowToDatabase(database, defaults);
-  syncDatabaseRowPageForRow(context, database, row.id);
+        syncDatabaseRowPageForRow(context, database, row.id);
         saveDatabaseForContext(context, database);
+
+        if (dbControl.dataset.openNewRow === "page") {
+          rerenderCalendarContext(context);
+          openDatabaseRowAsPage(context, database, row.id, row.pageId || "");
+          return;
+        }
 
         pendingDatabaseFocus = {
           context,
@@ -9105,7 +11014,13 @@
       }
 
       if (action === "open-row-peek") {
-        openDatabaseRowPeek(dbControl.dataset.dbRowPageId || dbControl.dataset.rowPageId || dbControl.closest('[data-db-row-page-id]')?.dataset.dbRowPageId || "");
+        const rowPageId = dbControl.dataset.dbRowPageId || dbControl.dataset.rowPageId || dbControl.closest('[data-db-row-page-id]')?.dataset.dbRowPageId || "";
+        const galleryCard = dbControl.closest(".page-database-gallery-card");
+        if (galleryCard && getGalleryOpenMode(database) === "page") {
+          openDatabaseRowAsPage(context, database, galleryCard.dataset.rowId || galleryCard.dataset.itemId || "", rowPageId);
+          return;
+        }
+        openDatabaseRowPeek(rowPageId);
         return;
       }
 
@@ -9168,6 +11083,16 @@
         return;
       }
 
+      if (action === "add-tag-option") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const propertyId = panel?.dataset.propertyId || "";
+        addTagOption(database, propertyId);
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
+        refreshPropertyPanel(context, database, propertyId);
+        return;
+      }
+
       if (action === "delete-status-option") {
         const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
         const propertyId = panel?.dataset.propertyId || "";
@@ -9182,6 +11107,16 @@
         const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
         const propertyId = panel?.dataset.propertyId || "";
         deleteSelectOption(database, propertyId, Number(dbControl.dataset.selectOptionIndex || -1));
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
+        refreshPropertyPanel(context, database, propertyId);
+        return;
+      }
+
+      if (action === "delete-tag-option") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const propertyId = panel?.dataset.propertyId || "";
+        deleteTagOption(database, propertyId, Number(dbControl.dataset.tagOptionIndex || -1));
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         refreshPropertyPanel(context, database, propertyId);
@@ -9224,19 +11159,89 @@
         return;
       }
 
+      if (action === "open-tag-color-menu") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const propertyId = panel?.dataset.propertyId || "";
+        const property = getPropertyById(database, propertyId);
+        const option = getPropertyTagOptions(property)[Number(dbControl.dataset.tagOptionIndex || -1)];
+        if (!option) return;
+        openTagColorMenu(dbControl, context, database, propertyId, option.name, {
+          onChange: () => refreshPropertyPanel(context, database, propertyId)
+        });
+        return;
+      }
+
       if (action === "open-relation-table-menu") {
         const propertyId = dbControl.dataset.propId || dbControl.closest(`#${PROPERTY_PANEL_ID}`)?.dataset.propertyId || "";
         const property = getPropertyById(database, propertyId);
         if (!property || property.type !== "relation") return;
         openPropertySubmenu(dbControl, "Link", (submenuEl) => {
           getDatabaseTableSources().forEach((source) => {
-            appendMenuButton(submenuEl, source.label, () => {
+            appendMenuButton(submenuEl, getDatabaseSourceMenuLabel(source, getCurrentPageId()), () => {
               setRelationTarget(database, propertyId, source);
               saveDatabaseForContext(context, database);
               rerenderCalendarContext(context);
               refreshPropertyPanel(context, database, propertyId);
               document.getElementById(DATABASE_SUBMENU_ID)?.remove();
             }, { active: getDatabaseSourceKey(source) === getDatabaseSourceKey(property.relationTarget || {}) });
+          });
+        });
+        return;
+      }
+
+      if (action === "open-relation-filter-menu") {
+        const propertyId = dbControl.dataset.propId || dbControl.closest(`#${PROPERTY_PANEL_ID}`)?.dataset.propertyId || "";
+        const property = getPropertyById(database, propertyId);
+        if (!property || property.type !== "relation") return;
+        const sourceDb = getDatabaseFromSource(getRelationSource(property));
+        openPropertySubmenu(dbControl, "Filter by field", (submenuEl) => {
+          // "None" option to clear filter
+          appendMenuButton(submenuEl, "None", () => {
+            const current = normalizeRelationTarget(property.relationTarget || {});
+            setRelationTarget(database, propertyId, { ...current, filterPropertyId: "", filterValue: "" });
+            saveDatabaseForContext(context, database);
+            rerenderCalendarContext(context);
+            refreshPropertyPanel(context, database, propertyId);
+            document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+          }, { active: !property.relationTarget?.filterPropertyId });
+
+          if (!sourceDb) return;
+
+          // list all properties of the linked table as filter candidates
+          (sourceDb.properties || []).forEach((fp) => {
+            if (["created-time", "edited-time", "formula", "summary"].includes(fp.type)) return;
+            appendMenuButton(submenuEl, fp.name, () => {
+              // open a second submenu to enter the filter value
+              document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+              openPropertySubmenu(dbControl, `Filter: ${fp.name}`, (valueSubmenuEl) => {
+                const input = document.createElement("input");
+                input.type = "text";
+                input.className = "page-database-value-search";
+                input.placeholder = `Value to match...`;
+                input.value = property.relationTarget?.filterPropertyId === fp.id
+                  ? (property.relationTarget?.filterValue || "")
+                  : "";
+                input.style.margin = "6px 8px";
+                input.style.width = "calc(100% - 16px)";
+                valueSubmenuEl.appendChild(input);
+
+                const applyBtn = document.createElement("button");
+                applyBtn.type = "button";
+                applyBtn.className = "topbar-dropdown-btn";
+                applyBtn.textContent = "Apply";
+                applyBtn.addEventListener("click", () => {
+                  const val = input.value.trim();
+                  const current = normalizeRelationTarget(property.relationTarget || {});
+                  setRelationTarget(database, propertyId, { ...current, filterPropertyId: fp.id, filterValue: val });
+                  saveDatabaseForContext(context, database);
+                  rerenderCalendarContext(context);
+                  refreshPropertyPanel(context, database, propertyId);
+                  document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+                });
+                valueSubmenuEl.appendChild(applyBtn);
+                requestAnimationFrame(() => input.focus());
+              });
+            }, { active: property.relationTarget?.filterPropertyId === fp.id });
           });
         });
         return;
@@ -9303,6 +11308,37 @@
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         refreshPropertyPanel(context, database, propertyId);
+        return;
+      }
+
+      if (action === "insert-formula-token") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        insertAdvancedFormulaToken(panel, dbControl.dataset.formulaToken || "");
+        return;
+      }
+
+      if (action === "toggle-formula-ai") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const aiPanel = panel?.querySelector("[data-formula-ai-panel]");
+        if (aiPanel) aiPanel.hidden = !aiPanel.hidden;
+        return;
+      }
+
+      if (action === "generate-formula-ai") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const propertyId = panel?.dataset.propertyId || "";
+        void generateAdvancedFormulaDraft(panel, context, database, propertyId);
+        return;
+      }
+
+      if (action === "apply-formula-ai") {
+        const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
+        const input = panel?.querySelector('[data-db-action="formula-expression"]');
+        const expression = panel?.querySelector("[data-formula-ai-expression]")?.dataset.expression || "";
+        if (!input || !expression) return;
+        input.value = expression;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        window.showAppToast?.("Formula draft applied.", "success");
         return;
       }
 
@@ -9596,6 +11632,7 @@
       setFormulaConfig(database, propertyId, { expression: formulaInput.value || "" });
       saveDatabaseForContext(context, database);
       rerenderCalendarContext(context);
+      updateAdvancedFormulaFeedback(panel, database, propertyId);
       return;
     }
 
@@ -9648,6 +11685,10 @@
         updateSelectOptionName(database, propertyId, Number(panelInput.dataset.selectOptionIndex || -1), panelInput.value || "");
       }
 
+      if (panelInput.dataset.dbAction === "tag-option-name") {
+        updateTagOptionName(database, propertyId, Number(panelInput.dataset.tagOptionIndex || -1), panelInput.value || "");
+      }
+
       if (panelInput.dataset.dbAction === "formula-expression") {
         setFormulaConfig(database, propertyId, { expression: panelInput.value || "" });
       }
@@ -9672,6 +11713,13 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    const checklistTitleInput = event.target.closest(".page-database-checklist-title-input");
+    if (checklistTitleInput && event.key === "Enter") {
+      event.preventDefault();
+      checklistTitleInput.blur();
+      return;
+    }
+
     const titleInput = event.target.closest('.page-calendar-title-input');
     if (titleInput && event.key === "Enter") {
       event.preventDefault();
@@ -9685,6 +11733,7 @@
       const context = getCalendarContext(propertyHeader);
       if (!context) return;
 
+      event.stopPropagation();
       draggingDatabaseProperty = {
         context,
         propertyId: propertyHeader.dataset.dbHeaderPropId || ""
@@ -9724,6 +11773,7 @@
       if (!targetPropertyId || targetPropertyId === draggingDatabaseProperty.propertyId) return;
 
       event.preventDefault();
+      event.stopPropagation();
       const rect = propertyHeader.getBoundingClientRect();
       const position = event.clientX < rect.left + (rect.width / 2) ? "before" : "after";
       document.querySelectorAll('.page-database-col-head-wrap.db-prop-drop-before, .page-database-col-head-wrap.db-prop-drop-after').forEach((node) => {
@@ -9779,6 +11829,7 @@
       }
 
       event.preventDefault();
+      event.stopPropagation();
       const database = getDatabaseForContext(context);
       if (movePropertyInDatabase(database, draggingDatabaseProperty.propertyId, targetPropertyId, position)) {
         saveDatabaseForContext(context, database);
@@ -9870,9 +11921,446 @@
   window.getDatabaseCalloutSources = getDatabaseCalloutSources;
   window.getDatabaseCalloutSourceData = getDatabaseCalloutSourceData;
   window.updateDatabaseSourceRowValues = updateDatabaseSourceRowValues;
+  window.updateDatabaseRowScore = updateDatabaseRowScore;
+  window.syncDatabaseRowTitleFromPage = syncDatabaseRowTitleFromPage;
+  window.syncDatabaseRowPageTitleFromRow = syncDatabaseRowPageTitleFromRow;
+  // Assistant transaction adapter is initialized below.
+  function cloneTransactionValue(value) {
+    if (typeof structuredClone === "function") return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizeTransactionSource(sourceInput = {}) {
+    const source = {
+      kind: sourceInput?.kind === "block" ? "block" : "page",
+      pageId: String(sourceInput?.pageId || "").trim(),
+      blockId: sourceInput?.kind === "block" ? String(sourceInput?.blockId || "").trim() : ""
+    };
+    if (!source.pageId) throw new Error("Database transaction source is missing a page.");
+    if (source.kind === "block" && !source.blockId) throw new Error("Database transaction source is missing a block.");
+    return source;
+  }
+
+  function getTransactionDatabase(sourceInput = {}) {
+    const source = normalizeTransactionSource(sourceInput);
+    const database = getDatabaseFromSource(source);
+    if (!database) throw new Error("A database used by this transaction no longer exists.");
+    const normalized = normalizeDatabase(database, { defaultView: "table" });
+    if (isFolderDatabase(normalized)) throw new Error("Assistant transactions cannot change folder-backed databases.");
+    return { source, database: normalized };
+  }
+
+  function getTransactionRelationTarget(property = {}) {
+    if (normalizePropertyType(property?.type || "", "") !== "relation") return null;
+    const target = normalizeRelationTarget(property.relationTarget || {});
+    return target?.pageId ? normalizeTransactionSource(target) : null;
+  }
+
+  function collectTransactionSources(operations = []) {
+    const sources = new Map();
+    const addSource = (sourceInput) => {
+      if (!sourceInput?.pageId) return null;
+      const source = normalizeTransactionSource(sourceInput);
+      const key = getDatabaseSourceKey(source);
+      if (!sources.has(key)) sources.set(key, source);
+      return source;
+    };
+
+    safeParseArray(operations).forEach((operation) => {
+      const source = addSource(operation?.source);
+      if (!source) return;
+      if (operation?.targetSource?.pageId) addSource(operation.targetSource);
+      const database = getTransactionDatabase(source).database;
+      const propertyIds = operation?.type === "relate-database-rows"
+        ? [operation.propertyId]
+        : Object.keys(operation?.values && typeof operation.values === "object" ? operation.values : {});
+      propertyIds.forEach((propertyId) => {
+        const property = getPropertyById(database, propertyId);
+        const target = getTransactionRelationTarget(property);
+        if (target) addSource(target);
+      });
+    });
+    return [...sources.values()];
+  }
+
+  function createTransactionState(operations = []) {
+    const states = new Map();
+    collectTransactionSources(operations).forEach((source) => {
+      const loaded = getTransactionDatabase(source);
+      states.set(getDatabaseSourceKey(loaded.source), {
+        source: loaded.source,
+        database: cloneTransactionValue(loaded.database),
+        changed: false
+      });
+    });
+    return states;
+  }
+
+  function requireTransactionState(states, sourceInput = {}) {
+    const source = normalizeTransactionSource(sourceInput);
+    const key = getDatabaseSourceKey(source);
+    if (!states.has(key)) {
+      const loaded = getTransactionDatabase(source);
+      states.set(key, {
+        source: loaded.source,
+        database: cloneTransactionValue(loaded.database),
+        changed: false
+      });
+    }
+    return states.get(key);
+  }
+
+  function requireEditableTransactionProperty(database, propertyId = "", allowedTypes = null) {
+    const property = getPropertyById(database, String(propertyId || "").trim());
+    if (!property) throw new Error(`Database property "${propertyId}" no longer exists.`);
+    const type = normalizePropertyType(property.type || "", "");
+    if (isTimestampProperty(property) || ["formula", "summary", "rollup"].includes(type)) {
+      throw new Error(`"${property.name || property.id}" is read-only.`);
+    }
+    if (allowedTypes && !allowedTypes.includes(type)) {
+      throw new Error(`"${property.name || property.id}" is not valid for this operation.`);
+    }
+    return property;
+  }
+
+  function assertRelationTargetsExist(states, property, rowIds = []) {
+    const targetSource = getTransactionRelationTarget(property);
+    if (!targetSource) throw new Error(`"${property.name || property.id}" has no valid relation target.`);
+    const targetState = requireTransactionState(states, targetSource);
+    const safeIds = [...new Set(safeParseArray(rowIds).map((rowId) => String(rowId || "").trim()).filter(Boolean))];
+    if (!safeIds.length) throw new Error(`"${property.name || property.id}" needs at least one related row.`);
+    safeIds.forEach((rowId) => {
+      if (!getRowById(targetState.database, rowId)) {
+        throw new Error(`A related row for "${property.name || property.id}" no longer exists.`);
+      }
+    });
+    return { targetSource, targetState, rowIds: safeIds };
+  }
+
+  function syncTransactionRelationBacklinks(states, source, sourceRowId, property, previousValue, nextValue) {
+    const targetSource = getTransactionRelationTarget(property);
+    if (!targetSource) return;
+    const targetState = requireTransactionState(states, targetSource);
+    const sourceKey = getDatabaseSourceKey(source);
+    const backlinkProperties = getRelationProperties(targetState.database).filter((candidate) => {
+      const candidateTarget = getTransactionRelationTarget(candidate);
+      return candidateTarget && getDatabaseSourceKey(candidateTarget) === sourceKey;
+    });
+    if (!backlinkProperties.length) return;
+
+    const previousIds = new Set(parseRelationValues(previousValue));
+    const nextIds = new Set(parseRelationValues(nextValue));
+    const affectedTargetIds = new Set([...previousIds, ...nextIds]);
+    affectedTargetIds.forEach((targetRowId) => {
+      const targetRow = getRowById(targetState.database, targetRowId);
+      if (!targetRow) return;
+      backlinkProperties.forEach((backlinkProperty) => {
+        const existing = new Set(parseRelationValues(getRowValue(targetRow, backlinkProperty.id)));
+        if (nextIds.has(targetRowId)) existing.add(sourceRowId);
+        else existing.delete(sourceRowId);
+        updateRowValue(targetState.database, targetRow.id, backlinkProperty.id, [...existing]);
+        targetState.changed = true;
+      });
+    });
+  }
+
+  function applyTransactionPropertyValue(states, state, row, property, value) {
+    const previousValue = getRowValue(row, property.id);
+    if (normalizePropertyType(property.type || "", "") === "relation") {
+      assertRelationTargetsExist(states, property, safeParseArray(value));
+    }
+    updateRowValue(state.database, row.id, property.id, value);
+    const nextValue = getRowValue(row, property.id);
+    if (previousValue !== nextValue) {
+      state.changed = true;
+      if (normalizePropertyType(property.type || "", "") === "relation") {
+        syncTransactionRelationBacklinks(states, state.source, row.id, property, previousValue, nextValue);
+      }
+    }
+  }
+
+  function applyDatabaseTransactionOperations(operations = [], options = {}) {
+    const states = createTransactionState(operations);
+    const temporaryRows = new Map();
+    const createdRows = [];
+    const changedRows = new Set();
+
+    safeParseArray(operations).forEach((operation) => {
+      const state = requireTransactionState(states, operation?.source);
+      const database = state.database;
+
+      if (operation.type === "create-database-row") {
+        const values = operation.values && typeof operation.values === "object" ? operation.values : {};
+        Object.keys(values).forEach((propertyId) => {
+          const property = requireEditableTransactionProperty(database, propertyId);
+          if (normalizePropertyType(property.type || "", "") === "relation") {
+            assertRelationTargetsExist(states, property, safeParseArray(values[propertyId]));
+          }
+        });
+        const row = addRowToDatabase(database, values);
+        if (!row) throw new Error(`Could not add a row to ${database.title || "database"}.`);
+        state.changed = true;
+        temporaryRows.set(operation.id, { sourceKey: getDatabaseSourceKey(state.source), rowId: row.id });
+        createdRows.push({
+          operationId: operation.id,
+          databaseTitle: database.title || "Database",
+          rowId: row.id,
+          rowTitle: getRowTitle(database, row),
+          source: cloneTransactionValue(state.source)
+        });
+        changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        Object.keys(values).forEach((propertyId) => {
+          const property = getPropertyById(database, propertyId);
+          if (normalizePropertyType(property?.type || "", "") === "relation") {
+            syncTransactionRelationBacklinks(states, state.source, row.id, property, "", getRowValue(row, property.id));
+          }
+        });
+        return;
+      }
+
+      if (operation.type === "update-database-rows") {
+        const rowUpdates = safeParseArray(operation.rowUpdates);
+        if (!rowUpdates.length) throw new Error("Bulk database update has no rows.");
+        rowUpdates.forEach((rowUpdate) => {
+          const rowId = String(rowUpdate?.rowId || "").trim();
+          const row = getRowById(database, rowId);
+          if (!row) throw new Error(`A row in ${database.title || "database"} no longer exists.`);
+          const values = rowUpdate?.values && typeof rowUpdate.values === "object" ? rowUpdate.values : {};
+          Object.entries(values).forEach(([propertyId, value]) => {
+            const property = requireEditableTransactionProperty(database, propertyId);
+            applyTransactionPropertyValue(states, state, row, property, value);
+          });
+          changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        });
+        return;
+      }
+
+      let rowId = String(operation.rowId || "").trim();
+      if (rowId.startsWith("@")) {
+        const temporary = temporaryRows.get(rowId.slice(1));
+        if (!temporary || temporary.sourceKey !== getDatabaseSourceKey(state.source)) {
+          throw new Error("A proposed relation depends on a new row that was not created.");
+        }
+        rowId = temporary.rowId;
+      }
+      const row = getRowById(database, rowId);
+      if (!row) throw new Error(`A row in ${database.title || "database"} no longer exists.`);
+
+      if (operation.type === "update-database-row") {
+        const values = operation.values && typeof operation.values === "object" ? operation.values : {};
+        Object.entries(values).forEach(([propertyId, value]) => {
+          const property = requireEditableTransactionProperty(database, propertyId);
+          applyTransactionPropertyValue(states, state, row, property, value);
+        });
+        changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        return;
+      }
+
+      if (operation.type === "append-database-field") {
+        const property = requireEditableTransactionProperty(database, operation.propertyId, ["text", "notes"]);
+        const content = String(operation.content || "").trim();
+        if (!content) throw new Error("Text to append is empty.");
+        const current = String(getRowValue(row, property.id) || "").trimEnd();
+        applyTransactionPropertyValue(states, state, row, property, current ? `${current}\n${content}` : content);
+        changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        return;
+      }
+
+      if (operation.type === "set-database-checklist-state") {
+        if (database.view !== "checklist") {
+          throw new Error(`${database.title || "Database"} is not currently a checklist.`);
+        }
+        const checked = operation.checked === true;
+        if (!!row.checklistChecked === checked) {
+          throw new Error(`${getRowTitle(database, row)} is already ${checked ? "complete" : "incomplete"}.`);
+        }
+        setRowChecklistChecked(database, row.id, checked);
+        state.changed = true;
+        changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        return;
+      }
+
+      if (operation.type === "relate-database-rows") {
+        const property = requireEditableTransactionProperty(database, operation.propertyId, ["relation"]);
+        const targets = assertRelationTargetsExist(states, property, operation.targetRowIds);
+        const existing = new Set(parseRelationValues(getRowValue(row, property.id)));
+        targets.rowIds.forEach((targetRowId) => existing.add(targetRowId));
+        applyTransactionPropertyValue(states, state, row, property, [...existing]);
+        changedRows.add(`${getDatabaseSourceKey(state.source)}:${row.id}`);
+        return;
+      }
+
+      throw new Error(`Unsupported database operation: ${operation.type || "unknown"}.`);
+    });
+
+    if (options.save === true) {
+      states.forEach((state) => {
+        if (!state.changed) return;
+        if (!saveDatabaseToSource(state.source, state.database)) {
+          throw new Error(`Could not save ${state.database.title || "database"}.`);
+        }
+        rerenderDatabaseSourceIfVisible(state.source);
+      });
+    }
+
+    return {
+      states,
+      createdRows,
+      changedRowCount: changedRows.size,
+      affectedDatabaseCount: [...states.values()].filter((state) => state.changed).length
+    };
+  }
+
+  function createDatabaseTransactionSnapshot(operations = []) {
+    return {
+      version: 1,
+      sources: collectTransactionSources(operations).map((source) => {
+        const loaded = getTransactionDatabase(source);
+        return {
+          source: cloneTransactionValue(loaded.source),
+          database: cloneTransactionValue(loaded.database)
+        };
+      })
+    };
+  }
+
+  function stableTransactionFingerprint(value) {
+    const text = JSON.stringify(value);
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `db-${(hash >>> 0).toString(16)}-${text.length}`;
+  }
+
+  window.SanctumDatabaseTransactionAdapter = {
+    sourceType: "database",
+    preflight(operations) {
+      applyDatabaseTransactionOperations(operations, { save: false });
+      return true;
+    },
+    snapshot(operations) {
+      return createDatabaseTransactionSnapshot(operations);
+    },
+    apply(operations) {
+      const result = applyDatabaseTransactionOperations(operations, { save: true });
+      return {
+        createdRows: result.createdRows,
+        changedRowCount: result.changedRowCount,
+        affectedDatabaseCount: result.affectedDatabaseCount
+      };
+    },
+    restore(snapshot) {
+      const sources = safeParseArray(snapshot?.sources);
+      if (!sources.length) throw new Error("Database undo snapshot is empty.");
+      sources.forEach((entry) => {
+        const source = normalizeTransactionSource(entry?.source);
+        if (!entry?.database || !saveDatabaseToSource(source, cloneTransactionValue(entry.database))) {
+          throw new Error("Could not restore a database snapshot.");
+        }
+        rerenderDatabaseSourceIfVisible(source);
+      });
+      return true;
+    },
+    fingerprint(snapshot) {
+      const sources = safeParseArray(snapshot?.sources).map((entry) => normalizeTransactionSource(entry?.source));
+      const current = sources.map((source) => {
+        const loaded = getTransactionDatabase(source);
+        return {
+          source: loaded.source,
+          database: loaded.database
+        };
+      });
+      return stableTransactionFingerprint(current);
+    }
+  };
+
+  // Button-block helpers — exposed so button-block.js can create rows without
+  // touching page-database internals directly.
+  function parseButtonDatabaseSource(sourceInput = "") {
+    if (sourceInput && typeof sourceInput === "object") {
+      return {
+        kind: sourceInput.kind === "block" ? "block" : "page",
+        pageId: String(sourceInput.pageId || "").trim(),
+        blockId: sourceInput.kind === "block" ? String(sourceInput.blockId || "").trim() : ""
+      };
+    }
+    const text = String(sourceInput || "").trim();
+    if (text.includes("|")) {
+      const [kind = "page", pageId = "", blockId = ""] = text.split("|");
+      return {
+        kind: kind === "block" ? "block" : "page",
+        pageId: String(pageId || "").trim(),
+        blockId: kind === "block" ? String(blockId || "").trim() : ""
+      };
+    }
+    return { kind: "page", pageId: text, blockId: "" };
+  }
+
+  function getButtonDatabaseContext(sourceInput = "") {
+    const source = parseButtonDatabaseSource(sourceInput);
+    if (source.kind === "block") {
+      const liveBlock = source.pageId === getCurrentPageId()
+        ? document.getElementById(source.blockId || "")
+        : null;
+      return {
+        source,
+        context: {
+          kind: "block",
+          pageId: source.pageId || getCurrentPageId(),
+          blockId: source.blockId || "",
+          blockEl: liveBlock,
+          surfaceEl: liveBlock
+        }
+      };
+    }
+    return {
+      source,
+      context: {
+        kind: "page",
+        pageId: source.pageId || "",
+        surfaceEl: document.querySelector(`.calendar-db-surface[data-page-id="${source.pageId || ""}"]`)
+      }
+    };
+  }
+
+  window.buttonBlockGetDatabaseSources = function () {
+    return getDatabaseCalloutSources();
+  };
+  window.buttonBlockGetSourceProperties = function (sourceInput) {
+    const source = parseButtonDatabaseSource(sourceInput);
+    const data = getDatabaseCalloutSourceData(source);
+    return data?.database?.properties || [];
+  };
+  window.buttonBlockGetPageProperties = function (pageId) {
+    const db = getPageDatabase(pageId);
+    return db.properties || [];
+  };
+  window.buttonBlockAddRow = function (sourceInput, presetValues) {
+    const { source, context } = getButtonDatabaseContext(sourceInput);
+    if (!source.pageId) return null;
+    const db = getDatabaseFromSource(source);
+    if (!db || isFolderDatabase(db)) return null;
+    const row = addRowToDatabase(db, presetValues || {});
+    if (!row) return null;
+    syncDatabaseRowPageForRow(context, db, row.id);
+    if (context.kind === "block" && context.blockEl) {
+      saveDatabaseForContext(context, db);
+      renderDatabaseSurface(context.blockEl, db);
+    } else {
+      saveDatabaseToSource(source, db);
+      rerenderDatabaseSourceIfVisible(source);
+    }
+    return row;
+  };
+
   window.mountDatabaseEmbedBlock = function mountDatabaseEmbedBlock(hostEl, options = {}) {
     if (!hostEl) return null;
     if (!hostEl.querySelector(".page-database-block-shell")) return null;
+    // Older assistant-created blocks sometimes stored the database locally.
+    // Migrate them to a canonical full-page database before rendering the view.
+    recoverLocalInlineDatabaseSource(hostEl);
     renderDatabaseSurface(hostEl, getBlockDatabase(hostEl));
     if (options.openPicker) {
       const anchor = hostEl.querySelector(".page-database-block-view-btn, .page-database-block-empty-action") || hostEl;
@@ -9886,15 +12374,28 @@
     return hostEl;
   };
 
+  window.addEventListener("sanctum:scripts-ready", () => {
+    renderPageCalendarDatabase(getCurrentPageId());
+    renderVisibleDatabaseEmbeds();
+  }, { once: true });
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
+      migrateLegacyInlineDatabasesToPages();
       runScheduledResetsForAllSources();
       renderPageCalendarDatabase(getCurrentPageId());
       renderVisibleDatabaseEmbeds();
+      window.renderStudySourceBlocks?.();
+      window.dispatchEvent(new CustomEvent("sanctum:database-ready"));
     }, { once: true });
   } else {
+    migrateLegacyInlineDatabasesToPages();
     runScheduledResetsForAllSources();
     renderPageCalendarDatabase(getCurrentPageId());
     renderVisibleDatabaseEmbeds();
+    window.requestAnimationFrame(() => {
+      window.renderStudySourceBlocks?.();
+      window.dispatchEvent(new CustomEvent("sanctum:database-ready"));
+    });
   }
 })();

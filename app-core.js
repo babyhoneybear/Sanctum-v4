@@ -166,6 +166,18 @@ function openPageDetails(pageId) {
   document.getElementById("pageDetailsLayout").value = page.layout || "board-canvas";
   document.getElementById("pageDetailsCategory").value = page.category || "none";
   document.getElementById("pageDetailsSummary").value = page.summary || "";
+  const scopeBoundaryInput = document.getElementById("pageDetailsScopeBoundary");
+  if (scopeBoundaryInput) {
+    const defaultBoundary = isDomain || page.containerType === "project";
+    scopeBoundaryInput.checked = isDomain || page.isScopeBoundary === true || (page.isScopeBoundary !== false && defaultBoundary);
+    scopeBoundaryInput.disabled = isDomain;
+  }
+  const scopeBoundaryHelp = document.getElementById("pageDetailsScopeBoundaryHelp");
+  if (scopeBoundaryHelp) {
+    scopeBoundaryHelp.textContent = isDomain
+      ? "Domains always hold their own pages."
+      : "Links made inside it will prefer pages from here.";
+  }
 
   document.getElementById("pageDetailsLayout")?.closest(".page-details-row")?.style.setProperty("display", isDomain ? "none" : "");
   document.getElementById("pageDetailsCategory")?.closest(".page-details-row")?.style.setProperty("display", isDomain ? "none" : "");
@@ -261,12 +273,14 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
     page.layout   = document.getElementById("pageDetailsLayout").value;
     page.category = document.getElementById("pageDetailsCategory").value;
     page.summary  = document.getElementById("pageDetailsSummary").value.trim();
+    page.isScopeBoundary = document.getElementById("pageDetailsScopeBoundary")?.checked === true;
     page.openBehavior = getDefaultOpenBehavior(page.category, page.containerType || "page");
   } else {
     delete page.layout;
     delete page.category;
     delete page.summary;
     delete page.openBehavior;
+    page.isScopeBoundary = true;
   }
 
   applyPageRenameEverywhere(editingPageId, nextTitle);
@@ -714,7 +728,7 @@ function applyResolvedTheme(pageId = currentPageId) {
   root.dataset.workspaceTheme = workspaceTheme;
   root.dataset.theme = resolvedTheme;
   root.dataset.pageTheme = pageTheme || "inherit";
-  root.style.colorScheme = resolvedTheme;
+  root.style.colorScheme = resolvedTheme === "light" ? "light" : "dark";
 
   document.body?.setAttribute("data-theme", resolvedTheme);
   document.body?.setAttribute("data-page-theme", pageTheme || "inherit");
@@ -724,6 +738,7 @@ function getPageThemeLabel(value = "") {
   const normalized = normalizePageThemeOverride(value);
   if (normalized === "light") return "Light";
   if (normalized === "dark") return "Dark";
+  if (normalized === "black") return "Black";
   return "Use workspace";
 }
 
@@ -839,9 +854,11 @@ function renderPageHero(pageId) {
   const headerPos = normalizeHeaderPos(settings.headerPos);
   const isSystem = ["home", "search", "inbox", "notes"].includes(pageId);
   const isDatabasePage = page?.layout === "sheet";
+  const isInfiniteCanvasPage = page?.layout === "infinite-canvas";
+  const isJournalPage = page?.layout === "journal";
 
   // hide everything on system pages
-  if (isSystem || isDatabasePage) {
+  if (isSystem || isDatabasePage || isInfiniteCanvasPage || isJournalPage) {
     hero.style.display = "none";
     return;
   }
@@ -1650,6 +1667,8 @@ document.getElementById("pinCurrentBtn")?.addEventListener("click", () => {
 let inlineLinkActive = false;
 let inlineLinkStartOffset = null;
 let inlineLinkAnchorNode = null;
+let inlineLinkCurrentQuery = "";
+let inlineLinkCurrentEditable = null;
 
 function getAllVaultPages() {
   const results = [];
@@ -1661,6 +1680,11 @@ function getAllVaultPages() {
     category: "none",
     layout: "board-canvas",
     containerType: "domain",
+    parent: "home",
+    isScopeBoundary: true,
+    recordKind: "space",
+    canonicalId: "",
+    aliases: typeof window.normalizeVaultAliases === "function" ? window.normalizeVaultAliases(domain.aliases || domain.alias || "") : [],
     summary: ""
   }));
   userPages.forEach((page) => results.push({
@@ -1671,9 +1695,147 @@ function getAllVaultPages() {
     category: page.category || "none",
     layout: page.layout || "board-canvas",
     containerType: page.containerType || "page",
+    parent: page.parent || "",
+    isScopeBoundary: page.isScopeBoundary,
+    recordKind: typeof window.getVaultRecordKind === "function" ? window.getVaultRecordKind(page) : (page.recordKind || "record"),
+    canonicalId: String(page.canonicalId || page.canonicalPageId || page.duplicateOf || page.variantOf || ""),
+    aliases: typeof window.normalizeVaultAliases === "function" ? window.normalizeVaultAliases(page.aliases || page.alias || "") : [],
     summary: page.summary || ""
   }));
   return results;
+}
+
+function getCurrentVaultScopeId() {
+  return typeof window.getVaultTopLevelScopeId === "function"
+    ? window.getVaultTopLevelScopeId(currentPageId)
+    : "";
+}
+
+function getVaultCandidateMeta(item, currentScopeId = getCurrentVaultScopeId()) {
+  const base = item.type === "domain" ? "Domain" : (item.containerType || item.category || "Page");
+  if (!currentScopeId || typeof window.isVaultRecordInScope !== "function") return base;
+  if (window.isVaultRecordInScope(item, currentScopeId)) return `${base} · current area`;
+
+  const itemScopeId = typeof window.getVaultTopLevelScopeId === "function"
+    ? window.getVaultTopLevelScopeId(item.id)
+    : "";
+  const scopeLabel = typeof window.getVaultScopeLabel === "function"
+    ? window.getVaultScopeLabel(itemScopeId)
+    : "";
+  return scopeLabel ? `${base} · outside: ${scopeLabel}` : `${base} · outside current area`;
+}
+
+function compareVaultLinkCandidates(left, right, query = "", currentScopeId = getCurrentVaultScopeId()) {
+  const q = String(query || "").trim().toLowerCase();
+  if (currentScopeId && typeof window.isVaultRecordInScope === "function") {
+    const leftScoped = window.isVaultRecordInScope(left, currentScopeId) ? 1 : 0;
+    const rightScoped = window.isVaultRecordInScope(right, currentScopeId) ? 1 : 0;
+    if (leftScoped !== rightScoped) return rightScoped - leftScoped;
+  }
+
+  const leftTitle = (left.title || "").toLowerCase();
+  const rightTitle = (right.title || "").toLowerCase();
+  const leftExact = q && leftTitle === q ? 1 : 0;
+  const rightExact = q && rightTitle === q ? 1 : 0;
+  if (leftExact !== rightExact) return rightExact - leftExact;
+
+  const leftStarts = q && leftTitle.startsWith(q) ? 1 : 0;
+  const rightStarts = q && rightTitle.startsWith(q) ? 1 : 0;
+  if (leftStarts !== rightStarts) return rightStarts - leftStarts;
+
+  if (left.type !== right.type) return left.type === "page" ? -1 : 1;
+  return leftTitle.localeCompare(rightTitle);
+}
+
+function getVaultCandidateSearchText(item) {
+  return [
+    item.title || "",
+    ...(Array.isArray(item.aliases) ? item.aliases : [])
+  ].join(" ").toLowerCase();
+}
+
+function getVaultCandidateMatchScore(item, query = "") {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return 0;
+  const normalizedQuery = typeof window.normalizeVaultLookupTitle === "function"
+    ? window.normalizeVaultLookupTitle(query)
+    : q;
+  const normalizedTitle = typeof window.normalizeVaultLookupTitle === "function"
+    ? window.normalizeVaultLookupTitle(item.title || "")
+    : String(item.title || "").toLowerCase();
+  const normalizedAliases = Array.isArray(item.aliases)
+    ? item.aliases.map((alias) => (
+      typeof window.normalizeVaultLookupTitle === "function"
+        ? window.normalizeVaultLookupTitle(alias)
+        : String(alias || "").toLowerCase()
+    ))
+    : [];
+  const sharedScore = typeof window.getVaultRecordMatchScore === "function"
+    ? window.getVaultRecordMatchScore(query, item)
+    : 0;
+  const title = String(item.title || "").toLowerCase();
+  const aliases = Array.isArray(item.aliases) ? item.aliases.map((alias) => String(alias || "").toLowerCase()) : [];
+  if (sharedScore >= 80) return sharedScore;
+  if (title === q || normalizedTitle === normalizedQuery) return 76;
+  if (aliases.some((alias) => alias === q) || normalizedAliases.some((alias) => alias === normalizedQuery)) return 72;
+  if (title.startsWith(q) || (normalizedQuery && normalizedTitle.startsWith(normalizedQuery))) return 56;
+  if (aliases.some((alias) => alias.startsWith(q)) || normalizedAliases.some((alias) => normalizedQuery && alias.startsWith(normalizedQuery))) return 52;
+  if (title.includes(q) || (normalizedQuery && normalizedTitle.includes(normalizedQuery))) return 36;
+  if (aliases.some((alias) => alias.includes(q)) || normalizedAliases.some((alias) => normalizedQuery && alias.includes(normalizedQuery))) return 32;
+  return 0;
+}
+
+function compareVaultLinkCandidatesV2(left, right, query = "", currentScopeId = getCurrentVaultScopeId()) {
+  if (currentScopeId && typeof window.isVaultRecordInScope === "function") {
+    const leftScoped = window.isVaultRecordInScope(left, currentScopeId) ? 1 : 0;
+    const rightScoped = window.isVaultRecordInScope(right, currentScopeId) ? 1 : 0;
+    if (leftScoped !== rightScoped) return rightScoped - leftScoped;
+  }
+
+  if (typeof window.isVaultCanonicalRecord === "function") {
+    const leftCanonical = window.isVaultCanonicalRecord(left) ? 1 : 0;
+    const rightCanonical = window.isVaultCanonicalRecord(right) ? 1 : 0;
+    if (leftCanonical !== rightCanonical) return rightCanonical - leftCanonical;
+  }
+
+  const leftScore = getVaultCandidateMatchScore(left, query);
+  const rightScore = getVaultCandidateMatchScore(right, query);
+  if (leftScore !== rightScore) return rightScore - leftScore;
+
+  if (left.type !== right.type) return left.type === "page" ? -1 : 1;
+  return String(left.title || "").localeCompare(String(right.title || ""), undefined, { sensitivity: "base", numeric: true });
+}
+
+function getVaultCandidateMetaV2(item, currentScopeId = getCurrentVaultScopeId()) {
+  const base = item.type === "domain" ? "Domain" : (item.containerType || item.category || "Page");
+  const pathLabel = typeof window.getVaultRecordPathLabel === "function"
+    ? window.getVaultRecordPathLabel(item.id, { omitSelf: true })
+    : "";
+  const canonicalId = typeof window.getVaultCanonicalId === "function" ? window.getVaultCanonicalId(item) : (item.canonicalId || "");
+  const isVariant = !!canonicalId && canonicalId !== item.id;
+  const canonical = isVariant && typeof window.getVaultRecordById === "function" ? window.getVaultRecordById(canonicalId) : null;
+  const variantLabel = isVariant ? ` - variant of ${canonical?.title || "main page"}` : "";
+  if (!currentScopeId || typeof window.isVaultRecordInScope !== "function") return `${base}${variantLabel}`;
+  if (window.isVaultRecordInScope(item, currentScopeId)) {
+    return `${base} - ${pathLabel || "current area"}${variantLabel}`;
+  }
+
+  const itemScopeId = typeof window.getVaultTopLevelScopeId === "function"
+    ? window.getVaultTopLevelScopeId(item.id)
+    : "";
+  const scopeLabel = typeof window.getVaultScopeLabel === "function"
+    ? window.getVaultScopeLabel(itemScopeId)
+    : "";
+  return scopeLabel ? `${base} - outside: ${scopeLabel}${variantLabel}` : `${base} - outside current area${variantLabel}`;
+}
+
+function getInlineLinkCandidates(query = "", limit = 8) {
+  const q = String(query || "").trim();
+  const currentScopeId = getCurrentVaultScopeId();
+  return getAllVaultPages()
+    .filter((page) => !q || getVaultCandidateMatchScore(page, q) > 0)
+    .sort((a, b) => compareVaultLinkCandidatesV2(a, b, q, currentScopeId))
+    .slice(0, limit);
 }
 
 function checkInlineLinkTrigger(editable) {
@@ -1694,13 +1856,21 @@ function checkInlineLinkTrigger(editable) {
 
   // check nothing closed the bracket after it opened
   const afterBracket = textBefore.slice(bracketIdx + 1);
-  if (afterBracket.includes("]")) {
+  const closeBracketIdx = afterBracket.indexOf("]");
+  if (closeBracketIdx !== -1) {
+    const query = afterBracket.slice(0, closeBracketIdx).trim();
+    const afterClose = afterBracket.slice(closeBracketIdx + 1);
+    if (!afterClose && resolveClosedInlineLink(query, editable)) {
+      return;
+    }
     closeInlineLinkPopup();
     return;
   }
 
   const query = afterBracket;
   inlineLinkActive = true;
+  inlineLinkCurrentQuery = query;
+  inlineLinkCurrentEditable = editable;
   showInlineLinkPopup(query, range, editable);
 }
 
@@ -1713,11 +1883,8 @@ function showInlineLinkPopup(query, range, editable) {
     document.body.appendChild(popup);
   }
 
-  const allPages = getAllVaultPages();
-  const q = query.toLowerCase();
-  const matches = allPages
-    .filter(p => p.title.toLowerCase().includes(q))
-    .slice(0, 8);
+  const currentScopeId = getCurrentVaultScopeId();
+  const matches = getInlineLinkCandidates(query, 8);
 
   if (!matches.length) {
     popup.style.display = "none";
@@ -1727,8 +1894,14 @@ function showInlineLinkPopup(query, range, editable) {
   popup.innerHTML = "";
   matches.forEach((page, i) => {
     const item = document.createElement("div");
-    item.className = "inline-link-item";
-    item.innerHTML = `${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "inline-link-icon")}<span class="inline-link-title">${escapeHTML(page.title)}</span>`;
+    item.className = `inline-link-item${i === 0 ? " active" : ""}`;
+    item.innerHTML = `
+      ${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "inline-link-icon")}
+      <span class="inline-link-text">
+        <span class="inline-link-title">${escapeHTML(page.title)}</span>
+        <span class="inline-link-meta">${escapeHTML(getVaultCandidateMetaV2(page, currentScopeId))}</span>
+      </span>
+    `;
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
       insertInlineLink(page, query, editable);
@@ -1743,6 +1916,37 @@ function showInlineLinkPopup(query, range, editable) {
   popup.style.left = `${rect.left + window.scrollX}px`;
 }
 
+function getEditableTextPosition(root, textOffset) {
+  const safeOffset = Math.max(0, Number(textOffset) || 0);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = safeOffset;
+  let lastTextNode = null;
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    lastTextNode = node;
+    const length = node.nodeValue.length;
+    if (remaining <= length) {
+      return { node, offset: remaining };
+    }
+    remaining -= length;
+  }
+
+  if (lastTextNode) {
+    return { node: lastTextNode, offset: lastTextNode.nodeValue.length };
+  }
+  return { node: root, offset: root.childNodes.length };
+}
+
+function resolveClosedInlineLink(query, editable) {
+  if (!query || query.length < 2) return false;
+  const target = getInlineLinkCandidates(query, 1)[0];
+  if (!target) return false;
+  if (getVaultCandidateMatchScore(target, query) < 80) return false;
+  insertInlineLink(target, query, editable);
+  return true;
+}
+
 function insertInlineLink(page, query, editable) {
   // find and replace the [query text with a link chip
   const sel = window.getSelection();
@@ -1754,11 +1958,16 @@ function insertInlineLink(page, query, editable) {
   preRange.setEnd(range.startContainer, range.startOffset);
   const textBefore = preRange.toString();
   const bracketIdx = textBefore.lastIndexOf("[");
+  if (bracketIdx === -1) return;
 
   // move range back to the [ and delete everything from there to cursor
+  const startPos = getEditableTextPosition(editable, bracketIdx);
+  const endPos = getEditableTextPosition(editable, textBefore.length);
+  if (!startPos || !endPos) return;
+
   const fullRange = document.createRange();
-  fullRange.setStart(range.startContainer, range.startOffset - (textBefore.length - bracketIdx));
-  fullRange.setEnd(range.startContainer, range.startOffset);
+  fullRange.setStart(startPos.node, startPos.offset);
+  fullRange.setEnd(endPos.node, endPos.offset);
   fullRange.deleteContents();
 
   // insert the link element
@@ -1784,6 +1993,8 @@ function insertInlineLink(page, query, editable) {
 
 function closeInlineLinkPopup() {
   inlineLinkActive = false;
+  inlineLinkCurrentQuery = "";
+  inlineLinkCurrentEditable = null;
   const popup = document.getElementById("inlineLinkPopup");
   if (popup) popup.style.display = "none";
 }
@@ -1812,6 +2023,7 @@ document.addEventListener("keydown", (e) => {
   const items = popup.querySelectorAll(".inline-link-item");
   const active = popup.querySelector(".inline-link-item.active");
   let idx = Array.from(items).indexOf(active);
+  if (!items.length) return;
 
   if (e.key === "ArrowDown") {
     e.preventDefault();
@@ -1827,12 +2039,224 @@ document.addEventListener("keydown", (e) => {
     items[idx].classList.add("active");
   }
 
-  if (e.key === "Enter" && active) {
+  if (e.key === "Enter" || e.key === "Tab") {
+    const picked = active || items[0];
+    if (!picked) return;
     e.preventDefault();
-    active.dispatchEvent(new MouseEvent("mousedown"));
+    picked.dispatchEvent(new MouseEvent("mousedown"));
   }
 });
 
+
+// == Page Templates ==
+const PAGE_TEMPLATES = {
+  character: {
+    document: ["Overview", "Appearance", "Relations", "Background", "Notes"],
+    canvas:   ["Overview", "Relations", "Background", "Notes"],
+  },
+  spell: {
+    document: ["Description", "Domain & Tier", "Casting Method", "Effect", "Drawbacks", "Notes"],
+    canvas:   ["Description", "Domain & Tier", "Effect", "Drawbacks", "Notes"],
+  },
+  location: {
+    document: ["Overview", "Key Places", "Ruling Powers", "Culture", "History", "Notes"],
+    canvas:   ["Overview", "Politics", "Places", "Key People"],
+  },
+  event: {
+    document: ["Summary", "Participants", "Places Involved", "Aftermath", "Notes"],
+    canvas:   ["Summary", "Participants", "Places Involved", "Aftermath"],
+  },
+  item: {
+    document: ["Description", "Origin", "Properties", "Notes"],
+    canvas:   ["Description", "Origin", "Properties", "Notes"],
+  },
+};
+
+function applyPageTemplate(pageId, category, layout) {
+  const tpl = PAGE_TEMPLATES[category];
+  if (!tpl) return;
+
+  if (layout === "profile") {
+    if (typeof window.applyProfileTemplate === "function") {
+      window.applyProfileTemplate(pageId, category);
+    }
+    return;
+  }
+
+  if (layout === "document") {
+    const sections = tpl.document.map((title, i) => ({
+      id: `doc-section-${pageId}-${i}`,
+      title,
+      content: "",
+      styleKit: "",
+      meta: {
+        status: "draft",
+        purpose: "",
+        pov: "",
+        povId: "",
+        location: "",
+        locationId: "",
+        chapter: "",
+        notes: "",
+      },
+      annotations: [],
+      suggestedChanges: [],
+    }));
+    if (typeof window.readAllDocuments === "function" && typeof window.writeAllDocuments === "function") {
+      const docs = window.readAllDocuments() || {};
+      if (!docs[pageId]) {
+        docs[pageId] = {
+          meta: { status: "draft", purpose: "", totalWords: 0, sessionStartWords: 0, updatedAt: new Date().toISOString() },
+          viewPrefs: {},
+          annotation: {},
+          sections,
+        };
+        window.writeAllDocuments(docs);
+      }
+    }
+    return;
+  }
+
+  if (layout === "board-canvas" || layout === "infinite-canvas") {
+    const GS = 24;
+    const isInfinite = layout === "infinite-canvas";
+
+    const blocks = buildCanvasTemplate(pageId, category, GS, isInfinite);
+
+    const allBlocks = readAllPageBlocks();
+    if (!allBlocks[pageId] || allBlocks[pageId].length === 0) {
+      allBlocks[pageId] = blocks;
+      writeAllPageBlocks(allBlocks);
+    }
+  }
+}
+
+function buildCanvasTemplate(pageId, category, GS, isInfinite) {
+  const GAP = GS;       // 24px gap between blocks
+
+  // board-canvas starts at (0,0); infinite-canvas centers around x≈2400
+  const OX = isInfinite ? 1980 : GS * 2;   // left origin
+  const OY = isInfinite ? GS * 32 : GS * 2; // top origin
+
+  function block(i, overrides) {
+    return Object.assign({
+      id: `block-tpl-${pageId}-${i}`,
+      type: "container",
+      z: 1,
+      containerTitle: "",
+      containerBody: "",
+      containerItems: [],
+      bg: "",
+      borderColor: "",
+      textColor: "",
+      padding: "",
+      radius: "",
+      locked: 0,
+      hasNote: 0,
+    }, overrides);
+  }
+
+  // ── Character ───────────────────────────────────────────────
+  if (category === "character") {
+    const TBL_W = GS * 14;  // 336px — stats table
+    const TBL_H = GS * 14;  // 336px
+    const REL_W = GS * 18;  // 432px — relations container
+    const REL_H = GS * 14;  // 336px — matches table height
+    const FULL_W = TBL_W + GAP + REL_W; // 792px total top row
+    const SEC_W  = Math.round(FULL_W / 2 - GAP / 2);
+    const SEC_H  = GS * 11; // 264px
+
+    const statsTableHTML = `<table class="block-table"><colgroup><col style="width:110px"><col style="width:206px"></colgroup><thead><tr><th class="table-cell" contenteditable="true" spellcheck="false">Field</th><th class="table-cell" contenteditable="true" spellcheck="false">Value</th></tr></thead><tbody><tr><td class="table-cell" contenteditable="true" spellcheck="false">Role</td><td class="table-cell" contenteditable="true" spellcheck="false"></td></tr><tr><td class="table-cell" contenteditable="true" spellcheck="false">Age</td><td class="table-cell" contenteditable="true" spellcheck="false"></td></tr><tr><td class="table-cell" contenteditable="true" spellcheck="false">Status</td><td class="table-cell" contenteditable="true" spellcheck="false"></td></tr><tr><td class="table-cell" contenteditable="true" spellcheck="false">Affiliation</td><td class="table-cell" contenteditable="true" spellcheck="false"></td></tr><tr><td class="table-cell" contenteditable="true" spellcheck="false">Home</td><td class="table-cell" contenteditable="true" spellcheck="false"></td></tr></tbody></table>`;
+
+    return [
+      // stats table — top left
+      block(0, { type: "table", x: OX, y: OY, w: TBL_W, h: TBL_H, tableHTML: statsTableHTML }),
+      // relations container — top right
+      block(1, { type: "container", x: OX + TBL_W + GAP, y: OY, w: REL_W, h: REL_H, containerTitle: "Relations" }),
+      // background container — bottom left
+      block(2, { type: "container", x: OX, y: OY + TBL_H + GAP, w: SEC_W, h: SEC_H, containerTitle: "Background" }),
+      // notes container — bottom right
+      block(3, { type: "container", x: OX + SEC_W + GAP, y: OY + TBL_H + GAP, w: SEC_W, h: SEC_H, containerTitle: "Notes" }),
+    ];
+  }
+
+  // ── Spell ────────────────────────────────────────────────────
+  if (category === "spell") {
+    const W = GS * 17;
+    const H = GS * 10;
+    const FULL_W = W * 2 + GAP;
+    return [
+      block(0, { type: "container", x: OX, y: OY, w: FULL_W, h: H, containerTitle: "Description" }),
+      block(1, { type: "container", x: OX, y: OY + H + GAP, w: W, h: H, containerTitle: "Domain & Tier" }),
+      block(2, { type: "container", x: OX + W + GAP, y: OY + H + GAP, w: W, h: H, containerTitle: "Casting Method" }),
+      block(3, { type: "container", x: OX, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "Effect" }),
+      block(4, { type: "container", x: OX + W + GAP, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "Drawbacks" }),
+    ];
+  }
+
+  // ── Location ─────────────────────────────────────────────────
+  if (category === "location") {
+    const W = GS * 17;
+    const H = GS * 10;
+    const FULL_W = W * 2 + GAP;
+    return [
+      block(0, { type: "container", x: OX, y: OY, w: FULL_W, h: H, containerTitle: "Overview" }),
+      block(1, { type: "container", x: OX, y: OY + H + GAP, w: W, h: H, containerTitle: "Politics" }),
+      block(2, { type: "container", x: OX + W + GAP, y: OY + H + GAP, w: W, h: H, containerTitle: "Key Places" }),
+      block(3, { type: "container", x: OX, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "Key People" }),
+      block(4, { type: "container", x: OX + W + GAP, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "History" }),
+    ];
+  }
+
+  // ── Event ────────────────────────────────────────────────────
+  if (category === "event") {
+    const W = GS * 17;
+    const H = GS * 10;
+    const FULL_W = W * 2 + GAP;
+    return [
+      block(0, { type: "container", x: OX, y: OY, w: FULL_W, h: H, containerTitle: "Summary" }),
+      block(1, { type: "container", x: OX, y: OY + H + GAP, w: W, h: H, containerTitle: "Participants" }),
+      block(2, { type: "container", x: OX + W + GAP, y: OY + H + GAP, w: W, h: H, containerTitle: "Places Involved" }),
+      block(3, { type: "container", x: OX, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "Aftermath" }),
+      block(4, { type: "container", x: OX + W + GAP, y: OY + (H + GAP) * 2, w: W, h: H, containerTitle: "Notes" }),
+    ];
+  }
+
+  // ── Item ─────────────────────────────────────────────────────
+  if (category === "item") {
+    const W = GS * 17;
+    const H = GS * 10;
+    const FULL_W = W * 2 + GAP;
+    return [
+      block(0, { type: "container", x: OX, y: OY, w: FULL_W, h: H, containerTitle: "Description" }),
+      block(1, { type: "container", x: OX, y: OY + H + GAP, w: W, h: H, containerTitle: "Origin" }),
+      block(2, { type: "container", x: OX + W + GAP, y: OY + H + GAP, w: W, h: H, containerTitle: "Properties" }),
+      block(3, { type: "container", x: OX, y: OY + (H + GAP) * 2, w: FULL_W, h: H, containerTitle: "Notes" }),
+    ];
+  }
+
+  // ── Fallback: simple 2-col containers from tpl ───────────────
+  const tpl = PAGE_TEMPLATES[category];
+  if (!tpl) return [];
+  const names = tpl.canvas;
+  const W = GS * 17;
+  const H = GS * 9;
+  const FULL_W = W * 2 + GAP;
+  return names.map((name, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    return block(i, {
+      type: "container",
+      x: OX + col * (W + GAP),
+      y: OY + row * (H + GAP),
+      w: W,
+      h: H,
+      containerTitle: name,
+    });
+  });
+}
+
+window.applyPageTemplate = applyPageTemplate;
 
 // == Peek Drawer ==
 let activePeekId = null;
@@ -2095,7 +2519,17 @@ function openPeek(pageId) {
 
   const rowNotesInput = document.getElementById("peekRowNotesInput");
   if (rowPeekData && rowNotesInput) {
+    const resizePeekNotes = () => {
+      const value = String(rowNotesInput.value || "");
+      rowNotesInput.style.height = "76px";
+      const shouldGrow = value.includes("\n") || value.length > 90;
+      const nextHeight = shouldGrow ? Math.min(280, Math.max(76, rowNotesInput.scrollHeight)) : 76;
+      rowNotesInput.style.height = `${nextHeight}px`;
+      rowNotesInput.style.overflowY = rowNotesInput.scrollHeight > 280 ? "auto" : "hidden";
+    };
+    resizePeekNotes();
     rowNotesInput.addEventListener("input", () => {
+      resizePeekNotes();
       window.clearTimeout(drawer._peekNotesSaveTimer);
       drawer._peekNotesSaveTimer = window.setTimeout(() => {
         savePeekPageNotes(pageId, rowNotesInput.value || "");
@@ -2326,12 +2760,13 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
       }
     });
 
-    // display toggles — not applicable on document layout pages
+    // display toggles — not applicable on document or infinite-canvas layout pages
     const isDocPage = (currentPage?.layout === "document");
+    const isCanvasPage = (currentPage?.layout === "infinite-canvas");
     const pageSettings = getPageSettings(currentPageId);
     const fontPreset = normalizePageFontPreset(pageSettings.fontPreset);
 
-    if (!isDocPage) {
+    if (!isDocPage && !isCanvasPage) {
       const saveHeroSettings = () => {
         savePageSettings(currentPageId, pageSettings);
         renderPageHero(currentPageId);
@@ -2407,6 +2842,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
       children: [
         { value: "", label: `Use workspace (${getPageThemeLabel(getWorkspaceTheme())})` },
         { value: "dark", label: "Dark" },
+        { value: "black", label: "Black" },
         { value: "light", label: "Light" }
       ].map((themeOption) => ({
         key: `page-theme-${themeOption.value || "workspace"}`,
@@ -2418,6 +2854,19 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
           applyResolvedTheme(currentPageId);
         }, ["page-theme"])
       }))
+    });
+
+    items.push({ type: "divider" });
+
+    items.push({
+      label: "Relationship graph",
+      action: () => {
+        if (typeof window.openRelationshipGraph === "function") {
+          window.openRelationshipGraph({ focusId: currentPageId, mode: "local" });
+        } else {
+          showAppToast?.("Graph view is still loading. Try again in a second.", "info");
+        }
+      }
     });
 
     items.push({ type: "divider" });
@@ -2450,7 +2899,20 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
   }
 
   if (isHome || isInbox) {
-    items.push({ label: "More options coming soon", danger: false, action: () => {} });
+    if (isHome) {
+      items.push({
+        label: "Global relationship graph",
+        action: () => {
+          if (typeof window.openRelationshipGraph === "function") {
+            window.openRelationshipGraph({ focusId: "home", mode: "global" });
+          } else {
+            showAppToast?.("Graph view is still loading. Try again in a second.", "info");
+          }
+        }
+      });
+    } else {
+      items.push({ label: "More options coming soon", danger: false, action: () => {} });
+    }
   }
 
   if (items.length) openTopbarDropdown(anchorEl, items, options);
@@ -2549,7 +3011,7 @@ let pageCreateLinkTargetType = "all";
 
 function normalizePageCreateLayout(value = "") {
   const safe = String(value || "").trim().toLowerCase();
-  return ["board-canvas", "infinite-canvas", "document", "sheet"].includes(safe)
+  return ["board-canvas", "infinite-canvas", "document", "sheet", "journal"].includes(safe)
     ? safe
     : "board-canvas";
 }
@@ -2599,25 +3061,13 @@ function getPageCreateLinkCopy() {
 
 function getPageCreateLinkTargets(query = "") {
   const q = String(query || "").trim().toLowerCase();
+  const currentScopeId = getCurrentVaultScopeId();
 
   return getAllVaultPages()
     .filter((item) => item.id !== currentPageId)
     .filter((item) => isAllowedPageCreateLinkTarget(item))
-    .filter((item) => !q || (item.title || "").toLowerCase().includes(q))
-    .sort((a, b) => {
-      const aTitle = (a.title || "").toLowerCase();
-      const bTitle = (b.title || "").toLowerCase();
-      const aExact = q && aTitle === q ? 1 : 0;
-      const bExact = q && bTitle === q ? 1 : 0;
-      if (aExact !== bExact) return bExact - aExact;
-
-      const aStarts = q && aTitle.startsWith(q) ? 1 : 0;
-      const bStarts = q && bTitle.startsWith(q) ? 1 : 0;
-      if (aStarts !== bStarts) return bStarts - aStarts;
-
-      if (a.type !== b.type) return a.type === "page" ? -1 : 1;
-      return aTitle.localeCompare(bTitle);
-    })
+    .filter((item) => !q || getVaultCandidateSearchText(item).includes(q))
+    .sort((a, b) => compareVaultLinkCandidatesV2(a, b, q, currentScopeId))
     .slice(0, 12);
 }
 
@@ -2632,6 +3082,230 @@ function resolvePageCreateLinkTarget() {
   }
 
   return null;
+}
+
+function normalizePageCreateTitle(value = "") {
+  if (typeof window.normalizeVaultLookupTitle === "function") {
+    return window.normalizeVaultLookupTitle(value);
+  }
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getPageCreateTitleDistance(left = "", right = "") {
+  const a = String(left || "");
+  const b = String(right || "");
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  let prev = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      next[j] = Math.min(next[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = next;
+  }
+  return prev[b.length];
+}
+
+function getPageCreateTitleMatchScore(inputTitle = "", candidateTitle = "") {
+  if (typeof window.getVaultTitleMatchScore === "function") {
+    return window.getVaultTitleMatchScore(inputTitle, candidateTitle);
+  }
+
+  const input = normalizePageCreateTitle(inputTitle);
+  const candidate = normalizePageCreateTitle(candidateTitle);
+  if (!input || !candidate) return 0;
+  if (input === candidate) return 100;
+
+  const longerLength = Math.max(input.length, candidate.length);
+  if (longerLength < 8) return 0;
+
+  const inputWords = new Set(input.split(" ").filter(Boolean));
+  const candidateWords = new Set(candidate.split(" ").filter(Boolean));
+  const sharedWords = [...inputWords].filter((word) => candidateWords.has(word)).length;
+  const sharedCoverage = sharedWords / Math.max(1, Math.min(inputWords.size, candidateWords.size));
+  const similarity = 1 - (getPageCreateTitleDistance(input, candidate) / longerLength);
+
+  if (similarity >= 0.9 && sharedCoverage >= 0.5) return Math.round(similarity * 95);
+  if (similarity >= 0.84 && sharedCoverage >= 0.75) return Math.round(similarity * 90);
+  return 0;
+}
+
+function getVisiblePageCreateDuplicateSources() {
+  const candidates = [];
+  const pushCandidate = (item = {}) => {
+    const id = String(item.id || "").trim();
+    const title = String(item.title || "").trim();
+    if (!id || !title) return;
+    candidates.push({
+      id,
+      title,
+      icon: item.icon || "📄",
+      type: item.type || "page",
+      category: item.category || "none",
+      layout: item.layout || "board-canvas",
+      containerType: item.containerType || "page",
+      parent: item.parent || currentPageId || "",
+      canonicalId: String(item.canonicalId || item.canonicalPageId || item.duplicateOf || item.variantOf || ""),
+      aliases: item.aliases || []
+    });
+  };
+
+  const currentRecord =
+    userPages.find((page) => page.id === currentPageId) ||
+    userDomains.find((domain) => domain.id === currentPageId);
+  if (currentRecord) {
+    pushCandidate({
+      ...currentRecord,
+      type: userDomains.some((domain) => domain.id === currentRecord.id) ? "domain" : "page",
+      parent: currentRecord.parent || "home"
+    });
+  } else {
+    const visibleTitle =
+      document.getElementById("pageHeroOverlayTitle")?.textContent ||
+      document.getElementById("pageHeroTitle")?.textContent ||
+      document.getElementById("pageTitle")?.textContent ||
+      "";
+    pushCandidate({
+      id: currentPageId,
+      title: visibleTitle,
+      type: "page",
+      parent: "home"
+    });
+  }
+
+  document.querySelectorAll(".page-card, .page-link-card, [data-linked-page-id], [data-page-id]").forEach((el) => {
+    const id = el.dataset.linkedPageId || el.dataset.pageId || el.dataset.targetId || "";
+    const title =
+      el.querySelector(".page-card-title, .page-link-title, strong")?.textContent ||
+      el.getAttribute("aria-label") ||
+      "";
+    pushCandidate({
+      id,
+      title,
+      type: el.dataset.type === "domain" ? "domain" : "page",
+      parent: currentPageId
+    });
+  });
+
+  return candidates;
+}
+
+function getSelectedPageCreateContainerType(parentId = currentPageId) {
+  const activeType = document.querySelector("#pageCreateContainerTypes .page-type-btn.active")?.dataset.container;
+  const allowedTypes = getAllowedContainerTypes(parentId);
+  const nextType = activeType || selectedContainerType || getPreferredContainerType(parentId);
+  return allowedTypes.includes(nextType) ? nextType : getPreferredContainerType(parentId);
+}
+
+function getPageCreateDuplicateTargets(title = "") {
+  const normalizedTitle = normalizePageCreateTitle(title);
+  if (!normalizedTitle || pageCreateMode !== "create" || !pendingPageBlock) return [];
+
+  const isDomainCard = pendingPageBlock.dataset.type === "domain";
+  const parentId = isDomainCard ? "home" : currentPageId;
+  const selectedType = isDomainCard ? "domain" : getSelectedPageCreateContainerType(parentId);
+  const currentScopeId = getCurrentVaultScopeId();
+
+  if (typeof window.getVaultCreateMatchCandidates === "function") {
+    const seen = new Set();
+    const matches = window.getVaultCreateMatchCandidates({
+      title,
+      parentId,
+      containerType: selectedType,
+      currentPageId,
+      scopeId: currentScopeId,
+      type: isDomainCard ? "domain" : "page",
+      includeCurrentPage: true,
+      limit: 4
+    })
+      .map((item) => (typeof window.getVaultCanonicalRecord === "function" ? window.getVaultCanonicalRecord(item) : null) || item)
+      .filter((item) => {
+        if (!item?.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+    if (matches.length) return matches;
+  }
+
+  const seen = new Set();
+  return [...getAllVaultPages(), ...getVisiblePageCreateDuplicateSources()]
+    .filter((item) => (isDomainCard ? item.type === "domain" : item.type !== "domain"))
+    .filter((item) => isDomainCard || item.containerType !== "database-row")
+    .map((item) => ({ ...item, vaultMatchScore: getPageCreateTitleMatchScore(title, item.title || "") }))
+    .filter((item) => item.vaultMatchScore > 0)
+    .filter((item) => {
+      if (item.id === currentPageId) return true;
+      if (parentId && item.parent === parentId) return true;
+      if (currentScopeId && typeof window.isVaultRecordInScope === "function") {
+        return window.isVaultRecordInScope(item, currentScopeId);
+      }
+      return !currentScopeId;
+    })
+    .sort((a, b) => {
+      const aCurrent = a.id === currentPageId ? 1 : 0;
+      const bCurrent = b.id === currentPageId ? 1 : 0;
+      if (aCurrent !== bCurrent) return bCurrent - aCurrent;
+
+      const aSameParent = parentId && a.parent === parentId ? 1 : 0;
+      const bSameParent = parentId && b.parent === parentId ? 1 : 0;
+      if (aSameParent !== bSameParent) return bSameParent - aSameParent;
+
+      if (a.vaultMatchScore !== b.vaultMatchScore) return b.vaultMatchScore - a.vaultMatchScore;
+      return String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base", numeric: true });
+    })
+    .filter((item) => {
+      const canonical = typeof window.getVaultCanonicalRecord === "function" ? window.getVaultCanonicalRecord(item) : null;
+      const resolved = canonical || item;
+      if (!resolved?.id || seen.has(resolved.id)) return false;
+      seen.add(resolved.id);
+      return true;
+    })
+    .slice(0, 4);
+}
+
+function getPageCreatePreservedCardOptions() {
+  return pendingPageRestoreData
+    ? {
+        pageCardImageMode: getPageCardImageMode(pendingPageRestoreData),
+        pageCardImageSrc: getStoredPageCardImageSource(pendingPageRestoreData)
+      }
+    : {};
+}
+
+function reparentLinkedVaultPageToHost(target, hostPageId = currentPageId) {
+  if (!target?.id || target.type === "domain" || !hostPageId || hostPageId === "home") return;
+  const page = userPages.find((entry) => entry?.id === target.id);
+  if (!page || page.containerType === "hub" || page.containerType === "project" || page.containerType === "domain") return;
+
+  const hostPage = userPages.find((entry) => entry?.id === hostPageId);
+  const hostAcceptsChildren = hostPage?.containerType === "project"
+    || hostPage?.containerType === "hub"
+    || hostPage?.isScopeBoundary === true;
+  if (!hostAcceptsChildren) return;
+  if (page.parent === hostPageId) return;
+
+  page.parent = hostPageId;
+  saveSanctumRegistry();
+  if (typeof window.invalidateRelationshipGraphCache === "function") {
+    window.invalidateRelationshipGraphCache();
+  }
+}
+
+function linkPageCreateTarget(target) {
+  if (!pendingPageBlock || !target?.id) return false;
+  applyLinkedPageTargetToBlock(pendingPageBlock, target, {
+    hideCardIcon: pageCreateHideCardIcon,
+    ...getPageCreatePreservedCardOptions()
+  });
+  reparentLinkedVaultPageToHost(target, currentPageId);
+  saveCurrentPageBlocks();
+  saveState();
+  closePageCreateModal(false);
+  return true;
 }
 
 function syncPageCreateHideIconButton() {
@@ -2656,6 +3330,7 @@ function renderPageCreateLinkResults() {
 
   const matches = getPageCreateLinkTargets(pageCreateName.value);
   const linkCopy = getPageCreateLinkCopy();
+  const currentScopeId = getCurrentVaultScopeId();
   pageCreateResults.style.display = "flex";
 
   if (!matches.length) {
@@ -2678,7 +3353,7 @@ function renderPageCreateLinkResults() {
       ${getIconMarkup(item.icon || (item.type === "domain" ? "⌂" : "📄"), item.type === "domain" ? "⌂" : "📄", "page-create-result-icon")}
       <span class="page-create-result-main">
         <span class="page-create-result-title">${escapeHTML(item.title || "Untitled")}</span>
-        <span class="page-create-result-meta">${item.type === "domain" ? "Domain" : (item.containerType || item.category || "Page")}</span>
+        <span class="page-create-result-meta">${escapeHTML(getVaultCandidateMetaV2(item, currentScopeId))}</span>
       </span>
     `;
 
@@ -2694,6 +3369,82 @@ function renderPageCreateLinkResults() {
   });
 
   syncPageCreateConfirmState();
+}
+
+function renderPageCreateDuplicateResults() {
+  if (!pageCreateResults) return;
+
+  if (pageCreateMode !== "create") {
+    pageCreateResults.innerHTML = "";
+    pageCreateResults.style.display = "none";
+    return;
+  }
+
+  let matches = getPageCreateDuplicateTargets(pageCreateName.value);
+  if (!matches.length) {
+    const currentTitle =
+      document.getElementById("pageHeroOverlayTitle")?.textContent ||
+      document.getElementById("pageHeroTitle")?.textContent ||
+      document.getElementById("pageTitle")?.textContent ||
+      "";
+    if (currentPageId && getPageCreateTitleMatchScore(pageCreateName.value, currentTitle) > 0) {
+      matches = [{
+        id: currentPageId,
+        title: currentTitle,
+        icon: "📄",
+        type: "page",
+        containerType: "page",
+        category: "none",
+        parent: "home"
+      }];
+    }
+  }
+  if (!matches.length) {
+    pageCreateResults.innerHTML = "";
+    pageCreateResults.style.display = "none";
+    syncPageCreateConfirmState();
+    return;
+  }
+
+  const currentScopeId = getCurrentVaultScopeId();
+  pageCreateResults.style.display = "flex";
+  pageCreateResults.innerHTML = "";
+
+  const note = document.createElement("div");
+  note.className = "page-create-empty";
+  note.textContent = "Already exists nearby. Press Enter or click it to reuse it. Click Create to make another.";
+  pageCreateResults.appendChild(note);
+
+  matches.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "page-create-result";
+    btn.innerHTML = `
+      ${getIconMarkup(item.icon || (item.type === "domain" ? "⌂" : "📄"), item.type === "domain" ? "⌂" : "📄", "page-create-result-icon")}
+      <span class="page-create-result-main">
+        <span class="page-create-result-title">${escapeHTML(item.title || "Untitled")}</span>
+        <span class="page-create-result-meta">${escapeHTML(getVaultCandidateMetaV2(item, currentScopeId))}</span>
+      </span>
+    `;
+
+    btn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      linkPageCreateTarget(item);
+    });
+
+    pageCreateResults.appendChild(btn);
+  });
+
+  syncPageCreateConfirmState();
+}
+
+function renderPageCreateResults() {
+  if (pageCreateMode === "link") {
+    renderPageCreateLinkResults();
+  } else {
+    renderPageCreateDuplicateResults();
+  }
 }
 
 function getCreateParentType(parentId = currentPageId) {
@@ -2721,8 +3472,8 @@ function getPreferredContainerType(parentId = currentPageId) {
 function applyContainerTypeDefaults(containerType) {
   if (containerType === "detail") {
     document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
-    document.querySelector('#pageCreateLayouts .page-type-btn[data-layout="sheet"]')?.classList.add("active");
-    selectedLayout = "sheet";
+    document.querySelector('#pageCreateLayouts .page-type-btn[data-layout="profile"]')?.classList.add("active");
+    selectedLayout = "profile";
   } else if (containerType === "hub" || containerType === "project") {
     document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
     document.querySelector('#pageCreateLayouts .page-type-btn[data-layout="board-canvas"]')?.classList.add("active");
@@ -2768,7 +3519,7 @@ function applyPageCreateContext(parentId = currentPageId, isDomainCard = false) 
     if (hintEl) hintEl.textContent = linkCopy.hint;
     if (pageCreateConfirm) pageCreateConfirm.textContent = "Link";
 
-    renderPageCreateLinkResults();
+    renderPageCreateResults();
     return;
   }
 
@@ -2784,7 +3535,7 @@ function applyPageCreateContext(parentId = currentPageId, isDomainCard = false) 
     if (contextEl) contextEl.textContent = "Creating at the top level";
     if (hintEl) hintEl.textContent = "Domains are the main buckets. They hold hubs underneath them.";
     if (pageCreateConfirm) pageCreateConfirm.textContent = "Create";
-    renderPageCreateLinkResults();
+    renderPageCreateResults();
     syncPageCreateConfirmState();
     return;
   }
@@ -2831,7 +3582,7 @@ function applyPageCreateContext(parentId = currentPageId, isDomainCard = false) 
   }
 
   if (pageCreateConfirm) pageCreateConfirm.textContent = "Create";
-  renderPageCreateLinkResults();
+  renderPageCreateResults();
   syncPageCreateConfirmState();
 }
 
@@ -2839,6 +3590,7 @@ document.getElementById("pageCreateContainerTypes")?.addEventListener("click", (
   const btn = e.target.closest(".page-type-btn");
   if (!btn || btn.disabled) return;
   setPageCreateContainerType(btn.dataset.container);
+  renderPageCreateResults();
 });
 
 document.getElementById("pageCreateLayouts").addEventListener("click", (e) => {
@@ -2847,6 +3599,7 @@ document.getElementById("pageCreateLayouts").addEventListener("click", (e) => {
   document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
   selectedLayout = btn.dataset.layout;
+  renderPageCreateResults();
 });
 
 function openPageCreateModal(block, options = {}) {
@@ -2964,13 +3717,6 @@ function closePageCreateModal(cancel = false) {
 function confirmPageCreate() {
   if (!pendingPageBlock) return;
 
-  const preservedCardOptions = pendingPageRestoreData
-    ? {
-        pageCardImageMode: getPageCardImageMode(pendingPageRestoreData),
-        pageCardImageSrc: getStoredPageCardImageSource(pendingPageRestoreData)
-      }
-    : {};
-
   if (pageCreateMode === "link") {
     const target = resolvePageCreateLinkTarget();
     if (!target) {
@@ -2978,16 +3724,11 @@ function confirmPageCreate() {
       return;
     }
 
-    applyLinkedPageTargetToBlock(pendingPageBlock, target, {
-      hideCardIcon: pageCreateHideCardIcon,
-      ...preservedCardOptions
-    });
-    saveCurrentPageBlocks();
-    saveState();
-    closePageCreateModal(false);
+    linkPageCreateTarget(target);
     return;
   }
 
+  const preservedCardOptions = getPageCreatePreservedCardOptions();
   const title = pageCreateName.value.trim() || "Untitled";
 
   if (pendingPageBlock.dataset.type === "domain") {
@@ -3002,12 +3743,15 @@ function confirmPageCreate() {
     );
   } else {
     selectedCategory = document.getElementById("pageCreateCategory").value;
-    const allowedTypes = getAllowedContainerTypes(currentPageId);
-    selectedContainerType = document.querySelector("#pageCreateContainerTypes .page-type-btn.active")?.dataset.container || getPreferredContainerType(currentPageId);
-    if (!allowedTypes.includes(selectedContainerType)) {
-      selectedContainerType = getPreferredContainerType(currentPageId);
-    }
-    const newPage = createPage(title, currentPageId, selectedLayout, selectedCategory, selectedContainerType);
+    selectedContainerType = getSelectedPageCreateContainerType(currentPageId);
+    const variantTarget = getPageCreateDuplicateTargets(title)[0];
+    const canonicalId = variantTarget?.id && typeof window.getVaultCanonicalId === "function"
+      ? window.getVaultCanonicalId(variantTarget)
+      : (variantTarget?.id || "");
+    const newPage = createPage(title, currentPageId, selectedLayout, selectedCategory, selectedContainerType, {
+      canonicalId,
+      includeCurrentPage: true
+    });
     applyLinkedPageTargetToBlock(
       pendingPageBlock,
       {
@@ -3023,6 +3767,7 @@ function confirmPageCreate() {
         ...preservedCardOptions
       }
     );
+    reparentLinkedVaultPageToHost(newPage, currentPageId);
   }
 
   saveCurrentPageBlocks();
@@ -3042,11 +3787,21 @@ pageCreateCancel.addEventListener("click", () => {
 pageCreateName.addEventListener("input", () => {
   if (pageCreateMode === "link") {
     selectedLinkCandidateId = "";
-    renderPageCreateLinkResults();
   }
+  renderPageCreateResults();
 });
 pageCreateName.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") confirmPageCreate();
+  if (e.key === "Enter") {
+    if (pageCreateMode === "create") {
+      const duplicateTarget = getPageCreateDuplicateTargets(pageCreateName.value)[0];
+      if (duplicateTarget) {
+        e.preventDefault();
+        linkPageCreateTarget(duplicateTarget);
+        return;
+      }
+    }
+    confirmPageCreate();
+  }
   if (e.key === "Escape") closePageCreateModal(true);
 });
 
@@ -3351,7 +4106,7 @@ function renderWorkspace() {
   const ws = sanctumSettings.workspace;
   settingsRight.innerHTML = `
     <div class="settings-section-title">Workspace</div>
-    ${settingsField("Theme", "", settingsSelect("wsTheme", [{value:"dark",label:"Dark"},{value:"light",label:"Light"}], ws.theme))}
+    ${settingsField("Theme", "", settingsSelect("wsTheme", [{value:"dark",label:"Dark"},{value:"black",label:"Black"},{value:"light",label:"Light"}], ws.theme))}
     ${settingsField("UI Font", "", settingsSelect("wsFont", [{value:"system",label:"System"},{value:"serif",label:"Serif"},{value:"mono",label:"Mono"}], ws.uiFont))}
     ${settingsField("Default Borders", "Block border style", settingsSelect("wsBorders", [{value:"none",label:"None"},{value:"subtle",label:"Subtle"},{value:"visible",label:"Visible"}], ws.borders))}
     ${settingsField("Corner Style", "", settingsSelect("wsCorners", [{value:"square",label:"Square"},{value:"slight",label:"Slightly Rounded"},{value:"round",label:"Fully Rounded"}], ws.cornerStyle))}
@@ -3399,51 +4154,18 @@ function renderData() {
   const used = window.SanctumStorage?.getUsageBytes?.() || new Blob([JSON.stringify(localStorage)]).size;
   const usedKB = (used / 1024).toFixed(1);
 
-  const readPageDatabasesForExport = () => {
-    const primary = readStorageJSON(STORAGE_KEYS.pageDatabases, null);
-    if (primary && typeof primary === "object" && !Array.isArray(primary)) return primary;
-    const legacy = readStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, {});
-    return legacy && typeof legacy === "object" && !Array.isArray(legacy) ? legacy : {};
-  };
-
-  const buildBackupData = () => ({
+  const backupAdapter = {
     settings: sanctumSettings,
     domains: userDomains,
     pages: userPages,
-    blocks: readStorageJSON(STORAGE_KEYS.pageBlocks, {}),
-    pageSettings: readStorageJSON(STORAGE_KEYS.pageSettings, {}),
-    pageActivity: readStorageJSON(STORAGE_KEYS.pageActivity, {}),
-    documents: readStorageJSON(STORAGE_KEYS.documents, {}),
-    docSettings: readStorageJSON(STORAGE_KEYS.docSettings, {}),
-    pageDatabases: readPageDatabasesForExport(),
-    chronicles: readStorageJSON(STORAGE_KEYS.chronicles, []),
-    trash: readStorageJSON(STORAGE_KEYS.trash, []),
-    pins: readStorageJSON(STORAGE_KEYS.pins, []),
-    bookmarks: readStorageJSON(STORAGE_KEYS.bookmarks, []),
-    stickers: readStorageJSON(STORAGE_KEYS.stickers, {}),
-    customStickers: readStorageJSON(STORAGE_KEYS.customStickers, []),
-    recentColors: readStorageJSON(STORAGE_KEYS.recentColors, []),
-    colorPalette: readStorageJSON(STORAGE_KEYS.colorPalette, []),
-    threads: readStorageJSON("sanctum_threads", {}),
-    anchors: readStorageJSON("sanctum_anchors", {}),
-    annotations: readStorageJSON("sanctum_annotations", {}),
-    notesVault: readStorageJSON(STORAGE_KEYS.notesVault, []),
-    noteShelves: readStorageJSON(STORAGE_KEYS.noteShelves, []),
-    helperInbox: readStorageJSON(STORAGE_KEYS.helperInbox, []),
-    helperActionLog: readStorageJSON(STORAGE_KEYS.helperActionLog, []),
-    helperChatLog: readStorageJSON(STORAGE_KEYS.helperChatLog, []),
-    helperUserProfile: readStorageJSON(STORAGE_KEYS.helperUserProfile, {}),
-    helperMemoryProfile: readStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(readStorageJSON(STORAGE_KEYS.helperUserProfile, {}).id || "primary-user")}`, {}),
-  });
-
-  const hasBackupContent = (data) => {
-    return (data.domains?.length || 0) > 0
-      || (data.pages?.length || 0) > 0
-      || Object.keys(data.blocks || {}).length > 0
-      || Object.keys(data.documents || {}).length > 0
-      || Object.keys(data.pageDatabases || {}).length > 0
-      || (data.notesVault?.length || 0) > 0;
+    keys: STORAGE_KEYS,
+    readJSON: readStorageJSON,
+    writeJSON: writeStorageJSON,
+    writeSettings: (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
   };
+
+  const buildBackupData = () => window.SanctumBackupData.buildBackupData(backupAdapter);
+  const hasBackupContent = (data) => window.SanctumBackupData.hasBackupContent(data);
 
   const downloadBackupData = (filename, options = {}) => {
     const data = buildBackupData();
@@ -3488,38 +4210,7 @@ function renderData() {
         try {
           const data = JSON.parse(e.target.result);
           downloadBackupData(recoveryFilename("before-import"), { onlyWhenPopulated: true });
-          if (data.settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings)); }
-          if (data.domains) { writeStorageJSON(STORAGE_KEYS.domains, data.domains); }
-          if (data.pages) { writeStorageJSON(STORAGE_KEYS.pagesRegistry, data.pages); }
-          if (data.blocks) { writeStorageJSON(STORAGE_KEYS.pageBlocks, data.blocks); }
-          if (data.pageSettings) { writeStorageJSON(STORAGE_KEYS.pageSettings, data.pageSettings); }
-          if (data.pageActivity) { writeStorageJSON(STORAGE_KEYS.pageActivity, data.pageActivity); }
-          if (data.documents) { writeStorageJSON(STORAGE_KEYS.documents, data.documents); }
-          if (data.docSettings) { writeStorageJSON(STORAGE_KEYS.docSettings, data.docSettings); }
-          const importedPageDatabases = data.pageDatabases || data.calendarDatabases;
-          if (importedPageDatabases) {
-            writeStorageJSON(STORAGE_KEYS.pageDatabases, importedPageDatabases);
-            writeStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, importedPageDatabases);
-          }
-          if (data.chronicles) { writeStorageJSON(STORAGE_KEYS.chronicles, data.chronicles); }
-          if (data.trash) { writeStorageJSON(STORAGE_KEYS.trash, data.trash); }
-          if (data.pins) { writeStorageJSON(STORAGE_KEYS.pins, data.pins); }
-          if (data.bookmarks) { writeStorageJSON(STORAGE_KEYS.bookmarks, data.bookmarks); }
-          if (data.stickers) { writeStorageJSON(STORAGE_KEYS.stickers, data.stickers); }
-          if (data.customStickers) { writeStorageJSON(STORAGE_KEYS.customStickers, data.customStickers); }
-          if (data.recentColors) { writeStorageJSON(STORAGE_KEYS.recentColors, data.recentColors); }
-          if (data.colorPalette) { writeStorageJSON(STORAGE_KEYS.colorPalette, data.colorPalette); }
-          if (data.threads) { writeStorageJSON("sanctum_threads", data.threads); }
-          if (data.anchors) { writeStorageJSON("sanctum_anchors", data.anchors); }
-          if (data.annotations) { writeStorageJSON("sanctum_annotations", data.annotations); }
-          if (data.notesVault) { writeStorageJSON(STORAGE_KEYS.notesVault, data.notesVault); }
-          if (data.noteShelves) { writeStorageJSON(STORAGE_KEYS.noteShelves, data.noteShelves); }
-          if (data.helperInbox) { writeStorageJSON(STORAGE_KEYS.helperInbox, data.helperInbox); }
-          if (data.helperActionLog) { writeStorageJSON(STORAGE_KEYS.helperActionLog, data.helperActionLog); }
-          if (data.helperChatLog) { writeStorageJSON(STORAGE_KEYS.helperChatLog, data.helperChatLog); }
-          if (data.helperUserProfile) { writeStorageJSON(STORAGE_KEYS.helperUserProfile, data.helperUserProfile); }
-          const importedProfile = data.helperUserProfile || readStorageJSON(STORAGE_KEYS.helperUserProfile, {});
-          if (data.helperMemoryProfile) { writeStorageJSON(`${STORAGE_KEYS.helperMemoryProfile}:${(importedProfile.id || 'primary-user')}`, data.helperMemoryProfile); }
+          window.SanctumBackupData.importBackupData(data, backupAdapter);
           const flush = window.SanctumStorage && window.SanctumStorage.flush;
           const doReload = () => { alert("Import successful. Reloading..."); location.reload(); };
           flush ? flush().then(doReload).catch(doReload) : doReload();
@@ -3548,8 +4239,8 @@ function renderAbout() {
   settingsRight.innerHTML = `
     <div class="settings-section-title">About</div>
     <div style="display:flex;flex-direction:column;gap:12px;color:var(--muted2);font-size:13px;">
-      <div>Sanctum <span style="color:var(--text-main)">v3</span></div>
-      <div>Build <span style="color:var(--text-main)">0.3.0</span></div>
+      <div>Sanctum <span style="color:var(--text-main)">v4</span></div>
+      <div>Build <span style="color:var(--text-main)">0.4.0</span></div>
       <div style="margin-top:8px;color:var(--muted3);font-size:12px;line-height:1.7;">
         A private vault for everything that matters.<br>
         Built for brains that work differently.
@@ -3665,25 +4356,38 @@ function getAllBlocks() {
   userDomains.forEach(d => allPages[d.id] = d);
   userPages.forEach(p => allPages[p.id] = p);
 
+  const getResultScope = (pageId) => {
+    const scopeId = typeof window.getVaultTopLevelScopeId === "function"
+      ? window.getVaultTopLevelScopeId(pageId)
+      : "";
+    return {
+      scopeId,
+      scopeTitle: typeof window.getVaultScopeLabel === "function" ? window.getVaultScopeLabel(scopeId) : ""
+    };
+  };
+
   // search page/domain titles as results
   for (const page of [...userDomains, ...userPages]) {
+    const scope = getResultScope(page.id);
     results.push({
       pageId: page.id,
       pageTitle: page.title,
       block: { type: userDomains.some(d => d.id === page.id) ? "domain" : "page" },
       text: page.title,
       isTitle: true,
+      ...scope,
     });
   }
 
   for (const [pageId, blocks] of Object.entries(all)) {
     const page = allPages[pageId];
     const pageTitle = page ? page.title : "Unknown Page";
+    const scope = getResultScope(pageId);
 
     for (const block of blocks) {
       const text = getSerializedBlockSearchText(block);
       if (!text) continue;
-      results.push({ pageId, pageTitle, block, text });
+      results.push({ pageId, pageTitle, block, text, ...scope });
     }
   }
 
@@ -3694,7 +4398,7 @@ function getAllBlocks() {
     if (!page) continue;
     const docText = (typeof docData === "string" ? docData : (docData.content || "")).replace(/<[^>]*>/g, " ").trim();
     if (!docText) continue;
-    results.push({ pageId, pageTitle: page.title, block: { type: "document" }, text: docText });
+    results.push({ pageId, pageTitle: page.title, block: { type: "document" }, text: docText, ...getResultScope(pageId) });
   }
 
   // search notes
@@ -3747,6 +4451,16 @@ function runSearch() {
     return r.text.toLowerCase().includes(term.toLowerCase());
   });
 
+  const currentScopeId = getCurrentVaultScopeId();
+  if (currentScopeId) {
+    filtered = filtered.sort((a, b) => {
+      const aScoped = a.pageId && typeof window.isVaultRecordInScope === "function" && window.isVaultRecordInScope(a.pageId, currentScopeId) ? 1 : 0;
+      const bScoped = b.pageId && typeof window.isVaultRecordInScope === "function" && window.isVaultRecordInScope(b.pageId, currentScopeId) ? 1 : 0;
+      if (aScoped !== bScoped) return bScoped - aScoped;
+      return String(a.pageTitle || "").localeCompare(String(b.pageTitle || ""), undefined, { sensitivity: "base", numeric: true });
+    });
+  }
+
   searchResults.innerHTML = "";
 
   if (!term) {
@@ -3770,10 +4484,11 @@ function runSearch() {
 
     const row = document.createElement("div");
     row.className = "search-result-row";
+    const pathLabel = ["SANCTUM", r.scopeTitle || "", typeLabel].filter(Boolean).join(" / ");
     row.innerHTML = `
       <div class="search-result-left">
         <div class="search-result-title">${escapeHTML(r.pageTitle)}</div>
-        <div class="search-result-path">SANCTUM / ${typeLabel}</div>
+        <div class="search-result-path">${escapeHTML(pathLabel)}</div>
         <div class="search-result-snippet">${snippetHtml}</div>
       </div>
       <div class="search-result-right">${bigHtml}</div>
@@ -3822,7 +4537,14 @@ loadPins();
 renderSidebarDomains();
 renderSidebarPins();
 renderSidebarBookmarks();
-openPage(typeof window.getRecentSessionPageId === "function" ? window.getRecentSessionPageId() : "home");
+const restoredTabPage = typeof window.restoreTabsLayoutIfSaved === "function"
+  ? window.restoreTabsLayoutIfSaved()
+  : null;
+openPage(
+  restoredTabPage || (typeof window.getRecentSessionPageId === "function" ? window.getRecentSessionPageId() : "home"),
+  { skipTabHistory: !!restoredTabPage }
+);
+if (typeof window.restoreSplitLayoutIfSaved === "function") window.restoreSplitLayoutIfSaved();
 pushHistory();
 updateTopbarContext(currentPageId);
 renderBreadcrumbs(currentPageId);

@@ -1,2 +1,4 @@
 node_modules/
 .env
+recovery/
+.claude/settings.local.json

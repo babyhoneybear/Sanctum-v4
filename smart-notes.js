@@ -7,6 +7,50 @@
   const USER_PROFILE_KEY = (window.STORAGE_KEYS && window.STORAGE_KEYS.helperUserProfile) || 'sanctum_helper_user_profile_v1';
   const HELPER_MEMORY_KEY = (window.STORAGE_KEYS && window.STORAGE_KEYS.helperMemoryProfile) || 'sanctum_helper_memory_profile_v1';
   const ASSISTANT_API_PATH = ((window.SANCTUM_API_BASE || '') + '/api/assistant/chat').replace(/\/\/api/, '/api');
+  const CONTEXT_ROUTE_API_PATH = ((window.SANCTUM_API_BASE || '') + '/api/assistant/route-context').replace(/\/\/api/, '/api');
+  const ORGANIZE_API_PATH = ((window.SANCTUM_API_BASE || '') + '/api/assistant/organize').replace(/\/\/api/, '/api');
+  const USE_AI_CONTEXT_ROUTER = window.SANCTUM_AI_CONTEXT_ROUTER === true;
+  const ASSISTANT_BULK_BATCH_SIZE = 20;
+  const ASSISTANT_PERSONALITIES = Object.freeze([
+    {
+      id: 'southern-warden',
+      label: 'Southern Warden',
+      gender: 'masculine',
+      shortLabel: 'Stern · protective · dry',
+      subtitle: 'Steady hands. Few words. No foolishness.',
+      description: 'A restrained Southern protector: practical, blunt, quietly caring, and difficult to rattle.',
+    },
+    {
+      id: 'southern-belle',
+      label: 'Southern Belle',
+      gender: 'feminine',
+      shortLabel: 'Warm · graceful · firm',
+      subtitle: 'Soft voice. Strong spine.',
+      description: 'Warm Southern charm with patience, emotional perception, and a politely immovable backbone.',
+    },
+    {
+      id: 'commander',
+      label: 'Commander',
+      gender: 'feminine',
+      shortLabel: 'Sharp · capable · demanding',
+      subtitle: 'Stand up straight. You can handle this.',
+      description: 'Direct, ambitious, and motivating. She treats the user as capable and expects follow-through.',
+    },
+    {
+      id: 'golden-boy',
+      label: 'Golden Boy',
+      gender: 'masculine',
+      shortLabel: 'Playful · loyal · expressive',
+      subtitle: 'Good energy, good company, serious when it counts.',
+      description: 'Affectionate and playful without becoming foolish; collaborative, curious, and openly encouraging.',
+    },
+  ]);
+  const ASSISTANT_GENDERS = Object.freeze([
+    { value: 'masculine', label: 'Masculine' },
+    { value: 'feminine', label: 'Feminine' },
+    { value: 'neutral', label: 'Neutral' },
+    { value: 'custom', label: 'Custom' },
+  ]);
 
   if (window.STORAGE_KEYS) {
     window.STORAGE_KEYS.notesVault = NOTES_KEY;
@@ -66,10 +110,24 @@
   const makeId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   function normalizeUserProfile(profile = {}) {
+    const personalityId = ASSISTANT_PERSONALITIES.some((item) => item.id === profile.assistantPersonality)
+      ? profile.assistantPersonality
+      : 'southern-warden';
+    const selectedPersonality = ASSISTANT_PERSONALITIES.find((item) => item.id === personalityId)
+      || ASSISTANT_PERSONALITIES[0];
+    const existingName = typeof profile.assistantName === 'string' ? profile.assistantName.trim() : '';
     return {
       id: typeof profile.id === 'string' && profile.id.trim() ? profile.id.trim() : 'primary-user',
       displayName: typeof profile.displayName === 'string' && profile.displayName.trim() ? profile.displayName.trim() : 'You',
-      assistantName: typeof profile.assistantName === 'string' && profile.assistantName.trim() ? profile.assistantName.trim() : 'Assistant',
+      assistantName: existingName && existingName !== 'Assistant' ? existingName : 'Warden',
+      assistantAvatar: typeof profile.assistantAvatar === 'string' ? profile.assistantAvatar.trim() : '',
+      assistantPersonality: personalityId,
+      assistantGender: ASSISTANT_GENDERS.some((item) => item.value === profile.assistantGender)
+        ? profile.assistantGender
+        : selectedPersonality.gender,
+      assistantPronouns: typeof profile.assistantPronouns === 'string' ? profile.assistantPronouns.trim().slice(0, 60) : '',
+      memoryEnabled: profile.memoryEnabled !== false,
+      autoMemory: profile.autoMemory !== false,
     };
   }
 
@@ -80,7 +138,10 @@
             id: typeof item?.id === 'string' ? item.id : makeId('mem'),
             text: typeof item?.text === 'string' ? item.text.trim() : '',
             source: typeof item?.source === 'string' ? item.source : 'assistant',
+            category: typeof item?.category === 'string' ? item.category.trim().slice(0, 40) : 'general',
+            pinned: item?.pinned === true,
             createdAt: Number.isFinite(Number(item?.createdAt)) ? Number(item.createdAt) : now(),
+            updatedAt: Number.isFinite(Number(item?.updatedAt)) ? Number(item.updatedAt) : (Number(item?.createdAt) || now()),
           }))
           .filter((item) => item.text)
       : [];
@@ -107,11 +168,15 @@
   let notesListFilter = 'all';
   let notesLayoutState = { shelvesOpen: true, listOpen: true };
   let notesFolderState = {};
+  let activeAssistantEditMessageId = '';
+  let activeAssistantTransactionMessageId = '';
   let activeAssistantOpen = false;
   let activeAssistantBusy = false;
+  let assistantRenderRevision = 0;
   let activeComposerContextPageId = '';
   let noteSaveTimer = null;
   let noteReprocessTimer = null;
+  const organizingNoteIds = new Set();
 
   const NOTES_LIST_FILTER_OPTIONS = [
     { id: 'all', label: 'All Pages', buttonLabel: 'All' },
@@ -198,6 +263,7 @@
       noteId: typeof item.noteId === 'string' ? item.noteId : '',
       status: ['open', 'resolved'].includes(item.status) ? item.status : 'open',
       confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0,
+      choices: Array.isArray(item.choices) ? item.choices.filter((c) => typeof c === 'string' && c.trim()).slice(0, 4) : [],
       suggestedPageId: typeof item.suggestedPageId === 'string' ? item.suggestedPageId : '',
       suggestedAction: typeof item.suggestedAction === 'string' ? item.suggestedAction : '',
       reason: typeof item.reason === 'string' ? item.reason : '',
@@ -242,15 +308,134 @@
     };
   }
 
+  function normalizeStoredDatabaseProposal(proposal = null) {
+    if (!proposal || typeof proposal !== 'object') return null;
+    const operations = Array.isArray(proposal.operations) ? proposal.operations.slice(0, 20) : [];
+    const questions = Array.isArray(proposal.questions) ? proposal.questions.slice(0, 8) : [];
+    const rejectedOperations = Array.isArray(proposal.rejectedOperations)
+      ? proposal.rejectedOperations.slice(0, 20)
+      : [];
+    if (!operations.length && !questions.length && !rejectedOperations.length) return null;
+    const operationIds = new Set(operations.map((operation) => operation?.id).filter(Boolean));
+    const defaultSelectedIds = operations
+      .filter((operation) => operation?.basis === 'explicit')
+      .map((operation) => operation.id);
+    const selectedOperationIds = Array.isArray(proposal.review?.selectedOperationIds)
+      ? proposal.review.selectedOperationIds.filter((id) => operationIds.has(id))
+      : defaultSelectedIds;
+    const preparedTransaction = proposal.preparedTransaction && typeof proposal.preparedTransaction === 'object'
+      ? {
+          ...proposal.preparedTransaction,
+          executable: false,
+          applyAvailable: false,
+          operations: Array.isArray(proposal.preparedTransaction.operations)
+            ? proposal.preparedTransaction.operations.slice(0, 20)
+            : [],
+        }
+      : null;
+    const continuation = proposal.continuation && typeof proposal.continuation === 'object'
+      ? {
+          summary: String(proposal.continuation.summary || '').slice(0, 600),
+          batchSize: Math.max(1, Math.min(ASSISTANT_BULK_BATCH_SIZE, Number(proposal.continuation.batchSize) || ASSISTANT_BULK_BATCH_SIZE)),
+          totalRowCount: Math.max(0, Number(proposal.continuation.totalRowCount) || 0),
+          completedRowCount: Math.max(0, Number(proposal.continuation.completedRowCount) || 0),
+          started: proposal.continuation.started === true,
+          remainingRows: Array.isArray(proposal.continuation.remainingRows)
+            ? proposal.continuation.remainingRows.slice(0, 100).map((row) => ({
+                databaseRef: String(row?.databaseRef || '').slice(0, 240),
+                rowId: String(row?.rowId || '').slice(0, 180),
+                title: String(row?.title || '').slice(0, 240),
+              })).filter((row) => row.databaseRef && row.rowId)
+            : [],
+        }
+      : null;
+    return {
+      ...proposal,
+      status: preparedTransaction && proposal.review?.status === 'prepared' ? 'prepared' : 'proposed',
+      executable: false,
+      operations,
+      questions: questions.map((question, index) => ({
+        ...question,
+        id: question?.id || `question-${index + 1}`,
+        operationIds: Array.isArray(question?.operationIds) ? question.operationIds : [],
+      })),
+      rejectedOperations,
+      allowedDatabaseRefs: Array.isArray(proposal.allowedDatabaseRefs)
+        ? proposal.allowedDatabaseRefs
+        : [...new Set(operations.map((operation) => operation?.databaseRef).filter(Boolean))],
+      allowedContentRefs: Array.isArray(proposal.allowedContentRefs)
+        ? proposal.allowedContentRefs
+        : [...new Set(operations.map((operation) => operation?.targetRef).filter(Boolean))],
+      review: {
+        status: ['reviewing', 'invalid', 'prepared'].includes(proposal.review?.status)
+          ? proposal.review.status
+          : 'reviewing',
+        selectedOperationIds,
+        answers: proposal.review?.answers && typeof proposal.review.answers === 'object'
+          ? { ...proposal.review.answers }
+          : {},
+        errors: Array.isArray(proposal.review?.errors) ? proposal.review.errors.slice(0, 20) : [],
+      },
+      preparedTransaction,
+      continuation,
+    };
+  }
+
+  function normalizeAssistantTransactionReceipt(receipt = null) {
+    if (!receipt || typeof receipt !== 'object') return null;
+    const status = ['applied', 'undone'].includes(receipt.status) ? receipt.status : '';
+    if (!status || !Array.isArray(receipt.operations) || !receipt.operations.length) return null;
+    return {
+      ...receipt,
+      status,
+      operations: receipt.operations.slice(0, 20),
+      adapters: Array.isArray(receipt.adapters) ? receipt.adapters.slice(0, 8) : [],
+      undoAvailable: status === 'applied' && receipt.undoAvailable === true,
+      appliedAt: Number.isFinite(Number(receipt.appliedAt)) ? Number(receipt.appliedAt) : 0,
+      undoneAt: Number.isFinite(Number(receipt.undoneAt)) ? Number(receipt.undoneAt) : 0,
+    };
+  }
+
+  function extractEmbeddedAssistantPayload(text = '') {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced ? fenced[1].trim() : raw;
+    if (!candidate.startsWith('{') || !candidate.endsWith('}')) return null;
+
+    try {
+      const parsed = JSON.parse(candidate);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
   function normalizeChat(list = []) {
     return Array.isArray(list)
-      ? list.map((message) => ({
-          id: typeof message?.id === 'string' ? message.id : makeId('msg'),
-          role: ['user', 'assistant', 'system'].includes(message?.role) ? message.role : 'assistant',
-          text: typeof message?.text === 'string' ? message.text : '',
-          actions: Array.isArray(message?.actions) ? message.actions.map(normalizeChatAction).filter(Boolean) : [],
-          createdAt: Number.isFinite(Number(message?.createdAt)) ? Number(message.createdAt) : now(),
-        })).filter((message) => message.text.trim() || (message.actions || []).length)
+      ? list.map((message) => {
+          const role = ['user', 'assistant', 'system'].includes(message?.role) ? message.role : 'assistant';
+          const text = typeof message?.text === 'string' ? message.text : '';
+          const embedded = role === 'assistant' ? extractEmbeddedAssistantPayload(text) : null;
+          const storedActions = Array.isArray(message?.actions)
+            ? message.actions.map(normalizeChatAction).filter(Boolean)
+            : [];
+          const embeddedActions = !storedActions.length && Array.isArray(embedded?.suggestedActions)
+            ? embedded.suggestedActions.map(normalizeChatAction).filter(Boolean)
+            : [];
+          return {
+            id: typeof message?.id === 'string' ? message.id : makeId('msg'),
+            role,
+            text: embedded?.reply || text,
+            actions: storedActions.length ? storedActions : embeddedActions,
+            databaseProposal: normalizeStoredDatabaseProposal(message?.databaseProposal),
+            proposalSuperseded: message?.proposalSuperseded === true,
+            transactionReceipt: normalizeAssistantTransactionReceipt(message?.transactionReceipt),
+            transactionError: typeof message?.transactionError === 'string' ? message.transactionError.slice(0, 1000) : '',
+            createdAt: Number.isFinite(Number(message?.createdAt)) ? Number(message.createdAt) : now(),
+          };
+        }).filter((message) => message.text.trim() || (message.actions || []).length || message.databaseProposal || message.transactionReceipt)
       : [];
   }
 
@@ -270,10 +455,30 @@
     return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
 
+  function formatAssistantTime(ts) {
+    const d = new Date(ts || Date.now());
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
   function saveNotes() {
     notes = normalizeNotes(notes);
     writeJSON(NOTES_KEY, notes);
   }
+
+  window.SanctumAssistantNoteStore = {
+    read() {
+      if (noteSaveTimer) flushPendingNoteSave();
+      return typeof structuredClone === 'function'
+        ? structuredClone(notes)
+        : JSON.parse(JSON.stringify(notes));
+    },
+    write(nextNotes) {
+      notes = normalizeNotes(Array.isArray(nextNotes) ? nextNotes : []);
+      saveNotes();
+      renderEverything();
+      return true;
+    },
+  };
 
   function saveShelves() {
     shelves = normalizeShelves(shelves);
@@ -283,6 +488,30 @@
   function saveInbox() {
     inboxItems = normalizeInbox(inboxItems);
     writeJSON(INBOX_KEY, inboxItems);
+    renderInboxBadge();
+    window.refreshDataCalloutBlocks?.();
+  }
+
+  function getOpenInboxCount() {
+    return inboxItems.filter((item) => item.status === 'open').length;
+  }
+
+  function renderInboxBadge() {
+    const count = getOpenInboxCount();
+    const inboxLink = document.getElementById('navInbox');
+    if (!inboxLink) return;
+
+    let badge = inboxLink.querySelector('.notes-inbox-count-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'notes-inbox-count-badge';
+      inboxLink.appendChild(badge);
+    }
+
+    inboxLink.classList.toggle('has-pending-inbox', count > 0);
+    inboxLink.title = count > 0 ? `${count} pending inbox item${count === 1 ? '' : 's'}` : 'Inbox';
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = count > 0 ? '' : 'none';
   }
 
   function saveActionLog() {
@@ -292,6 +521,7 @@
 
   function saveChat() {
     chatMessages = normalizeChat(chatMessages).slice(-120);
+    assistantRenderRevision += 1;
     writeJSON(CHAT_KEY, chatMessages);
   }
 
@@ -300,15 +530,54 @@
     writeJSON(`${HELPER_MEMORY_KEY}:${activeUser.id}`, helperMemory);
   }
 
-  function addHelperMemoryFact(text, source = 'assistant') {
+  function addHelperMemoryFact(text, source = 'assistant', category = 'general') {
     const clean = String(text || '').trim();
     if (!clean) return null;
     if (helperMemory.facts.some((item) => item.text.toLowerCase() === clean.toLowerCase())) return null;
-    const fact = { id: makeId('mem'), text: clean, source, createdAt: now() };
+    const timestamp = now();
+    const fact = {
+      id: makeId('mem'),
+      text: clean.slice(0, 500),
+      source,
+      category: String(category || 'general').trim().slice(0, 40) || 'general',
+      pinned: source === 'user',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     helperMemory.facts.push(fact);
     helperMemory.updatedAt = now();
     saveHelperMemory();
     return fact;
+  }
+
+  function removeHelperMemoryFact(memoryId = '') {
+    const before = helperMemory.facts.length;
+    helperMemory.facts = helperMemory.facts.filter((item) => item.id !== memoryId);
+    if (helperMemory.facts.length === before) return false;
+    helperMemory.updatedAt = now();
+    saveHelperMemory();
+    return true;
+  }
+
+  function getRelevantHelperMemory(query = '', limit = 16) {
+    if (activeUser.memoryEnabled === false) return [];
+    const queryTerms = new Set(
+      String(query || '')
+        .toLowerCase()
+        .match(/[a-z0-9']{3,}/g) || []
+    );
+    return [...(helperMemory.facts || [])]
+      .map((item, index) => {
+        const memoryTerms = String(item.text || '').toLowerCase().match(/[a-z0-9']{3,}/g) || [];
+        const overlap = memoryTerms.reduce((score, term) => score + (queryTerms.has(term) ? 1 : 0), 0);
+        return {
+          item,
+          score: (item.pinned ? 100 : 0) + (overlap * 12) + (index / Math.max(1, helperMemory.facts.length)),
+        };
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, limit))
+      .map(({ item }) => item.text);
   }
 
   function addAction(noteId, action, detail = '') {
@@ -558,7 +827,37 @@
   function openPageSafe(pageId) {
     if (typeof window.openPage === 'function') {
       window.openPage(pageId);
+    } else if (typeof openPage === 'function') {
+      openPage(pageId);
     }
+  }
+
+  function getAssistantCurrentPageId(fallback = 'home') {
+    let pageId = '';
+    try {
+      if (typeof window.getCurrentPageId === 'function') pageId = window.getCurrentPageId() || '';
+    } catch (_error) {}
+    try {
+      if (!pageId && typeof currentPageId === 'string') pageId = currentPageId;
+    } catch (_error) {}
+    try {
+      if (!pageId && typeof activeTabId === 'string' && Array.isArray(tabs)) {
+        pageId = tabs.find((tab) => tab.id === activeTabId)?.pageId || '';
+      }
+    } catch (_error) {}
+    return pageId || fallback;
+  }
+
+  function saveAssistantCurrentPageBlocks() {
+    if (typeof window.saveCurrentPageBlocks === 'function') {
+      window.saveCurrentPageBlocks();
+      return true;
+    }
+    if (typeof saveCurrentPageBlocks === 'function') {
+      saveCurrentPageBlocks();
+      return true;
+    }
+    return false;
   }
 
   function buildAutoTitle(text = '') {
@@ -588,7 +887,7 @@
     ].join('||');
   }
 
-  function createInboxItem({ title, question, noteId = '', confidence = 0, suggestedPageId = '', suggestedAction = '', reason = '' }) {
+  function createInboxItem({ title, question, noteId = '', confidence = 0, suggestedPageId = '', suggestedAction = '', reason = '', choices = [] }) {
     const existing = inboxItems.find((item) => item.status === 'open' && item.noteId === noteId && item.question === question);
     if (existing) return existing;
 
@@ -601,6 +900,7 @@
       suggestedPageId,
       suggestedAction,
       reason,
+      choices,
       status: 'open',
       createdAt: now(),
     });
@@ -776,6 +1076,10 @@
     saveNotes();
     activeNoteId = note.id;
     addAction(note.id, 'create-note', sourceType === 'quick' ? 'Saved from Quick Note.' : 'Saved in Notes.');
+    // If local scoring left the note unsorted, queue background AI organization
+    if (note.sortState === 'unsorted' && note.bodyText.trim().length >= 10) {
+      triggerBackgroundOrganize(note);
+    }
     return note;
   }
 
@@ -800,6 +1104,138 @@
     note.needsReview = false;
     processNotePlacement(note, { forceContext: note.sourceType === 'quick' && !!note.contextPageId });
     saveNotes();
+    // If local scoring left it unsorted, escalate to AI
+    if (note.sortState === 'unsorted' && note.bodyText.trim().length >= 10) {
+      triggerBackgroundOrganize(note);
+    }
+  }
+
+  function buildVaultSnapshot() {
+    const SYSTEM_IDS = new Set(['home', 'search', 'inbox', 'notes', 'settings']);
+    return Object.values(getPagesMap())
+      .filter((page) => !SYSTEM_IDS.has(page.id))
+      .map((page) => ({
+        id: page.id,
+        title: page.title || 'Untitled',
+        breadcrumb: getBreadcrumb(page.id).map((item) => item.title || ''),
+        layout: page.layout || 'board-canvas',
+        category: page.category || 'none',
+      }));
+  }
+
+  async function triggerBackgroundOrganize(note) {
+    if (!note?.id || !note.bodyText || note.bodyText.trim().length < 10) return;
+    if (organizingNoteIds.has(note.id)) return;
+
+    // Skip if local scoring already confidently placed this note
+    const current = getNoteById(note.id);
+    if (current && current.sortState === 'placed' && current.helperConfidence >= 0.95) return;
+
+    organizingNoteIds.add(note.id);
+    try {
+      const response = await fetch(ORGANIZE_API_PATH, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          note: {
+            id: note.id,
+            title: note.title || '',
+            bodyText: note.bodyText.slice(0, 2400),
+          },
+          vaultPages: buildVaultSnapshot(),
+        }),
+      });
+      if (!response.ok) return;
+      const result = await response.json().catch(() => null);
+      if (!result || result.skip) return;
+
+      const n = getNoteById(note.id);
+      if (!n) return;
+
+      // Apply title suggestion (only for untitled or AI-named notes)
+      if (result.suggestedTitle && (!n.title.trim() || n.aiTitle)) {
+        n.title = result.suggestedTitle;
+        n.aiTitle = true;
+        n.aiNamed = true;
+      }
+
+      // Apply shelf suggestions
+      (result.suggestedShelves || []).forEach((name) => {
+        const shelfId = ensureShelfByName(name, { kind: 'smart', createdBy: 'ai' });
+        if (shelfId) n.shelfIds = dedupe([...(n.shelfIds || []), shelfId]);
+      });
+
+      const validPageIds = (result.suggestedPageIds || []).filter((id) => !!getPageById(id));
+
+      // Apply all note mutations before saveNotes() — saveNotes() replaces objects via normalizeNotes,
+      // making any reference held after that call stale.
+      if (result.confidence >= 0.95 && validPageIds.length) {
+        validPageIds.forEach((pageId) => {
+          n.directPageIds = dedupe([...(n.directPageIds || []), pageId]);
+          const shelfId = ensureContextShelf(pageId);
+          if (shelfId) n.shelfIds = dedupe([...(n.shelfIds || []), shelfId]);
+        });
+        n.sortState = 'placed';
+        n.needsReview = false;
+        n.status = n.archived ? 'archived' : 'normal';
+        n.helperConfidence = result.confidence;
+        n.helperSummary = `Placed by AI under ${validPageIds.map((id) => getPageById(id)?.title).filter(Boolean).join(', ')}.`;
+      } else if (result.confidence >= 0.75 && validPageIds.length) {
+        validPageIds.forEach((pageId) => {
+          n.directPageIds = dedupe([...(n.directPageIds || []), pageId]);
+          const shelfId = ensureContextShelf(pageId);
+          if (shelfId) n.shelfIds = dedupe([...(n.shelfIds || []), shelfId]);
+        });
+        n.sortState = 'review';
+        n.needsReview = true;
+        n.status = n.archived ? 'archived' : 'review';
+        n.helperConfidence = result.confidence;
+        n.helperSummary = `Placed for review under ${validPageIds.map((id) => getPageById(id)?.title).filter(Boolean).join(', ')}.`;
+      } else if (n.shelfIds?.length || n.directPageIds?.length) {
+        n.sortState = n.needsReview ? 'review' : 'placed';
+        n.helperConfidence = result.confidence;
+        n.helperSummary = 'Assigned to shelves by AI.';
+      }
+
+      // If AI wants a question and note isn't already placed, mark it for review now
+      const needsQuestion = result.needsInboxQuestion && result.inboxQuestion?.question;
+      if (needsQuestion && n.sortState !== 'placed') {
+        n.needsReview = true;
+        n.sortState = (n.shelfIds?.length || n.directPageIds?.length) ? 'review' : 'unsorted';
+        n.status = n.archived ? 'archived' : 'review';
+        n.helperConfidence = n.helperConfidence || result.confidence;
+        n.helperSummary = n.helperSummary === 'Still unsorted.' ? 'Waiting on your input.' : n.helperSummary;
+      }
+
+      n.updatedAt = now();
+      saveNotes(); // Single save — do NOT mutate n after this point
+
+      // Create inbox item after saving note state (createInboxItem has its own saveInbox)
+      if (needsQuestion) {
+        const iq = result.inboxQuestion;
+        const suggestedPageId = iq.suggestedPageId || validPageIds[0] || '';
+        createInboxItem({
+          title: iq.title || 'Helper question',
+          question: iq.question,
+          noteId: n.id,
+          confidence: result.confidence,
+          suggestedPageId,
+          suggestedAction: 'ai-review',
+          reason: iq.reason || '',
+          choices: (iq.choices || []).map((c) => c.replace(/\s*\([^)]+\)\s*$/, '').trim()).filter(Boolean),
+        });
+      }
+
+      // Re-render if user is on notes or inbox
+      const currentPageId = getAssistantCurrentPageId('');
+      if (['notes', 'inbox'].includes(currentPageId)) {
+        renderEverything();
+      }
+    } catch (err) {
+      console.warn('Background organize failed:', err);
+    } finally {
+      organizingNoteIds.delete(note.id);
+    }
   }
 
   function archiveNote(noteId) {
@@ -878,7 +1314,7 @@
       activeNoteId = matchingNotes[0]?.id || '';
     }
 
-    if (typeof window.getCurrentPageId === 'function' && window.getCurrentPageId() === 'notes') {
+    if (getAssistantCurrentPageId('') === 'notes') {
       renderNotesSurface();
     }
   }
@@ -1265,13 +1701,13 @@
     const grid = document.getElementById('grid');
     if (!pageContent || !grid) return;
 
-    flushPendingNoteSave();
+    if (noteSaveTimer) flushPendingNoteSave();
 
     const activeElementId = document.activeElement?.id || '';
     const shouldRestoreNotesSearch = activeElementId === 'notesSearchInput';
     const shouldRestoreGlobalSearch = activeElementId === 'notesGlobalSearchInput';
 
-    const pageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+    const pageId = getAssistantCurrentPageId('home');
     const hero = document.getElementById('pageHero');
     const pageCanvas = document.getElementById('pageCanvas');
     const isNotes = pageId === 'notes';
@@ -1304,6 +1740,8 @@
 
     pageContent.classList.add('system-page-content');
     pageCanvas?.classList.add('system-page-canvas');
+    pageContent.style.display = 'block';
+    pageContent.dataset.surfaceType = 'notes';
     grid.style.display = 'none';
     if (hero) hero.style.display = 'none';
     syncNotesTopbarSearch(true);
@@ -1395,6 +1833,9 @@
   function editorHTML(note, layoutState = {}) {
     const relatedPages = (note.directPageIds || []).map((pageId) => getPageById(pageId)).filter(Boolean);
     const primaryLinkedPage = relatedPages[0] || null;
+    const linkedPageContextHTML = primaryLinkedPage
+      ? `<div class="note-linked-context-row"><button class="note-chip buttonish" data-open-linked-page="${primaryLinkedPage.id}">${escapeHTML(primaryLinkedPage.title)}</button></div>`
+      : '';
 
     return `
       <div class="note-editor-wrap note-editor-wrap-full" data-note-editor="${note.id}">
@@ -1412,11 +1853,11 @@
                 <div class="note-editor-context-row">
                   <div class="note-editor-meta-line">
                     <span class="note-editor-date">${escapeHTML(formatDateTime(note.updatedAt || note.createdAt))}</span>
-                    ${primaryLinkedPage ? `<button class="note-chip buttonish" data-open-linked-page="${primaryLinkedPage.id}">${escapeHTML(primaryLinkedPage.title)}</button>` : ''}
                     ${note.needsReview || note.status === 'review' ? '<span class="notes-row-flag notes-row-flag-inline">Needs review</span>' : ''}
                   </div>
                 </div>
                 <div class="note-editor-divider" aria-hidden="true"></div>
+                ${linkedPageContextHTML}
               </div>
             </div>
 
@@ -1447,7 +1888,7 @@
     const pageCanvas = document.getElementById('pageCanvas');
     const grid = document.getElementById('grid');
     if (!pageContent || !grid) return;
-    const pageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+    const pageId = getAssistantCurrentPageId('home');
     const hero = document.getElementById('pageHero');
     const isInbox = pageId === 'inbox';
     if (!isInbox) return;
@@ -1455,6 +1896,8 @@
     const openItems = inboxItems.filter((item) => item.status === 'open');
     pageContent.classList.add('system-page-content');
     pageCanvas?.classList.add('system-page-canvas');
+    pageContent.style.display = 'block';
+    pageContent.dataset.surfaceType = 'inbox';
     grid.style.display = 'none';
     if (hero) hero.style.display = 'none';
 
@@ -1463,8 +1906,8 @@
         <div class="helper-inbox-hero">
           <div>
             <div class="notes-kicker">Inbox</div>
-            <h2>Helper questions</h2>
-            <p>Items the helper needs your input on before acting.</p>
+            <h2>${openItems.length ? `${openItems.length} pending question${openItems.length === 1 ? '' : 's'}` : 'Inbox clear'}</h2>
+            <p>${openItems.length ? 'Review suggestions, link notes, or dismiss anything that is not useful.' : 'Nothing needs your attention right now.'}</p>
           </div>
           <div class="helper-inbox-stats">
             <div class="helper-inbox-stat"><span>${openItems.length}</span><label>Open</label></div>
@@ -1474,7 +1917,12 @@
         </div>
 
         <div class="helper-inbox-list">
-          ${openItems.length ? openItems.map((item) => inboxCardHTML(item)).join('') : '<div class="notes-empty-large">Nothing here yet.</div>'}
+          ${openItems.length ? openItems.map((item) => inboxCardHTML(item)).join('') : `
+            <div class="helper-inbox-empty">
+              <strong>No pending questions</strong>
+              <span>If the helper needs you to confirm where something belongs, it will show up here.</span>
+            </div>
+          `}
         </div>
       </section>
     `;
@@ -1483,6 +1931,8 @@
   function inboxCardHTML(item) {
     const note = getNoteById(item.noteId);
     const suggestedPage = item.suggestedPageId ? getPageById(item.suggestedPageId) : null;
+    const confidence = Math.round(item.confidence * 100);
+    const confidenceClass = item.confidence >= 0.95 ? 'strong' : item.confidence >= 0.75 ? 'review' : '';
     return `
       <article class="helper-inbox-card">
         <div class="helper-inbox-card-top">
@@ -1490,9 +1940,15 @@
             <div class="helper-inbox-card-title">${escapeHTML(item.title)}</div>
             <div class="helper-inbox-card-question">${escapeHTML(item.question)}</div>
           </div>
-          <span class="notes-pill ${item.confidence >= 0.95 ? 'strong' : item.confidence >= 0.75 ? 'review' : ''}">${Math.round(item.confidence * 100)}%</span>
+          <span class="notes-pill helper-inbox-confidence ${confidenceClass}">${confidence}%</span>
         </div>
-        ${note ? `<div class="helper-inbox-note-preview">${escapeHTML(note.preview || note.title)}</div>` : ''}
+        ${note ? `
+          <button type="button" class="helper-inbox-note-preview" data-open-note-in-notes="${note.id}">
+            <span>Note</span>
+            <strong>${escapeHTML(note.title || 'Untitled note')}</strong>
+            <em>${escapeHTML(note.preview || '')}</em>
+          </button>
+        ` : ''}
         ${item.reason ? `<div class="helper-inbox-reason">${escapeHTML(item.reason)}</div>` : ''}
         ${suggestedPage ? `<div class="helper-inbox-suggestion">Suggested: <strong>${escapeHTML(suggestedPage.title)}</strong></div>` : ''}
         <div class="helper-inbox-actions-row">
@@ -1502,12 +1958,19 @@
           </select>
           <textarea class="helper-inbox-answer" data-inbox-answer="${item.id}" placeholder="Optional note for the helper…">${escapeHTML(item.answer || '')}</textarea>
         </div>
+        ${item.choices && item.choices.length ? `
+        <div class="helper-inbox-choices">
+          ${item.choices.map((choice) => `<button class="notes-mini-btn" data-inbox-choice="${escapeHTML(item.id)}" data-choice-label="${escapeHTML(choice)}">${escapeHTML(choice)}</button>`).join('')}
+          <button class="notes-mini-btn danger" data-inbox-resolve="${item.id}">Dismiss</button>
+        </div>
+        ` : `
         <div class="helper-inbox-actions">
           ${suggestedPage ? `<button class="notes-mini-btn" data-inbox-accept="${item.id}">Accept</button>` : ''}
           <button class="notes-mini-btn" data-inbox-link="${item.id}">Link page</button>
           <button class="notes-mini-btn" data-inbox-loose="${item.id}">Keep loose</button>
           <button class="notes-mini-btn danger" data-inbox-resolve="${item.id}">Dismiss</button>
         </div>
+        `}
       </article>
     `;
   }
@@ -1523,9 +1986,9 @@
     const pageContent = document.getElementById('pageContent');
     const pageCanvas = document.getElementById('pageCanvas');
     const grid = document.getElementById('grid');
-    const heroBelow = document.getElementById('pageHeroBelow');
+    const topbarRight = document.querySelector('.topbar-right');
     if (!pageContent || !grid) return;
-    const pageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+    const pageId = getAssistantCurrentPageId('home');
 
     // Clean up previous badge
     document.getElementById('pageNotesBadge')?.remove();
@@ -1536,17 +1999,22 @@
     const related = getRelatedNotesForPage(pageId).slice(0, 8);
     pageContent.classList.remove('system-page-content');
     pageCanvas?.classList.remove('system-page-canvas');
+    pageContent.style.display = '';
+    pageContent.dataset.surfaceType = '';
     grid.style.display = '';
 
-    if (!related.length || !heroBelow) return;
+    if (!related.length) return;
 
-    // Inject badge into hero-below (beside the title)
+    if (!topbarRight) return;
+
+    // Keep related notes in navigation chrome so they never cover page content.
     const badge = document.createElement('div');
     badge.id = 'pageNotesBadge';
-    badge.className = 'page-notes-badge';
+    badge.className = 'page-notes-badge page-notes-badge--topbar';
     badge.innerHTML = `
-      <button class="page-notes-toggle" id="pageNotesToggle">
-        <span class="page-notes-toggle-label">\uD83D\uDCDD ${related.length} note${related.length === 1 ? '' : 's'}</span>
+      <button class="page-notes-toggle" id="pageNotesToggle" aria-label="Related notes (${related.length})" aria-expanded="false">
+        <span class="page-notes-toggle-label">Notes</span>
+        <span class="page-notes-count">${related.length}</span>
         <span class="page-notes-chevron" id="pageNotesChevron">&#x25B8;</span>
       </button>
       <div class="page-notes-tray" id="pageNotesTray">
@@ -1558,11 +2026,14 @@
         `).join('')}
         <div class="page-notes-tray-actions">
           <button class="page-notes-action" id="pageQuickNoteBtn">+ Note</button>
-          <button class="page-notes-action" id="pageOpenNotesBtn">All Notes</button>
+          <button class="page-notes-action" id="pageOpenNotesBtn">Open in Notes</button>
         </div>
       </div>
     `;
-    heroBelow.appendChild(badge);
+    const anchor = document.getElementById('assistantTopBtn')
+      || document.getElementById('moreBtn')
+      || topbarRight.lastElementChild;
+    topbarRight.insertBefore(badge, anchor || null);
   }
 
   function clearSystemSurfaceIfNeeded() {
@@ -1570,7 +2041,7 @@
     const pageCanvas = document.getElementById('pageCanvas');
     const grid = document.getElementById('grid');
     if (!pageContent || !grid) return;
-    const pageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+    const pageId = getAssistantCurrentPageId('home');
 
     document.body.classList.remove('notes-mode');
     document.getElementById('pageNotesBadge')?.remove();
@@ -1586,6 +2057,8 @@
       pageContent.innerHTML = '';
       pageContent.classList.remove('system-page-content');
       pageCanvas?.classList.remove('system-page-canvas');
+      pageContent.style.display = '';
+      pageContent.dataset.surfaceType = '';
       grid.style.display = '';
       return;
     }
@@ -1653,11 +2126,253 @@
     activeComposerContextPageId = '';
   }
 
+  let pendingAssistantAvatar = '';
+
+  function getAssistantPersonality(personalityId = activeUser.assistantPersonality) {
+    return ASSISTANT_PERSONALITIES.find((item) => item.id === personalityId)
+      || ASSISTANT_PERSONALITIES[0];
+  }
+
   function getAssistantDisplayName() {
     return activeUser.assistantName || 'Assistant';
   }
 
+  function saveActiveUserProfile(patch = {}) {
+    Object.assign(activeUser, normalizeUserProfile({ ...activeUser, ...patch }));
+    writeJSON(USER_PROFILE_KEY, activeUser);
+    assistantRenderRevision += 1;
+    ensureAssistantUI();
+    renderAssistantMessages();
+    return { ...activeUser };
+  }
+
+  function renderAssistantAvatarContent() {
+    const assistantName = getAssistantDisplayName();
+    return activeUser.assistantAvatar
+      ? `<img src="${escapeHTML(activeUser.assistantAvatar)}" alt="">`
+      : `<span class="assistant-drawer-avatar-initial">${escapeHTML(assistantName.slice(0, 1).toUpperCase())}</span>`;
+  }
+
+  function renderAssistantMemoryManager() {
+    const host = document.getElementById('assistantProfileMemoryList');
+    if (!host) return;
+    const memories = [...(helperMemory.facts || [])].reverse();
+    host.innerHTML = memories.length
+      ? memories.map((memory) => `
+          <div class="assistant-profile-memory-item">
+            <div>
+              <div class="assistant-profile-memory-text">${escapeHTML(memory.text)}</div>
+              <div class="assistant-profile-memory-meta">${memory.source === 'user' ? 'Added by you' : 'Remembered from chat'}${memory.pinned ? ' · Always available' : ''}</div>
+            </div>
+            <button type="button" data-assistant-memory-delete="${escapeHTML(memory.id)}" aria-label="Forget this memory">&times;</button>
+          </div>
+        `).join('')
+      : '<div class="assistant-profile-memory-empty">Nothing saved yet. Useful preferences and recurring habits will appear here.</div>';
+  }
+
+  function selectAssistantProfileTab(tabId = 'identity') {
+    const overlay = document.getElementById('assistantProfileOverlay');
+    if (!overlay) return;
+    overlay.querySelectorAll('[data-assistant-profile-tab]').forEach((button) => {
+      const active = button.dataset.assistantProfileTab === tabId;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    overlay.querySelectorAll('[data-assistant-profile-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.assistantProfilePanel !== tabId;
+    });
+  }
+
+  function ensureAssistantProfileUI() {
+    if (document.getElementById('assistantProfileOverlay')) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'assistant-profile-overlay';
+    overlay.id = 'assistantProfileOverlay';
+    overlay.innerHTML = `
+      <section class="assistant-profile-modal" role="dialog" aria-modal="true" aria-labelledby="assistantProfileTitle">
+        <header class="assistant-profile-header">
+          <div>
+            <div class="assistant-profile-kicker">Sanctum assistant</div>
+            <h2 id="assistantProfileTitle">Identity & memory</h2>
+          </div>
+          <button type="button" class="assistant-profile-close" data-assistant-profile-close aria-label="Close">&times;</button>
+        </header>
+        <div class="assistant-profile-tabs" role="tablist">
+          <button type="button" class="active" data-assistant-profile-tab="identity" role="tab" aria-selected="true">Identity</button>
+          <button type="button" data-assistant-profile-tab="memory" role="tab" aria-selected="false">Memory</button>
+        </div>
+        <div class="assistant-profile-body">
+          <div data-assistant-profile-panel="identity">
+            <div class="assistant-profile-portrait-row">
+              <div class="assistant-profile-portrait" id="assistantProfilePortrait"></div>
+              <div>
+                <div class="assistant-profile-field-title">Portrait</div>
+                <div class="assistant-profile-help">Use your drawing now or replace it whenever his room is ready.</div>
+                <div class="assistant-profile-inline-actions">
+                  <button type="button" data-assistant-avatar-choose>Choose image</button>
+                  <button type="button" data-assistant-avatar-remove>Remove</button>
+                </div>
+                <input id="assistantProfileAvatarInput" type="file" accept="image/*" hidden>
+              </div>
+            </div>
+            <label class="assistant-profile-field">
+              <span>Name</span>
+              <input id="assistantProfileName" type="text" maxlength="40" autocomplete="off">
+            </label>
+            <div class="assistant-profile-field">
+              <span>Personality</span>
+              <div class="assistant-personality-grid">
+                ${ASSISTANT_PERSONALITIES.map((personality) => `
+                  <button type="button" class="assistant-personality-card" data-assistant-personality="${escapeHTML(personality.id)}">
+                    <strong>${escapeHTML(personality.label)}</strong>
+                    <small>${escapeHTML(personality.shortLabel)}</small>
+                  </button>
+                `).join('')}
+              </div>
+              <div class="assistant-personality-description" id="assistantPersonalityDescription"></div>
+            </div>
+            <div class="assistant-profile-two-column">
+              <label class="assistant-profile-field">
+                <span>Gender</span>
+                <select id="assistantProfileGender">
+                  ${ASSISTANT_GENDERS.map((gender) => `<option value="${escapeHTML(gender.value)}">${escapeHTML(gender.label)}</option>`).join('')}
+                </select>
+              </label>
+              <label class="assistant-profile-field">
+                <span>Pronouns <small>optional</small></span>
+                <input id="assistantProfilePronouns" type="text" maxlength="60" placeholder="he/him">
+              </label>
+            </div>
+          </div>
+          <div data-assistant-profile-panel="memory" hidden>
+            <label class="assistant-profile-toggle">
+              <input id="assistantMemoryEnabled" type="checkbox">
+              <span><strong>Use memory</strong><small>Let the assistant use saved preferences and habits while helping you.</small></span>
+            </label>
+            <label class="assistant-profile-toggle">
+              <input id="assistantAutoMemory" type="checkbox">
+              <span><strong>Remember automatically</strong><small>Save stable, useful details from conversation—not database facts or private health records.</small></span>
+            </label>
+            <div class="assistant-profile-memory-add">
+              <input id="assistantMemoryAddInput" type="text" maxlength="500" placeholder="Something he should always remember...">
+              <button type="button" data-assistant-memory-add>Add</button>
+            </div>
+            <div class="assistant-profile-memory-list" id="assistantProfileMemoryList"></div>
+          </div>
+        </div>
+        <footer class="assistant-profile-footer">
+          <button type="button" class="is-secondary" data-assistant-profile-close>Cancel</button>
+          <button type="button" class="is-primary" data-assistant-profile-save>Save assistant</button>
+        </footer>
+      </section>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay || event.target.closest('[data-assistant-profile-close]')) {
+        overlay.classList.remove('open');
+        return;
+      }
+      const tab = event.target.closest('[data-assistant-profile-tab]');
+      if (tab) {
+        selectAssistantProfileTab(tab.dataset.assistantProfileTab);
+        return;
+      }
+      const personalityButton = event.target.closest('[data-assistant-personality]');
+      if (personalityButton) {
+        const personality = getAssistantPersonality(personalityButton.dataset.assistantPersonality);
+        overlay.dataset.selectedPersonality = personality.id;
+        overlay.querySelectorAll('[data-assistant-personality]').forEach((button) => {
+          button.classList.toggle('selected', button.dataset.assistantPersonality === personality.id);
+        });
+        const genderInput = document.getElementById('assistantProfileGender');
+        if (genderInput) genderInput.value = personality.gender;
+        const description = document.getElementById('assistantPersonalityDescription');
+        if (description) description.textContent = personality.description;
+        return;
+      }
+      if (event.target.closest('[data-assistant-avatar-choose]')) {
+        document.getElementById('assistantProfileAvatarInput')?.click();
+        return;
+      }
+      if (event.target.closest('[data-assistant-avatar-remove]')) {
+        pendingAssistantAvatar = '';
+        const portrait = document.getElementById('assistantProfilePortrait');
+        if (portrait) portrait.innerHTML = `<span>${escapeHTML((document.getElementById('assistantProfileName')?.value || 'A').slice(0, 1).toUpperCase())}</span>`;
+        return;
+      }
+      const memoryDelete = event.target.closest('[data-assistant-memory-delete]');
+      if (memoryDelete) {
+        removeHelperMemoryFact(memoryDelete.dataset.assistantMemoryDelete);
+        renderAssistantMemoryManager();
+        return;
+      }
+      if (event.target.closest('[data-assistant-memory-add]')) {
+        const input = document.getElementById('assistantMemoryAddInput');
+        if (addHelperMemoryFact(input?.value || '', 'user', 'manual') && input) input.value = '';
+        renderAssistantMemoryManager();
+        return;
+      }
+      if (event.target.closest('[data-assistant-profile-save]')) {
+        saveActiveUserProfile({
+          assistantName: document.getElementById('assistantProfileName')?.value || 'Warden',
+          assistantAvatar: pendingAssistantAvatar,
+          assistantPersonality: overlay.dataset.selectedPersonality || 'southern-warden',
+          assistantGender: document.getElementById('assistantProfileGender')?.value || 'masculine',
+          assistantPronouns: document.getElementById('assistantProfilePronouns')?.value || '',
+          memoryEnabled: document.getElementById('assistantMemoryEnabled')?.checked !== false,
+          autoMemory: document.getElementById('assistantAutoMemory')?.checked !== false,
+        });
+        overlay.classList.remove('open');
+      }
+    });
+
+    document.getElementById('assistantProfileAvatarInput')?.addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      if (!file || !file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        pendingAssistantAvatar = String(reader.result || '');
+        const portrait = document.getElementById('assistantProfilePortrait');
+        if (portrait) portrait.innerHTML = `<img src="${escapeHTML(pendingAssistantAvatar)}" alt="">`;
+      }, { once: true });
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function openAssistantProfile(tabId = 'identity') {
+    ensureAssistantProfileUI();
+    const overlay = document.getElementById('assistantProfileOverlay');
+    const personality = getAssistantPersonality();
+    pendingAssistantAvatar = activeUser.assistantAvatar || '';
+    overlay.dataset.selectedPersonality = personality.id;
+    const nameInput = document.getElementById('assistantProfileName');
+    const genderInput = document.getElementById('assistantProfileGender');
+    const pronounsInput = document.getElementById('assistantProfilePronouns');
+    const memoryEnabled = document.getElementById('assistantMemoryEnabled');
+    const autoMemory = document.getElementById('assistantAutoMemory');
+    if (nameInput) nameInput.value = getAssistantDisplayName();
+    if (genderInput) genderInput.value = activeUser.assistantGender || personality.gender;
+    if (pronounsInput) pronounsInput.value = activeUser.assistantPronouns || '';
+    if (memoryEnabled) memoryEnabled.checked = activeUser.memoryEnabled !== false;
+    if (autoMemory) autoMemory.checked = activeUser.autoMemory !== false;
+    const portrait = document.getElementById('assistantProfilePortrait');
+    if (portrait) portrait.innerHTML = pendingAssistantAvatar
+      ? `<img src="${escapeHTML(pendingAssistantAvatar)}" alt="">`
+      : `<span>${escapeHTML(getAssistantDisplayName().slice(0, 1).toUpperCase())}</span>`;
+    overlay.querySelectorAll('[data-assistant-personality]').forEach((button) => {
+      button.classList.toggle('selected', button.dataset.assistantPersonality === personality.id);
+    });
+    const description = document.getElementById('assistantPersonalityDescription');
+    if (description) description.textContent = personality.description;
+    renderAssistantMemoryManager();
+    selectAssistantProfileTab(tabId);
+    overlay.classList.add('open');
+    setTimeout(() => (tabId === 'memory' ? document.getElementById('assistantMemoryAddInput') : nameInput)?.focus(), 30);
+  }
+
   function ensureAssistantUI() {
+    const personality = getAssistantPersonality();
     if (!document.getElementById('assistantTopBtn')) {
       const topbarRight = document.querySelector('.topbar-right');
       const moreBtn = document.getElementById('moreBtn');
@@ -1666,30 +2381,75 @@
         btn.className = 'icon-btn topbar-ask-btn';
         btn.id = 'assistantTopBtn';
         btn.setAttribute('aria-label', `Ask ${getAssistantDisplayName()}`);
-        btn.textContent = 'Ask';
+        btn.title = `Ask ${getAssistantDisplayName()}`;
+        btn.innerHTML = renderAssistantAvatarContent();
         topbarRight.insertBefore(btn, moreBtn);
       }
+    } else {
+      const topButton = document.getElementById('assistantTopBtn');
+      topButton.setAttribute('aria-label', `Ask ${getAssistantDisplayName()}`);
+      topButton.title = `Ask ${getAssistantDisplayName()}`;
+      topButton.innerHTML = renderAssistantAvatarContent();
     }
 
     if (document.getElementById('assistantDrawer')) {
-      const titleEl = document.querySelector('#assistantDrawer .assistant-drawer-title');
-      if (titleEl) titleEl.textContent = `Ask ${getAssistantDisplayName()}`;
+      const nameEl = document.querySelector('#assistantDrawer .assistant-drawer-name');
+      const roleEl = document.querySelector('#assistantDrawer .assistant-drawer-role');
+      const subtitleEl = document.querySelector('#assistantDrawer .assistant-drawer-subtitle');
+      const avatarEl = document.querySelector('#assistantDrawer .assistant-drawer-avatar');
+      const composerInput = document.getElementById('assistantComposerInput');
+      if (nameEl) nameEl.textContent = getAssistantDisplayName();
+      if (roleEl) roleEl.textContent = personality.label;
+      if (subtitleEl) subtitleEl.textContent = personality.subtitle;
+      if (avatarEl) {
+        avatarEl.innerHTML = `${renderAssistantAvatarContent()}<span class="assistant-drawer-presence"></span>`;
+      }
+      if (composerInput) composerInput.placeholder = `Message ${getAssistantDisplayName()}...`;
+      if (!document.getElementById('assistantProfileOpen')) {
+        const controls = document.querySelector('#assistantDrawer .assistant-drawer-controls');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'assistant-drawer-profile';
+        button.id = 'assistantProfileOpen';
+        button.setAttribute('aria-label', 'Assistant identity and memory');
+        button.title = 'Identity and memory';
+        button.textContent = '•••';
+        controls?.prepend(button);
+      }
       return;
     }
 
+    const assistantName = getAssistantDisplayName();
     const drawer = document.createElement('aside');
     drawer.className = 'assistant-drawer assistant-drawer-right';
     drawer.id = 'assistantDrawer';
     drawer.innerHTML = `
       <div class="assistant-drawer-top">
-        <div class="assistant-drawer-title">Ask ${escapeHTML(getAssistantDisplayName())}</div>
-        <button class="assistant-drawer-close" id="assistantDrawerClose">✕</button>
+        <div class="assistant-drawer-identity">
+          <div class="assistant-drawer-avatar" aria-hidden="true">
+            ${renderAssistantAvatarContent()}
+            <span class="assistant-drawer-presence"></span>
+          </div>
+          <div class="assistant-drawer-heading">
+            <div class="assistant-drawer-name">${escapeHTML(assistantName)}</div>
+            <div class="assistant-drawer-role-row">
+              <span class="assistant-drawer-role">${escapeHTML(personality.label)}</span>
+            </div>
+            <div class="assistant-drawer-subtitle">${escapeHTML(personality.subtitle)}</div>
+          </div>
+        </div>
+        <div class="assistant-drawer-controls">
+          <button type="button" class="assistant-drawer-profile" id="assistantProfileOpen" aria-label="Assistant identity and memory" title="Identity and memory">•••</button>
+          <span class="assistant-drawer-spark" aria-hidden="true">&#10022;</span>
+          <button class="assistant-drawer-close" id="assistantDrawerClose" aria-label="Close assistant">&minus;</button>
+        </div>
       </div>
       <div class="assistant-messages" id="assistantMessages"></div>
       <div class="assistant-composer">
         <div class="assistant-composer-row">
-          <textarea class="assistant-composer-input" id="assistantComposerInput" rows="1" placeholder="Ask about notes, pages, or what you were working on…"></textarea>
-          <button class="assistant-composer-send" id="assistantComposerSend" aria-label="Send">→</button>
+          <textarea class="assistant-composer-input" id="assistantComposerInput" rows="1" placeholder="Message ${escapeHTML(assistantName)}..."></textarea>
+          <span class="assistant-composer-spark" aria-hidden="true">&#10022;</span>
+          <button class="assistant-composer-send" id="assistantComposerSend" aria-label="Send">&#10148;</button>
         </div>
       </div>
     `;
@@ -1697,7 +2457,10 @@
   }
 
   function formatAssistantMessageText(text = '') {
-    return escapeHTML(String(text || '')).replace(/\n/g, '<br>');
+    return escapeHTML(String(text || ''))
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\n/g, '<br>');
   }
 
   function formatAssistantActionDetail(action = {}) {
@@ -1765,38 +2528,683 @@
     return `<div class="assistant-action-list">${buttons}</div>`;
   }
 
+  function formatProposalValue(value) {
+    if (value === null || value === undefined || value === '') return 'empty';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
+    return String(value);
+  }
+
+  function findProposalSchema(catalog, databaseRef) {
+    return Array.isArray(catalog?.schemas)
+      ? catalog.schemas.find((schema) => schema.ref === databaseRef) || null
+      : null;
+  }
+
+  function getProposalRelationRows(catalog, databaseRef) {
+    return Array.isArray(catalog?.records)
+      ? catalog.records
+          .filter((record) => record.kind === 'database-row' && record.parentRef === databaseRef)
+          .slice(0, 150)
+      : [];
+  }
+
+  function renderProposalRelationSelect({
+    messageId,
+    operationId,
+    propertyId = '',
+    targetDatabaseRef,
+    selectedRowIds = [],
+    catalog,
+    relationOperation = false,
+  }) {
+    const selected = new Set(Array.isArray(selectedRowIds) ? selectedRowIds : []);
+    const rows = getProposalRelationRows(catalog, targetDatabaseRef);
+    if (!rows.length) {
+      return `<div class="assistant-db-proposal-input-note">No current target rows are available to choose from.</div>`;
+    }
+    return `
+      <select
+        class="assistant-db-proposal-input assistant-db-proposal-relation-input"
+        multiple
+        size="${Math.min(4, Math.max(2, rows.length))}"
+        data-db-proposal-edit-message="${escapeHTML(messageId)}"
+        data-db-proposal-operation-id="${escapeHTML(operationId)}"
+        ${propertyId ? `data-db-proposal-property-id="${escapeHTML(propertyId)}"` : ''}
+        ${relationOperation ? 'data-db-proposal-relation-targets="1"' : ''}
+        aria-label="Related records"
+      >
+        ${rows.map((row) => `
+          <option value="${escapeHTML(row.id)}" ${selected.has(row.id) ? 'selected' : ''}>${escapeHTML(row.title || 'Untitled record')}</option>
+        `).join('')}
+      </select>
+      <div class="assistant-db-proposal-input-note">Use Ctrl or Cmd to choose more than one.</div>
+    `;
+  }
+
+  function renderProposalChangeEditor(messageId, operation, change, catalog) {
+    const value = change.newValue;
+    const commonAttributes = `
+      data-db-proposal-edit-message="${escapeHTML(messageId)}"
+      data-db-proposal-operation-id="${escapeHTML(operation.id)}"
+      data-db-proposal-property-id="${escapeHTML(change.propertyId)}"
+    `;
+    if (change.propertyType === 'relation') {
+      const schema = findProposalSchema(catalog, operation.databaseRef);
+      const property = Array.isArray(schema?.properties)
+        ? schema.properties.find((entry) => entry.id === change.propertyId)
+        : null;
+      const operationsApi = window.SanctumAssistantOperations;
+      const targetDatabaseRef = operationsApi?.databaseRefFromSource(property?.relationTarget || {});
+      return renderProposalRelationSelect({
+        messageId,
+        operationId: operation.id,
+        propertyId: change.propertyId,
+        targetDatabaseRef,
+        selectedRowIds: value,
+        catalog,
+      });
+    }
+    if (change.propertyType === 'checkbox') {
+      return `
+        <select class="assistant-db-proposal-input" ${commonAttributes}>
+          <option value="true" ${value === true || value === 'true' ? 'selected' : ''}>Yes</option>
+          <option value="false" ${value === false || value === 'false' ? 'selected' : ''}>No</option>
+        </select>
+      `;
+    }
+    if (change.propertyType === 'page-layout') {
+      const pageLayouts = [
+        ['board-canvas', 'Board page'],
+        ['infinite-canvas', 'Infinite board'],
+        ['document', 'Document'],
+        ['journal', 'Journal'],
+      ];
+      return `
+        <select class="assistant-db-proposal-input" ${commonAttributes} aria-label="Page type">
+          ${pageLayouts.map(([layout, label]) => (
+            `<option value="${layout}" ${value === layout ? 'selected' : ''}>${label}</option>`
+          )).join('')}
+        </select>
+      `;
+    }
+    if (change.propertyType === 'date') {
+      const dateValue = typeof value === 'string' ? value.slice(0, 10) : (value?.start || value?.date || '').slice(0, 10);
+      return `<input class="assistant-db-proposal-input" type="date" value="${escapeHTML(dateValue)}" ${commonAttributes}>`;
+    }
+    if (change.propertyType === 'number') {
+      return `<input class="assistant-db-proposal-input" type="number" step="any" value="${escapeHTML(value ?? '')}" ${commonAttributes}>`;
+    }
+    const inputValue = typeof value === 'object' && value !== null ? formatProposalValue(value) : (value ?? '');
+    return `<input class="assistant-db-proposal-input" type="text" value="${escapeHTML(inputValue)}" ${commonAttributes}>`;
+  }
+
+  function renderAssistantDatabaseProposal(message = {}) {
+    const proposal = message.databaseProposal;
+    const operationsApi = window.SanctumAssistantOperations;
+    if (!proposal || !operationsApi) return '';
+    const receipt = normalizeAssistantTransactionReceipt(message.transactionReceipt);
+    const transactionBusy = activeAssistantTransactionMessageId === message.id;
+    const proposalSuperseded = message.proposalSuperseded === true;
+    const reviewLocked = receipt?.status === 'applied' || transactionBusy || proposalSuperseded;
+    const operations = Array.isArray(proposal.operations) ? proposal.operations : [];
+    const contentOperationTypes = new Set([
+      'append-note-content',
+      'append-document-section',
+      'add-page-text-block',
+      'replace-note-text',
+      'replace-document-section-text',
+      'replace-canvas-block-text',
+    ]);
+    const replacementOperationTypes = new Set([
+      'replace-note-text',
+      'replace-document-section-text',
+      'replace-canvas-block-text',
+    ]);
+    const appendContentOperationTypes = new Set([
+      'append-note-content',
+      'append-document-section',
+      'add-page-text-block',
+    ]);
+    const hasContentOperations = operations.some((operation) => contentOperationTypes.has(operation.type));
+    const hasPageOperations = operations.some((operation) => operation.type === 'create-page');
+    const questions = Array.isArray(proposal.questions) ? proposal.questions : [];
+    const selectedIds = new Set(Array.isArray(proposal.review?.selectedOperationIds)
+      ? proposal.review.selectedOperationIds
+      : []);
+    const catalog = buildSanctumContextCatalog();
+    const operationHTML = operations.map((operation) => {
+      const selected = selectedIds.has(operation.id);
+      const changes = Array.isArray(operation.changes) ? operation.changes : [];
+      const changeHTML = changes.length && !replacementOperationTypes.has(operation.type)
+        ? `<div class="assistant-db-proposal-changes">${changes.map((change) => `
+            <div class="assistant-db-proposal-change">
+              <div class="assistant-db-proposal-change-label">
+                <span>${escapeHTML(change.propertyName || change.propertyId || 'Field')}</span>
+                ${change.oldValue !== null ? `<small>Currently ${escapeHTML(formatProposalValue(change.oldValue))}</small>` : '<small>New value</small>'}
+              </div>
+              <div class="assistant-db-proposal-editor">
+                ${renderProposalChangeEditor(message.id, operation, change, catalog)}
+              </div>
+            </div>
+          `).join('')}</div>`
+        : '';
+      const replacementHTML = replacementOperationTypes.has(operation.type)
+        ? `<div class="assistant-content-replacement">
+            <div class="assistant-content-replacement-side before">
+              <span>Before · exact passage</span>
+              <div>${escapeHTML(operation.matchText || '')}</div>
+            </div>
+            <label class="assistant-content-replacement-side after">
+              <span>After · replacement</span>
+              <textarea
+                class="assistant-db-proposal-input"
+                rows="3"
+                data-db-proposal-edit-message="${escapeHTML(message.id)}"
+                data-db-proposal-operation-id="${escapeHTML(operation.id)}"
+                data-db-proposal-property-id="replacementText"
+              >${escapeHTML(operation.replacementText || '')}</textarea>
+            </label>
+          </div>`
+        : '';
+      const relationHTML = operation.type === 'relate-database-rows'
+        ? `<div class="assistant-db-proposal-changes">
+            <div class="assistant-db-proposal-change">
+              <div class="assistant-db-proposal-change-label">
+                <span>${escapeHTML(operation.propertyName || 'Related records')}</span>
+                <small>${escapeHTML(operation.targetDatabaseTitle || 'Target database')}</small>
+              </div>
+              <div class="assistant-db-proposal-editor">
+                ${renderProposalRelationSelect({
+                  messageId: message.id,
+                  operationId: operation.id,
+                  targetDatabaseRef: operation.targetDatabaseRef,
+                  selectedRowIds: operation.targetRowIds,
+                  catalog,
+                  relationOperation: true,
+                })}
+              </div>
+            </div>
+          </div>`
+        : '';
+      const appendHTML = operation.type === 'append-database-field' || appendContentOperationTypes.has(operation.type)
+        ? `<div class="assistant-db-proposal-changes">
+            <label class="assistant-db-proposal-append-label">
+              <span>${escapeHTML(operation.propertyName || (appendContentOperationTypes.has(operation.type) ? 'Visible text to add' : 'Text to append'))}</span>
+              <textarea
+                class="assistant-db-proposal-input"
+                rows="3"
+                data-db-proposal-edit-message="${escapeHTML(message.id)}"
+                data-db-proposal-operation-id="${escapeHTML(operation.id)}"
+                data-db-proposal-property-id="${escapeHTML(appendContentOperationTypes.has(operation.type) ? 'content' : (operation.propertyId || ''))}"
+              >${escapeHTML(operation.content || '')}</textarea>
+            </label>
+          </div>`
+        : '';
+      const databaseStructureHTML = operation.type === 'create-inline-database'
+        ? (() => {
+            const properties = Array.isArray(operation.databaseProperties) ? operation.databaseProperties : [];
+            const rows = Array.isArray(operation.databaseRows) ? operation.databaseRows : [];
+            const views = Array.isArray(operation.views) ? operation.views : [];
+            const titleProperty = properties.find((property) => property.type === 'title') || properties[0];
+            const rowPreview = rows.slice(0, 8).map((row) => {
+              const title = row?.values?.[titleProperty?.id || 'name'] || row?.title || 'Untitled';
+              return escapeHTML(title);
+            });
+            const propertySummary = properties
+              .map((property) => `${escapeHTML(property.name || property.id || 'Field')} <small>${escapeHTML(property.type || 'text')}</small>`)
+              .join(', ');
+            const viewSummary = views.map((view) => {
+              const filters = Array.isArray(view.filters) ? view.filters : [];
+              const sorts = Array.isArray(view.sorts) ? view.sorts : [];
+              const rules = [];
+              if (filters.length) rules.push(`${filters.length} filter${filters.length === 1 ? '' : 's'}`);
+              if (sorts.some((sort) => sort.propertyId === '__last_opened')) rules.push('actual page-open recency');
+              else if (sorts.length) rules.push(`${sorts.length} sort${sorts.length === 1 ? '' : 's'}`);
+              if (view.groupBy) rules.push('grouped');
+              return `<li><strong>${escapeHTML(view.title || 'View')}</strong> · ${escapeHTML(view.view || 'table')}${rules.length ? ` · ${escapeHTML(rules.join(', '))}` : ''}</li>`;
+            }).join('');
+            return `<div class="assistant-db-proposal-changes">
+              <div class="assistant-db-proposal-change">
+                <div class="assistant-db-proposal-change-label">
+                  <span>Database page</span>
+                  <small>Full page</small>
+                </div>
+                <div class="assistant-db-proposal-structure-copy">
+                  ${escapeHTML(operation.databaseTitle || 'Database')} will own the fields and rows. The blocks below are linked views.
+                </div>
+              </div>
+              <div class="assistant-db-proposal-change">
+                <div class="assistant-db-proposal-change-label">
+                  <span>Properties</span>
+                  <small>${properties.length} field${properties.length === 1 ? '' : 's'}</small>
+                </div>
+                <div class="assistant-db-proposal-structure-copy">${propertySummary || 'Name title field'}</div>
+              </div>
+              <div class="assistant-db-proposal-change">
+                <div class="assistant-db-proposal-change-label">
+                  <span>Rows</span>
+                  <small>${rows.length} page${rows.length === 1 ? '' : 's'}</small>
+                </div>
+                <div class="assistant-db-proposal-structure-copy">
+                  ${rowPreview.join(', ')}${rows.length > rowPreview.length ? `, and ${rows.length - rowPreview.length} more` : ''}
+                </div>
+              </div>
+              <div class="assistant-db-proposal-change">
+                <div class="assistant-db-proposal-change-label">
+                  <span>Views</span>
+                  <small>Linked to one database</small>
+                </div>
+                <ul class="assistant-db-proposal-structure-views">${viewSummary}</ul>
+              </div>
+            </div>`;
+          })()
+        : '';
+      const bulkUpdateHTML = operation.type === 'update-database-rows'
+        ? (() => {
+            const rowUpdates = Array.isArray(operation.rowUpdates) ? operation.rowUpdates : [];
+            const preview = rowUpdates.slice(0, 10).map((row) => {
+              const values = Object.values(row?.values || {}).map(formatProposalValue).filter(Boolean).join(', ');
+              return `<li><strong>${escapeHTML(row.rowTitle || 'Untitled record')}</strong>${values ? ` &middot; ${escapeHTML(values)}` : ''}</li>`;
+            }).join('');
+            return `<div class="assistant-db-proposal-changes">
+              <div class="assistant-db-proposal-change">
+                <div class="assistant-db-proposal-change-label">
+                  <span>Rows</span>
+                  <small>${rowUpdates.length} update${rowUpdates.length === 1 ? '' : 's'}</small>
+                </div>
+                <ul class="assistant-db-proposal-structure-views">
+                  ${preview}${rowUpdates.length > 10 ? `<li>and ${rowUpdates.length - 10} more</li>` : ''}
+                </ul>
+              </div>
+            </div>`;
+          })()
+        : '';
+      const assumptionHTML = Array.isArray(operation.assumptions) && operation.assumptions.length
+        ? `<div class="assistant-db-proposal-assumptions">${operation.assumptions
+            .map((assumption) => `Assumption: ${escapeHTML(assumption)}`)
+            .join('<br>')}</div>`
+        : '';
+      const operationBodyHTML = `${changeHTML}${replacementHTML}${relationHTML}${appendHTML}${databaseStructureHTML}${bulkUpdateHTML}${assumptionHTML}`;
+      const operationDetailsHTML = operationBodyHTML
+        ? `<details class="assistant-db-operation-details">
+            <summary>Details</summary>
+            <div class="assistant-db-operation-details-body">${operationBodyHTML}</div>
+          </details>`
+        : '';
+      const confidence = Number.isFinite(Number(operation.confidence)) && Number(operation.confidence) > 0
+        ? `${Math.round(Number(operation.confidence) * 100)}%`
+        : '';
+      return `
+        <div class="assistant-db-proposal-operation ${selected ? 'selected' : 'not-selected'}">
+          <label class="assistant-db-proposal-operation-choice">
+            <input
+              type="checkbox"
+              data-db-proposal-toggle-message="${escapeHTML(message.id)}"
+              data-db-proposal-operation-id="${escapeHTML(operation.id)}"
+              ${selected ? 'checked' : ''}
+            >
+            <span>
+              <span class="assistant-db-proposal-operation-title">${escapeHTML(operationsApi.describeOperation(operation))}</span>
+              <span class="assistant-db-proposal-operation-meta">
+                ${escapeHTML(operation.basis === 'explicit' ? 'Explicit' : 'Inferred')}
+                ${confidence ? ` &middot; ${escapeHTML(confidence)}` : ''}
+                ${operation.databaseTitle
+                  ? ` &middot; ${escapeHTML(operation.databaseTitle)}`
+                  : operation.targetTitle
+                    ? ` &middot; ${escapeHTML(operation.targetTitle)}`
+                    : operation.parentTitle
+                      ? ` &middot; ${escapeHTML(operation.parentTitle)}`
+                    : ''}
+              </span>
+            </span>
+          </label>
+          ${operationDetailsHTML}
+        </div>
+      `;
+    }).join('');
+    const answers = proposal.review?.answers && typeof proposal.review.answers === 'object'
+      ? proposal.review.answers
+      : {};
+    const selectedQuestions = questions.filter((question) => {
+      const operationIds = Array.isArray(question.operationIds) ? question.operationIds : [];
+      return !operationIds.length || operationIds.some((id) => selectedIds.has(id));
+    });
+    const unansweredQuestions = selectedQuestions.filter((question) => !String(answers[question.id] || '').trim());
+    const questionsHTML = questions.length
+      ? `
+        <div class="assistant-db-proposal-questions">
+          <div class="assistant-db-proposal-question-head">
+            <div>
+              <div class="assistant-db-proposal-section-label">One thing needed</div>
+              <strong>Answer this before anything is created</strong>
+            </div>
+            <span>${questions.length}</span>
+          </div>
+          ${questions.map((question) => `
+            <label class="assistant-db-proposal-question">
+              <span>${escapeHTML(question.question || '')}</span>
+              <textarea
+                class="assistant-db-proposal-input"
+                rows="2"
+                placeholder="Type your answer here..."
+                data-db-proposal-answer-message="${escapeHTML(message.id)}"
+                data-db-proposal-question-id="${escapeHTML(question.id || '')}"
+              >${escapeHTML(answers[question.id] || '')}</textarea>
+            </label>
+          `).join('')}
+          <small class="assistant-db-proposal-question-help">Your answer goes back to the assistant so it can finish this proposal. This unfinished version will not be applied.</small>
+        </div>
+      `
+      : '';
+    const rejectedCount = Array.isArray(proposal.rejectedOperations) ? proposal.rejectedOperations.length : 0;
+    const reviewErrors = Array.isArray(proposal.review?.errors) ? proposal.review.errors : [];
+    const errorsHTML = reviewErrors.length
+      ? `<div class="assistant-db-proposal-errors">
+          ${reviewErrors.map((error) => `<div>${escapeHTML(error)}</div>`).join('')}
+        </div>`
+      : '';
+    const transactionItems = (receipt?.adapters || []).flatMap((entry) => {
+      const result = entry?.result || {};
+      const createdRows = Array.isArray(result.createdRows)
+        ? result.createdRows.map((row) => ({
+            kind: 'database-row',
+            targetTitle: row.rowTitle || 'New record',
+            destinationTitle: row.databaseTitle || 'Database',
+            pageId: row.source?.pageId || '',
+          }))
+        : [];
+      const changedItems = Array.isArray(result.changedItems)
+        ? result.changedItems.map((item) => ({
+            ...item,
+            destinationTitle: item.kind === 'note'
+              ? 'Note'
+              : item.kind === 'document-section'
+                ? 'Document'
+                : ['page-text-block', 'canvas-block'].includes(item.kind)
+                  ? 'Page'
+                  : item.kind === 'page'
+                    ? 'New page'
+                  : 'Content',
+          }))
+        : [];
+      return [...createdRows, ...changedItems];
+    });
+    const receiptHTML = receipt
+      ? `<div class="assistant-db-transaction-receipt ${receipt.status}">
+          <div class="assistant-db-proposal-section-label">${receipt.status === 'applied' ? 'Applied' : 'Undone'}</div>
+          <div class="assistant-db-transaction-title">
+            ${receipt.status === 'applied'
+              ? `${receipt.operations.length} change${receipt.operations.length === 1 ? '' : 's'} completed`
+              : hasPageOperations && hasContentOperations
+                ? 'The created pages and their starter content were removed'
+                : hasContentOperations
+                ? 'The affected content was restored'
+                : hasPageOperations
+                  ? 'The created pages were removed'
+                : 'The affected databases were restored'}
+          </div>
+          ${transactionItems.map((item) => `
+            <button class="assistant-db-transaction-row"
+              data-assistant-transaction-open-page="${escapeHTML(item.pageId || '')}"
+              data-assistant-transaction-open-note="${escapeHTML(item.noteId || '')}"
+              ${receipt.status === 'undone' && item.kind === 'page' ? 'disabled' : ''}>
+              ${escapeHTML(item.targetTitle || 'Changed content')} <span>${escapeHTML(item.destinationTitle || 'Sanctum')}</span>
+            </button>
+          `).join('')}
+          <div class="assistant-db-transaction-meta">
+            ${receipt.status === 'applied' ? `Applied ${escapeHTML(formatDateTime(receipt.appliedAt))}` : `Undone ${escapeHTML(formatDateTime(receipt.undoneAt))}`}
+          </div>
+          ${receipt.status === 'applied' && receipt.undoAvailable
+            ? `<button class="assistant-db-transaction-undo" data-assistant-transaction-undo-message="${escapeHTML(message.id)}" ${transactionBusy ? 'disabled' : ''}>Undo changes</button>`
+            : ''}
+          ${receipt.status === 'applied' && proposal.continuation?.remainingRows?.length
+            ? `<button class="assistant-db-transaction-continue"
+                data-assistant-bulk-continue-message="${escapeHTML(message.id)}"
+                ${activeAssistantBusy || proposal.continuation.started ? 'disabled' : ''}>
+                ${proposal.continuation.started
+                  ? 'Preparing next batch&hellip;'
+                  : `Continue next ${Math.min(proposal.continuation.batchSize || ASSISTANT_BULK_BATCH_SIZE, proposal.continuation.remainingRows.length)} rows`}
+              </button>
+              <div class="assistant-db-transaction-continuation-note">
+                ${proposal.continuation.completedRowCount} of ${proposal.continuation.totalRowCount} rows reviewed so far.
+              </div>`
+            : ''}
+        </div>`
+      : '';
+    const canAct = !proposalSuperseded && (!receipt || receipt.status === 'undone');
+    const primaryActionDisabled = activeAssistantBusy
+      || transactionBusy
+      || selectedIds.size === 0
+      || reviewErrors.length > 0
+      || (questions.length > 0 && unansweredQuestions.length > 0);
+    const primaryActionHTML = canAct
+      ? questions.length
+        ? `<div class="assistant-db-transaction-apply-row is-clarification">
+            <button
+              class="assistant-db-transaction-apply"
+              data-db-proposal-submit-answers-message="${escapeHTML(message.id)}"
+              ${primaryActionDisabled ? 'disabled' : ''}
+            >${unansweredQuestions.length ? 'Type your answer above' : 'Send answer & finish proposal'}</button>
+            <span>${unansweredQuestions.length ? 'Nothing will be created yet.' : 'The assistant will return a complete version to approve.'}</span>
+          </div>`
+        : `<div class="assistant-db-transaction-apply-row">
+            <button
+              class="assistant-db-transaction-apply"
+              data-assistant-transaction-apply-message="${escapeHTML(message.id)}"
+              ${primaryActionDisabled ? 'disabled' : ''}
+            >${transactionBusy ? 'Applying&hellip;' : `Apply ${selectedIds.size} change${selectedIds.size === 1 ? '' : 's'}`}</button>
+            <span>${selectedIds.size ? 'Nothing changes until you press this. Undo is included.' : 'Choose at least one change in the details.'}</span>
+          </div>`
+      : '';
+    const transactionErrorHTML = message.transactionError
+      ? `<div class="assistant-db-proposal-errors"><div>${escapeHTML(message.transactionError)}</div></div>`
+      : '';
+    const proposalKind = hasPageOperations && hasContentOperations
+      ? 'Sanctum proposal'
+      : hasPageOperations
+        ? 'Page proposal'
+        : hasContentOperations
+          ? 'Content proposal'
+          : 'Database proposal';
+    const structureOperation = operations.find((operation) => operation.type === 'create-inline-database');
+    const proposalOverview = structureOperation
+      ? `${structureOperation.databaseRows?.length || 0} rows &middot; ${structureOperation.views?.length || 0} views &middot; ${escapeHTML(structureOperation.targetTitle || 'Current page')}`
+      : `${selectedIds.size} of ${operations.length} change${operations.length === 1 ? '' : 's'} selected`;
+    const proposalStatus = proposalSuperseded
+      ? 'Updated'
+      : receipt?.status === 'applied'
+      ? 'Applied'
+      : receipt?.status === 'undone'
+        ? 'Undone'
+        : unansweredQuestions.length
+          ? 'Needs answer'
+          : 'Ready';
+    const forceReviewOpen = reviewErrors.length || selectedIds.size === 0;
+    const footerHTML = receipt?.status === 'applied'
+      ? '<div class="assistant-db-proposal-footer">Saved &middot; Undo stays available until the affected data changes.</div>'
+      : receipt?.status === 'undone'
+        ? '<div class="assistant-db-proposal-footer">Reversed.</div>'
+        : proposalSuperseded
+          ? '<div class="assistant-db-proposal-footer">A revised proposal follows below.</div>'
+          : '';
+    return `
+      <div
+        class="assistant-db-proposal ${receipt?.status === 'applied' ? 'is-applied' : ''} ${proposalSuperseded ? 'is-superseded' : ''}"
+        data-assistant-proposal-message="${escapeHTML(message.id)}"
+      >
+        <div class="assistant-db-proposal-head">
+          <div class="assistant-db-proposal-icon" aria-hidden="true">&#10022;</div>
+          <div>
+            <div class="assistant-db-proposal-kicker">${proposalKind}</div>
+            <div class="assistant-db-proposal-title">${escapeHTML(proposal.summary || 'Suggested changes')}</div>
+          </div>
+          <span class="assistant-db-proposal-readonly" data-assistant-proposal-status>${proposalStatus}</span>
+        </div>
+        <div class="assistant-db-proposal-overview">${proposalSuperseded ? 'This version was replaced by your answer.' : proposalOverview}</div>
+        <fieldset class="assistant-db-proposal-review-fieldset" ${reviewLocked ? 'disabled' : ''}>
+          ${questionsHTML}
+          ${errorsHTML}
+          <details class="assistant-db-proposal-details" ${forceReviewOpen ? 'open' : ''}>
+            <summary>
+              <span>
+                <strong>What will change</strong>
+                <small>${operations.length} item${operations.length === 1 ? '' : 's'} &middot; ${selectedIds.size} selected</small>
+              </span>
+              <span class="assistant-db-proposal-details-label">View details <b aria-hidden="true">⌄</b></span>
+            </summary>
+            <div class="assistant-db-proposal-details-body">
+              <div class="assistant-db-proposal-operations">${operationHTML}</div>
+              ${rejectedCount ? `<div class="assistant-db-proposal-withheld">${rejectedCount} invalid suggestion${rejectedCount === 1 ? '' : 's'} withheld.</div>` : ''}
+            </div>
+          </details>
+        </fieldset>
+        ${transactionErrorHTML}
+        ${primaryActionHTML}
+        ${receiptHTML}
+        ${footerHTML}
+      </div>
+    `;
+  }
+
   function renderAssistantMessages() {
     const host = document.getElementById('assistantMessages');
     if (!host) return;
+    const renderSignature = [
+      assistantRenderRevision,
+      activeAssistantBusy ? 1 : 0,
+      activeAssistantEditMessageId,
+      getAssistantDisplayName(),
+      activeUser.displayName || 'You',
+      activeUser.assistantPersonality,
+      activeUser.assistantGender,
+      activeUser.assistantAvatar,
+    ].join('|');
+    if (host.dataset.renderSignature === renderSignature) return;
+
     if (!chatMessages.length && !activeAssistantBusy) {
       host.innerHTML = `
         <div class="assistant-empty">
-          <div class="assistant-empty-title">No messages yet</div>
-          <p>Ask about this page, your notes, or something you want ${escapeHTML(getAssistantDisplayName())} to find.</p>
+          <div class="assistant-empty-spark" aria-hidden="true">&#10022;</div>
+          <div class="assistant-empty-title">What can I help with?</div>
+          <p>Ask about this page, find something, or make a change.</p>
         </div>
       `;
+      host.dataset.renderSignature = renderSignature;
       return;
     }
 
-    const messagesHTML = chatMessages.map((message) => `
+    const branchHasAppliedTransaction = new Array(chatMessages.length);
+    let hasAppliedTransaction = false;
+    for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+      hasAppliedTransaction = hasAppliedTransaction
+        || chatMessages[index].transactionReceipt?.status === 'applied';
+      branchHasAppliedTransaction[index] = hasAppliedTransaction;
+    }
+
+    const messagesHTML = chatMessages.map((message, messageIndex) => {
+      const branchHasApplied = branchHasAppliedTransaction[messageIndex];
+      const editing = message.role === 'user' && message.id === activeAssistantEditMessageId && !branchHasApplied;
+      const userMessageBody = editing
+        ? `
+          <div class="assistant-message-edit">
+            <textarea
+              class="assistant-message-edit-input"
+              rows="3"
+              data-assistant-message-edit-input="${escapeHTML(message.id)}"
+            >${escapeHTML(message.text || '')}</textarea>
+            <div class="assistant-message-edit-note">Saving removes this message and every reply after it, then resends the correction.</div>
+            <div class="assistant-message-edit-actions">
+              <button data-assistant-message-edit-save="${escapeHTML(message.id)}">Save &amp; resend</button>
+              <button class="secondary" data-assistant-message-edit-cancel="${escapeHTML(message.id)}">Cancel</button>
+            </div>
+          </div>
+        `
+        : `
+          ${message.text ? `<div class="assistant-message-text">${formatAssistantMessageText(message.text)}</div>` : ''}
+          <div class="assistant-message-user-actions">
+            <button data-assistant-message-edit="${escapeHTML(message.id)}" ${activeAssistantBusy || branchHasApplied ? 'disabled' : ''} title="${branchHasApplied ? 'Undo applied changes first' : 'Edit and resend'}">Edit</button>
+            <button data-assistant-message-delete="${escapeHTML(message.id)}" ${activeAssistantBusy || branchHasApplied ? 'disabled' : ''} title="${branchHasApplied ? 'Undo applied changes first' : 'Delete this conversation branch'}">Delete</button>
+          </div>
+        `;
+      return `
       <div class="assistant-message ${message.role}">
         <div class="assistant-message-role">${escapeHTML(message.role === 'assistant' ? getAssistantDisplayName() : activeUser.displayName || 'You')}</div>
-        ${message.text ? `<div class="assistant-message-text">${formatAssistantMessageText(message.text)}</div>` : ''}
+        ${message.role === 'user'
+          ? userMessageBody
+          : (message.text ? `<div class="assistant-message-text">${formatAssistantMessageText(message.text)}</div>` : '')}
+        ${message.role === 'assistant' ? renderAssistantDatabaseProposal(message) : ''}
         ${message.role === 'assistant' ? renderAssistantActions(message) : ''}
+        <div class="assistant-message-time">${escapeHTML(formatAssistantTime(message.createdAt))}</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     const busyHTML = activeAssistantBusy
       ? `
         <div class="assistant-message system">
           <div class="assistant-message-role">${escapeHTML(getAssistantDisplayName())}</div>
-          <div class="assistant-message-text">Thinking…</div>
+          <div class="assistant-message-text assistant-thinking"><span></span><span></span><span></span></div>
         </div>
       `
       : '';
 
     host.innerHTML = `${messagesHTML}${busyHTML}`;
+    host.dataset.renderSignature = renderSignature;
     host.scrollTop = host.scrollHeight;
+  }
+
+  function beginAssistantMessageEdit(messageId) {
+    if (activeAssistantBusy) return;
+    const index = chatMessages.findIndex((entry) => entry.id === messageId && entry.role === 'user');
+    const message = index === -1 ? null : chatMessages[index];
+    if (!message || chatMessages.slice(index).some((entry) => entry.transactionReceipt?.status === 'applied')) return;
+    activeAssistantEditMessageId = message.id;
+    renderAssistantMessages();
+    setTimeout(() => {
+      const input = document.querySelector(`[data-assistant-message-edit-input="${message.id}"]`);
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  }
+
+  function cancelAssistantMessageEdit() {
+    activeAssistantEditMessageId = '';
+    renderAssistantMessages();
+  }
+
+  function rollbackAssistantConversationFrom(messageId) {
+    const index = chatMessages.findIndex((message) => message.id === messageId && message.role === 'user');
+    if (index === -1) return false;
+    if (chatMessages.slice(index).some((message) => message.transactionReceipt?.status === 'applied')) return false;
+    chatMessages = chatMessages.slice(0, index);
+    activeAssistantEditMessageId = '';
+    saveChat();
+    renderAssistantMessages();
+    return true;
+  }
+
+  async function saveAssistantMessageEdit(messageId) {
+    if (activeAssistantBusy) return;
+    const input = document.querySelector(`[data-assistant-message-edit-input="${messageId}"]`);
+    const nextText = String(input?.value || '').trim();
+    if (!nextText) return;
+    const existing = chatMessages.find((message) => message.id === messageId && message.role === 'user');
+    if (!existing) return;
+    if (nextText === existing.text.trim()) {
+      cancelAssistantMessageEdit();
+      return;
+    }
+    if (!rollbackAssistantConversationFrom(messageId)) return;
+    await handleAssistantQuery(nextText);
   }
 
   function updateChatMessage(messageId, updater) {
@@ -1811,11 +3219,22 @@
   }
 
   function pushChat(role, text, options = {}) {
+    const embedded = role === 'assistant' ? extractEmbeddedAssistantPayload(text) : null;
+    const optionActions = Array.isArray(options.actions)
+      ? options.actions.map(normalizeChatAction).filter(Boolean)
+      : [];
+    const embeddedActions = !optionActions.length && Array.isArray(embedded?.suggestedActions)
+      ? embedded.suggestedActions.map(normalizeChatAction).filter(Boolean)
+      : [];
     chatMessages.push({
       id: makeId('msg'),
       role,
-      text,
-      actions: Array.isArray(options.actions) ? options.actions.map(normalizeChatAction).filter(Boolean) : [],
+      text: embedded?.reply || text,
+      actions: optionActions.length ? optionActions : embeddedActions,
+      databaseProposal: normalizeStoredDatabaseProposal(options.databaseProposal),
+      proposalSuperseded: false,
+      transactionReceipt: null,
+      transactionError: '',
       createdAt: now(),
     });
     saveChat();
@@ -1858,11 +3277,150 @@
     return scored.map((entry) => entry.page);
   }
 
-  function buildAssistantRequestContext(query) {
-    const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home";
+  function collectContextDatabases() {
+    if (typeof window.getDatabaseCalloutSources !== "function"
+      || typeof window.getDatabaseCalloutSourceData !== "function") {
+      return [];
+    }
+    try {
+      return (window.getDatabaseCalloutSources() || [])
+        .map((source) => window.getDatabaseCalloutSourceData(source))
+        .filter(Boolean);
+    } catch (error) {
+      console.warn("Could not collect databases for assistant context", error);
+      return [];
+    }
+  }
+
+  function getContextCatalogNotes() {
+    const draft = getLiveEditorNoteDraft();
+    if (!draft?.id) return notes;
+    const found = notes.some((note) => note.id === draft.id);
+    return found
+      ? notes.map((note) => note.id === draft.id ? draft : note)
+      : [...notes, draft];
+  }
+
+  function buildSanctumContextCatalog() {
+    const engine = window.SanctumContextEngine;
+    if (!engine || typeof engine.buildCatalog !== "function") return null;
+    try {
+      return engine.buildCatalog({
+        domains: Array.isArray(window.userDomains) ? window.userDomains : [],
+        pages: Array.isArray(window.userPages) ? window.userPages : [],
+        blocksByPage: typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {},
+        documentsByPage: typeof window.readAllDocuments === "function" ? window.readAllDocuments() : {},
+        pageProps: readJSON((window.STORAGE_KEYS && window.STORAGE_KEYS.pageProps) || "sanctum_page_props_v1", {}),
+        notes: getContextCatalogNotes(),
+        databases: collectContextDatabases(),
+      });
+    } catch (error) {
+      console.warn("Could not build Sanctum context catalog", error);
+      return null;
+    }
+  }
+
+  function buildRetrievedContext(catalog, routePlan, query, currentPageId) {
+    const engine = window.SanctumContextEngine;
+    if (!catalog || !engine) return { plan: null, entityResolution: null, records: [], schemas: [] };
+    const currentPageRecord = engine.getRecord(catalog, engine.pageRef(currentPageId));
+    const preferScopeId = currentPageRecord?.scopeId || "";
+    return engine.retrieveByRoutePlan(catalog, routePlan, {
+      query,
+      currentPageId,
+      preferScopeId,
+      maxRowsPerDatabase: 100,
+      maxRecords: 140,
+      maxSchemas: 8,
+    });
+  }
+
+  async function routeAssistantContext(catalog, query, currentPageId) {
+    const engine = window.SanctumContextEngine;
+    if (!catalog || !engine) return { plan: null, entityResolution: null, records: [], schemas: [] };
+    const currentPageRecord = engine.getRecord(catalog, engine.pageRef(currentPageId));
+    const preferScopeId = currentPageRecord?.scopeId || "";
+    const schemas = catalog.schemas.map((schema) => engine.toAssistantSchema(schema));
+    const requestsEveryRow = /\b(?:all|every)\b[\s\S]{0,80}\b(?:row|record|game)s?\b/i.test(String(query || ""))
+      || /\ball\s+\d+\b/i.test(String(query || ""));
+    let routePlan = null;
+
+    if (USE_AI_CONTEXT_ROUTER && !requestsEveryRow) try {
+      const response = await fetch(CONTEXT_ROUTE_API_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: String(query || "").trim(),
+            currentPage: currentPageRecord ? {
+              pageId: currentPageRecord.pageId,
+              title: currentPageRecord.title,
+              type: currentPageRecord.type,
+              scopeId: currentPageRecord.scopeId,
+              scopeTitle: currentPageRecord.scopeTitle,
+              breadcrumb: currentPageRecord.breadcrumb,
+            } : {
+              pageId: currentPageId,
+              title: getPageById(currentPageId)?.title || "Home",
+              type: getPageById(currentPageId)?.category || "",
+              scopeId: "",
+              scopeTitle: "",
+              breadcrumb: [],
+            },
+            schemas,
+          }),
+        });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.fallback) {
+        throw new Error(payload?.reason || `Context routing failed (${response.status}).`);
+      }
+      routePlan = engine.normalizeRoutePlan(catalog, payload);
+    } catch (error) {
+      console.warn("Assistant context routing fell back to local source matching", error);
+    }
+
+    if (!routePlan) {
+      routePlan = engine.routeSchemasDeterministically(catalog, query, {
+        currentPageId,
+        preferScopeId,
+        limit: 4,
+      });
+    }
+    if (requestsEveryRow && routePlan.selections.length > 0) {
+      routePlan = {
+        ...routePlan,
+        selections: routePlan.selections.map((selection) => ({
+          ...selection,
+          rowMode: "all",
+          rowQuery: "",
+          limit: 100
+        }))
+      };
+    }
+    return buildRetrievedContext(catalog, routePlan, query, currentPageId);
+  }
+
+  window.buildSanctumContextCatalog = buildSanctumContextCatalog;
+  window.searchSanctumContext = function searchSanctumContext(query, options = {}) {
+    const catalog = buildSanctumContextCatalog();
+    if (!catalog || !window.SanctumContextEngine) return [];
+    return window.SanctumContextEngine.search(catalog, query, options);
+  };
+
+  async function buildAssistantRequestContext(query, options = {}) {
+    const currentPageId = getAssistantCurrentPageId("home");
     const currentPage = getPageUnderstanding(currentPageId || "home");
     const activeNote = getLiveEditorNoteDraft() || getNoteById(activeNoteId);
-    const relatedNotes = getRelatedNotesForPage(currentPage.pageId).slice(0, 8).map((note) => ({
+    const contextCatalog = buildSanctumContextCatalog();
+    const retrievedContext = await routeAssistantContext(contextCatalog, query, currentPageId);
+    const contextEngine = window.SanctumContextEngine;
+    const routePlan = retrievedContext.plan || {
+      selections: [],
+      include: { notes: false, documents: false, canvas: false, pages: false, currentPage: false },
+    };
+    const includeNotes = routePlan.include?.notes === true;
+    const includePages = routePlan.include?.pages === true;
+    const includeCurrentPage = routePlan.include?.currentPage === true;
+    const relatedNotes = (includeNotes ? getRelatedNotesForPage(currentPage.pageId) : []).slice(0, 8).map((note) => ({
       id: note.id,
       title: note.title || "Untitled note",
       preview: note.preview || buildPreview(note.bodyText || ""),
@@ -1870,7 +3428,7 @@
       linkedPages: (note.directPageIds || []).map((id) => getPageById(id)?.title).filter(Boolean),
     }));
 
-    const noteMatches = searchNotes(query).map((note) => ({
+    const noteMatches = (includeNotes ? searchNotes(query) : []).map((note) => ({
       id: note.id,
       title: note.title || "Untitled note",
       preview: note.preview || buildPreview(note.bodyText || ""),
@@ -1881,7 +3439,7 @@
       needsReview: !!note.needsReview,
     }));
 
-    const pageMatches = searchPages(query).map((page) => ({
+    const pageMatches = (includePages ? searchPages(query) : []).map((page) => ({
       id: page.id,
       title: page.title || "Untitled page",
       breadcrumb: getBreadcrumb(page.id).map((item) => item.title || ""),
@@ -1890,12 +3448,25 @@
       summary: getPageDescriptorText(page.id).slice(0, 420),
     }));
 
+    const continuationTargetKeys = new Set((options.continuationTargetRows || []).map((row) => (
+      `${row.databaseRef}::${row.rowId}`
+    )));
+    const retrievedRecords = continuationTargetKeys.size
+      ? retrievedContext.records.filter((record) => (
+          record.kind !== 'database-row'
+          || continuationTargetKeys.has(`${record.parentRef}::${record.id}`)
+        ))
+      : retrievedContext.records;
+
     return {
       mode: 'ask',
       user: activeUser,
       context: {
-        currentPage,
-        activeNote: activeNote ? {
+        currentPage: {
+          ...currentPage,
+          descriptor: includeCurrentPage ? currentPage.descriptor : "",
+        },
+        activeNote: includeNotes && activeNote ? {
           id: activeNote.id,
           title: activeNote.title || "Untitled note",
           preview: activeNote.preview || buildPreview(activeNote.bodyText || ""),
@@ -1907,13 +3478,35 @@
           needsReview: !!activeNote.needsReview,
         } : null,
         relatedNotes,
-        nearbyLinkedPages: currentPage.nearbyLinkedPages || [],
+        nearbyLinkedPages: includePages || includeCurrentPage ? (currentPage.nearbyLinkedPages || []) : [],
         searchMatches: {
           notes: noteMatches,
           pages: pageMatches,
         },
-        helperMemory: (helperMemory?.facts || []).map((item) => item.text).slice(-12),
-        conversationHistory: chatMessages.slice(-8).map((message) => ({
+        retrievedRecords: retrievedRecords.map((record) => (
+          contextEngine.toAssistantRecord(record, { maxText: 1400 })
+        )),
+        entityResolution: retrievedContext.entityResolution || null,
+        availableSchemas: retrievedContext.schemas,
+        contextRoutePlan: routePlan,
+        contextCatalogStats: contextCatalog ? {
+          version: contextCatalog.version,
+          recordCount: contextCatalog.records.length,
+          schemaCount: contextCatalog.schemas.length,
+          kinds: contextCatalog.records.reduce((counts, record) => {
+            counts[record.kind] = (counts[record.kind] || 0) + 1;
+            return counts;
+          }, {}),
+        } : null,
+        helperMemory: getRelevantHelperMemory(query, 16),
+        conversationHistory: chatMessages
+          .filter((message, index) => !(
+            index === chatMessages.length - 1
+            && message.role === "user"
+            && String(message.text || "").trim() === String(query || "").trim()
+          ))
+          .slice(-8)
+          .map((message) => ({
           role: message.role,
           text: message.text,
         })),
@@ -1972,13 +3565,89 @@
     return deduped.slice(0, 6);
   }
 
-  function applyAssistantPayload(payload = {}) {
+  function applyAssistantPayload(payload = {}, requestContext = null) {
     const memoryWrites = Array.isArray(payload.memoryWrites) ? payload.memoryWrites : [];
-    memoryWrites.forEach((text) => addHelperMemoryFact(text, "assistant"));
-    return buildAssistantActionList(payload);
+    if (activeUser.memoryEnabled !== false && activeUser.autoMemory !== false) {
+      memoryWrites.forEach((text) => addHelperMemoryFact(text, "assistant"));
+    }
+    const operationsApi = window.SanctumAssistantOperations;
+    const contextCatalog = buildSanctumContextCatalog();
+    const routePlan = requestContext?.context?.contextRoutePlan || null;
+    const retrievedRefs = Array.isArray(requestContext?.context?.retrievedRecords)
+      ? requestContext.context.retrievedRecords.map((record) => record?.ref).filter(Boolean)
+      : [];
+    const currentPageId = requestContext?.context?.currentPage?.pageId || '';
+    const currentPageRef = currentPageId && window.SanctumContextEngine?.pageRef
+      ? window.SanctumContextEngine.pageRef(currentPageId)
+      : '';
+    const entityResolution = requestContext?.context?.entityResolution || null;
+    const routedDatabaseRefs = Array.isArray(routePlan?.selections)
+      ? routePlan.selections.map((selection) => selection?.databaseRef).filter(Boolean)
+      : [];
+    const resolvedDatabaseRefs = Array.isArray(entityResolution?.allowedDatabaseRefs)
+      ? entityResolution.allowedDatabaseRefs
+      : [];
+    const databaseProposal = operationsApi && contextCatalog && routePlan
+      ? operationsApi.normalizeProposal(
+          payload.changeProposal || payload.databaseProposal,
+          contextCatalog,
+          routePlan,
+          {
+            allowedContentRefs: [...new Set([...retrievedRefs, currentPageRef].filter(Boolean))],
+            allowedDatabaseRefs: [...new Set([...routedDatabaseRefs, ...resolvedDatabaseRefs])],
+            entityResolutionStatus: entityResolution?.status || 'none',
+          }
+        )
+      : null;
+    if (databaseProposal) {
+      databaseProposal.continuation = buildAssistantBulkContinuation(databaseProposal, requestContext);
+    }
+    return {
+      actions: buildAssistantActionList(payload),
+      databaseProposal,
+    };
   }
 
-  async function handleAssistantQuery(query) {
+  function buildAssistantBulkContinuation(proposal = {}, requestContext = null) {
+    const continuationJob = requestContext?.continuationJob && typeof requestContext.continuationJob === 'object'
+      ? requestContext.continuationJob
+      : null;
+    const query = String(requestContext?.message || '').trim();
+    const requestsWholeSet = /\b(?:all|every)\b[\s\S]{0,100}\b(?:row|record|entry|item|game)s?\b/i.test(query)
+      || /\ball\s+\d+\b/i.test(query);
+    if (!requestsWholeSet && !continuationJob) return null;
+    const bulkOperations = (proposal.operations || []).filter((operation) => operation.type === 'update-database-rows');
+    if (!bulkOperations.length) return null;
+
+    const completedKeys = new Set();
+    bulkOperations.forEach((operation) => {
+      (operation.rowUpdates || []).forEach((update) => {
+        completedKeys.add(`${operation.databaseRef}::${update.rowId}`);
+      });
+    });
+    const relevantRefs = new Set(bulkOperations.map((operation) => operation.databaseRef));
+    const allRows = continuationJob
+      ? (continuationJob.remainingRows || []).filter((row) => relevantRefs.has(row.databaseRef))
+      : (requestContext?.context?.retrievedRecords || [])
+          .filter((record) => record?.kind === 'database-row' && relevantRefs.has(record.parentRef))
+          .map((record) => ({
+            databaseRef: record.parentRef,
+            rowId: record.id,
+            title: record.title || 'Untitled record',
+          }));
+    const remainingRows = allRows.filter((row) => !completedKeys.has(`${row.databaseRef}::${row.rowId}`));
+    if (!remainingRows.length) return null;
+    return {
+      summary: proposal.summary || 'Continue the bulk database update',
+      batchSize: ASSISTANT_BULK_BATCH_SIZE,
+      totalRowCount: continuationJob?.totalRowCount || allRows.length,
+      completedRowCount: (continuationJob?.completedRowCount || 0) + (allRows.length - remainingRows.length),
+      started: false,
+      remainingRows,
+    };
+  }
+
+  async function handleAssistantQuery(query, options = {}) {
     const clean = String(query || "").trim();
     if (!clean) return;
     pushChat("user", clean);
@@ -1986,19 +3655,24 @@
     renderAssistantMessages();
 
     try {
+      const requestContext = await buildAssistantRequestContext(clean, options);
+      if (options.continuationJob) requestContext.continuationJob = options.continuationJob;
       const response = await fetch(ASSISTANT_API_PATH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildAssistantRequestContext(clean)),
+        body: JSON.stringify(requestContext),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.reply || `Assistant request failed (${response.status}).`);
       }
-      const suggestedActions = applyAssistantPayload(payload || {});
-      pushChat("assistant", payload?.reply || "No reply yet.", { actions: suggestedActions });
+      const appliedPayload = applyAssistantPayload(payload || {}, requestContext);
+      pushChat("assistant", payload?.reply || "No reply yet.", {
+        actions: appliedPayload.actions,
+        databaseProposal: appliedPayload.databaseProposal,
+      });
       renderEverything();
-      return;
+      return true;
     } catch (error) {
       console.warn("Assistant request failed, falling back to local search.", error);
     } finally {
@@ -2020,7 +3694,7 @@
       pushChat("assistant", `Closest page matches\n${lines.join("\n")}`);
     }
 
-    const currentPageId = typeof window.getCurrentPageId === "function" ? window.getCurrentPageId() : "home";
+    const currentPageId = getAssistantCurrentPageId("home");
     if (/what was i working on|jump back in|recent/.test(lowered)) {
       const recentNotes = getNotesSorted(notes.filter((note) => !note.archived)).slice(0, 3);
       if (recentNotes.length) {
@@ -2042,6 +3716,7 @@
     }
 
     pushChat("assistant", "The assistant route did not answer, so I fell back to local note and page search only.");
+    return false;
   }
 
   function markAssistantActionDone(messageId, actionId, resultText = '') {
@@ -2151,15 +3826,20 @@
         if (!aiBlocks.length) { resultText = 'No blocks provided'; changed = true; break; }
         let targetPageId;
         if (action.targetPage === 'new' && action.newPageTitle) {
+          const activePageId = getAssistantCurrentPageId('home');
           const newPage = typeof window.createPage === 'function'
-            ? window.createPage(action.newPageTitle, typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home', 'board-canvas', 'none', 'page')
+            ? window.createPage(action.newPageTitle, activePageId, 'board-canvas', 'none', 'page', {
+              reuseExisting: true,
+              currentPageId: activePageId,
+              includeCurrentPage: true
+            })
             : null;
-          targetPageId = newPage ? newPage.id : (typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home');
+          targetPageId = newPage ? newPage.id : activePageId;
         } else {
-          targetPageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : 'home';
+          targetPageId = getAssistantCurrentPageId('home');
         }
-        applyLayoutBlocks(targetPageId, aiBlocks);
-        resultText = 'Layout applied!';
+        const applied = applyLayoutBlocks(targetPageId, aiBlocks);
+        resultText = applied ? 'Layout applied!' : 'Could not apply layout';
         changed = true;
         break;
       }
@@ -2185,9 +3865,11 @@
       z: 0,
       titleHTML: spec.titleHTML || '',
       bodyHTML: spec.bodyHTML || '',
-      containerTitle: '',
-      containerBody: '',
-      containerItems: [],
+      containerTitle: spec.containerTitle || '',
+      containerBody: spec.containerBody || '',
+      containerItems: Array.isArray(spec.containerItems) ? spec.containerItems : [],
+      assistantLayoutId: spec.assistantLayoutId || '',
+      assistantLayoutSlot: Number.isFinite(Number(spec.assistantLayoutSlot)) ? Number(spec.assistantLayoutSlot) : i,
       tableHTML: '',
       bg: spec.bg || '',
       borderColor: spec.borderColor || '',
@@ -2202,37 +3884,39 @@
       pageCardSummary: spec.pageCardSummary || '',
       pageCardTypeLabel: '',
       pageCardImageSrc: '',
-      pageCardImageMode: 'none',
+      pageCardImageMode: ['none', 'linked', 'custom'].includes(spec.pageCardImageMode) ? spec.pageCardImageMode : 'none',
       pageCardImagePos: 50,
-      pageCardView: 'default',
+      pageCardView: spec.pageCardView === 'gallery' ? 'gallery' : 'default',
       pageCardHideIcon: 0,
-      cardStyle: '',
+      cardStyle: spec.cardStyle || '',
     }));
 
-    const currentPageId = typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : null;
+    if (typeof window.getPageBlocks !== 'function' || typeof window.setPageBlocks !== 'function') return false;
+
+    const currentPageId = getAssistantCurrentPageId('');
 
     if (pageId === currentPageId) {
-      // Append directly to the DOM — avoids openPage overwriting our blocks via saveCurrentPageBlocks
-      const grid = document.getElementById('grid');
-      if (grid) {
-        newBlocks.forEach((data) => {
-          if (typeof buildBlockFromData === 'function') {
-            const el = buildBlockFromData(data);
-            grid.appendChild(el);
-          }
-        });
-        if (typeof expandGrid === 'function') expandGrid();
-      }
-      // Persist the full merged state (existing DOM blocks + new ones)
-      if (typeof window.saveCurrentPageBlocks === 'function') {
-        window.saveCurrentPageBlocks();
-      }
-    } else {
-      // Different/new page — store first, then navigate (saveCurrentPageBlocks in openPage saves old page correctly)
-      const existing = typeof window.getPageBlocks === 'function' ? window.getPageBlocks(pageId) : [];
-      if (typeof window.setPageBlocks === 'function') window.setPageBlocks(pageId, [...existing, ...newBlocks]);
-      openPageSafe(pageId);
+      // Save the current live DOM state first so we don't lose unsaved edits
+      saveAssistantCurrentPageBlocks();
     }
+
+    // Merge new blocks into stored blocks then reload — works for all page types
+    const existing = window.getPageBlocks(pageId);
+    window.setPageBlocks(pageId, [...existing, ...newBlocks]);
+
+    if (pageId === currentPageId) {
+      const grid = document.getElementById('grid');
+      const canRenderLive = grid && typeof buildBlockFromData === 'function';
+      if (canRenderLive) {
+        newBlocks.forEach((data) => grid.appendChild(buildBlockFromData(data)));
+        if (typeof expandGrid === 'function') expandGrid();
+        saveAssistantCurrentPageBlocks();
+      } else {
+        openPageSafe(pageId);
+      }
+    }
+
+    return true;
   }
 
   function setAssistantOpen(open) {
@@ -2259,8 +3943,356 @@
     renderAssistantMessages();
   }
 
+  function updateDatabaseProposal(messageId, updater) {
+    const operationsApi = window.SanctumAssistantOperations;
+    if (!operationsApi) return null;
+    return updateChatMessage(messageId, (message) => {
+      const currentProposal = normalizeStoredDatabaseProposal(message.databaseProposal);
+      if (!currentProposal) return message;
+      const nextProposal = updater(currentProposal, operationsApi);
+      return {
+        ...message,
+        databaseProposal: normalizeStoredDatabaseProposal(nextProposal),
+      };
+    });
+  }
+
+  function updateProposalAnswerWithoutRerender(messageId, questionId, value) {
+    const operationsApi = window.SanctumAssistantOperations;
+    const message = chatMessages.find((entry) => entry.id === messageId);
+    const proposal = normalizeStoredDatabaseProposal(message?.databaseProposal);
+    if (!operationsApi || !message || !proposal) return false;
+    message.databaseProposal = normalizeStoredDatabaseProposal(
+      operationsApi.setQuestionAnswer(proposal, questionId, value)
+    );
+    return true;
+  }
+
+  function syncProposalAnswerAction(messageId) {
+    const card = document.querySelector(`[data-assistant-proposal-message="${CSS.escape(String(messageId || ''))}"]`);
+    if (!card) return;
+    const inputs = Array.from(card.querySelectorAll('[data-db-proposal-answer-message][data-db-proposal-question-id]'));
+    const unanswered = inputs.filter((input) => !String(input.value || '').trim()).length;
+    const button = card.querySelector('[data-db-proposal-submit-answers-message]');
+    const status = card.querySelector('[data-assistant-proposal-status]');
+    const help = card.querySelector('.assistant-db-transaction-apply-row.is-clarification > span');
+    if (button) {
+      button.disabled = unanswered > 0 || activeAssistantBusy;
+      button.textContent = unanswered ? 'Type your answer above' : 'Send answer & finish proposal';
+    }
+    if (status) status.textContent = unanswered ? 'Needs answer' : 'Answer ready';
+    if (help) {
+      help.textContent = unanswered
+        ? 'Nothing will be created yet.'
+        : 'The assistant will return a complete version to approve.';
+    }
+  }
+
+  function handleDatabaseProposalChange(event) {
+    const target = event.target;
+    const toggle = target.closest('[data-db-proposal-toggle-message][data-db-proposal-operation-id]');
+    if (toggle) {
+      updateDatabaseProposal(toggle.dataset.dbProposalToggleMessage, (proposal, operationsApi) => (
+        operationsApi.setOperationSelected(
+          proposal,
+          toggle.dataset.dbProposalOperationId,
+          !!toggle.checked
+        )
+      ));
+      return true;
+    }
+
+    const answer = target.closest('[data-db-proposal-answer-message][data-db-proposal-question-id]');
+    if (answer) {
+      saveChat();
+      return true;
+    }
+
+    const editor = target.closest('[data-db-proposal-edit-message][data-db-proposal-operation-id]');
+    if (!editor) return false;
+    const value = editor.multiple
+      ? [...editor.selectedOptions].map((option) => option.value)
+      : editor.value;
+    updateDatabaseProposal(editor.dataset.dbProposalEditMessage, (proposal, operationsApi) => (
+      editor.dataset.dbProposalRelationTargets === '1'
+        ? operationsApi.setRelationTargets(proposal, editor.dataset.dbProposalOperationId, value)
+        : operationsApi.editOperationValue(
+            proposal,
+            editor.dataset.dbProposalOperationId,
+            editor.dataset.dbProposalPropertyId,
+            value
+          )
+    ));
+    return true;
+  }
+
+  function getAssistantTransactionAdapters() {
+    return {
+      database: window.SanctumDatabaseTransactionAdapter,
+      'database-structure': window.SanctumDatabaseStructureTransactionAdapter,
+      page: window.SanctumPageTransactionAdapter,
+      ...(window.SanctumContentTransactionAdapters || {}),
+    };
+  }
+
+  async function submitAssistantProposalAnswers(messageId) {
+    if (activeAssistantBusy || activeAssistantTransactionMessageId) return;
+    const message = chatMessages.find((entry) => entry.id === messageId);
+    const proposal = normalizeStoredDatabaseProposal(message?.databaseProposal);
+    if (!message || !proposal || message.proposalSuperseded) return;
+    const selectedIds = new Set(proposal.review?.selectedOperationIds || []);
+    const questions = (proposal.questions || []).filter((question) => {
+      const operationIds = Array.isArray(question.operationIds) ? question.operationIds : [];
+      return !operationIds.length || operationIds.some((id) => selectedIds.has(id));
+    });
+    const answered = questions.map((question) => ({
+      question: String(question.question || '').trim(),
+      answer: String(proposal.review?.answers?.[question.id] || '').trim(),
+    }));
+    if (!answered.length || answered.some((item) => !item.answer)) {
+      syncProposalAnswerAction(messageId);
+      return;
+    }
+
+    saveChat();
+    const revisionRequest = [
+      `Here are my answers for the pending "${proposal.summary || 'Sanctum changes'}" proposal:`,
+      ...answered.flatMap((item) => [`Question: ${item.question}`, `Answer: ${item.answer}`]),
+      'Please revise it now and return one complete replacement proposal that includes these answers.',
+      'Do not apply anything yet, and do not leave the clarified parts out of the replacement proposal.',
+    ].join('\n');
+    const completed = await handleAssistantQuery(revisionRequest);
+    if (completed === true) {
+      updateChatMessage(messageId, {
+        proposalSuperseded: true,
+        transactionError: '',
+      });
+    }
+  }
+
+  async function applyAssistantTransaction(messageId) {
+    if (activeAssistantTransactionMessageId) return;
+    const message = chatMessages.find((entry) => entry.id === messageId);
+    const transactionsApi = window.SanctumAssistantTransactions;
+    const operationsApi = window.SanctumAssistantOperations;
+    if (!message?.databaseProposal) return;
+    const requiredSourceTypes = [...new Set((message.databaseProposal.operations || [])
+      .map((operation) => transactionsApi?.sourceTypeForOperation?.(operation))
+      .filter(Boolean))];
+    const adapters = getAssistantTransactionAdapters();
+    const missingAdapters = requiredSourceTypes.filter((sourceType) => !adapters[sourceType]);
+    if (!transactionsApi || !operationsApi || missingAdapters.length) {
+      const missing = [
+        !transactionsApi ? 'transaction engine' : '',
+        !operationsApi ? 'proposal engine' : '',
+        ...missingAdapters.map((sourceType) => `${sourceType} adapter`),
+      ].filter(Boolean);
+      updateChatMessage(messageId, {
+        transactionError: `Apply is unavailable because the ${missing.join(', ')} did not load. Refresh Sanctum and try again.`,
+      });
+      renderAssistantMessages();
+      return;
+    }
+
+    activeAssistantTransactionMessageId = messageId;
+    message.transactionError = '';
+    saveChat();
+    renderAssistantMessages();
+    try {
+      const reviewedProposal = operationsApi.prepareProposal(
+        message.databaseProposal,
+        buildSanctumContextCatalog() || {}
+      );
+      if (!reviewedProposal?.preparedTransaction || reviewedProposal.review?.status !== 'prepared') {
+        const reason = reviewedProposal?.review?.errors?.[0] || 'The proposal is no longer valid.';
+        throw new Error(reason);
+      }
+      const receipt = await transactionsApi.executePreparedTransaction(
+        reviewedProposal.preparedTransaction,
+        adapters
+      );
+      updateChatMessage(messageId, (current) => ({
+        ...current,
+        databaseProposal: reviewedProposal,
+        transactionReceipt: receipt,
+        transactionError: '',
+      }));
+    } catch (error) {
+      updateChatMessage(messageId, {
+        transactionError: String(error?.message || error || 'The transaction could not be applied.'),
+      });
+    } finally {
+      activeAssistantTransactionMessageId = '';
+      renderEverything();
+    }
+  }
+
+  async function undoAssistantTransaction(messageId) {
+    if (activeAssistantTransactionMessageId) return;
+    const message = chatMessages.find((entry) => entry.id === messageId);
+    const transactionsApi = window.SanctumAssistantTransactions;
+    if (!message?.transactionReceipt) return;
+    const adapters = getAssistantTransactionAdapters();
+    const requiredSourceTypes = [...new Set((message.transactionReceipt.adapters || [])
+      .map((entry) => entry?.sourceType)
+      .filter(Boolean))];
+    const missingAdapters = requiredSourceTypes.filter((sourceType) => !adapters[sourceType]);
+    if (!transactionsApi || missingAdapters.length) {
+      const missing = [
+        !transactionsApi ? 'transaction engine' : '',
+        ...missingAdapters.map((sourceType) => `${sourceType} adapter`),
+      ].filter(Boolean);
+      updateChatMessage(messageId, {
+        transactionError: `Undo is unavailable because the ${missing.join(', ')} did not load. Refresh Sanctum and try again.`,
+      });
+      renderAssistantMessages();
+      return;
+    }
+
+    activeAssistantTransactionMessageId = messageId;
+    message.transactionError = '';
+    saveChat();
+    renderAssistantMessages();
+    try {
+      const receipt = await transactionsApi.undoTransaction(
+        message.transactionReceipt,
+        adapters
+      );
+      updateChatMessage(messageId, {
+        transactionReceipt: receipt,
+        transactionError: '',
+      });
+    } catch (error) {
+      updateChatMessage(messageId, {
+        transactionError: String(error?.message || error || 'Undo could not be completed safely.'),
+      });
+    } finally {
+      activeAssistantTransactionMessageId = '';
+      renderEverything();
+    }
+  }
+
+  async function continueAssistantBulkJob(messageId) {
+    if (activeAssistantBusy) return;
+    const message = chatMessages.find((entry) => entry.id === messageId);
+    const proposal = normalizeStoredDatabaseProposal(message?.databaseProposal);
+    const continuation = proposal?.continuation;
+    if (!message || message.transactionReceipt?.status !== 'applied' || !continuation?.remainingRows?.length) return;
+    const nextRows = continuation.remainingRows.slice(0, continuation.batchSize || ASSISTANT_BULK_BATCH_SIZE);
+    message.databaseProposal = normalizeStoredDatabaseProposal({
+      ...proposal,
+      continuation: { ...continuation, started: true },
+    });
+    saveChat();
+    renderAssistantMessages();
+    const rowsByDatabase = nextRows.reduce((groups, row) => {
+      if (!groups[row.databaseRef]) groups[row.databaseRef] = [];
+      groups[row.databaseRef].push(row.rowId);
+      return groups;
+    }, {});
+    const rowInstructions = Object.entries(rowsByDatabase)
+      .map(([databaseRef, rowIds]) => `${databaseRef}: ${rowIds.join(', ')}`)
+      .join('\n');
+    const completed = await handleAssistantQuery(
+      `Continue "${continuation.summary}" for the next reviewed batch. `
+      + `Update only these exact rows and do not repeat rows already applied:\n${rowInstructions}`,
+      {
+        continuationJob: {
+          summary: continuation.summary,
+          batchSize: continuation.batchSize,
+          totalRowCount: continuation.totalRowCount,
+          completedRowCount: continuation.completedRowCount,
+          remainingRows: continuation.remainingRows,
+        },
+        continuationTargetRows: nextRows,
+      }
+    );
+    if (!completed) {
+      updateChatMessage(messageId, {
+        databaseProposal: normalizeStoredDatabaseProposal({
+          ...proposal,
+          continuation: { ...continuation, started: false },
+        }),
+      });
+    }
+  }
+
   function handleDocumentClick(event) {
     const target = event.target;
+
+    const assistantProfileButton = target.closest('#assistantProfileOpen');
+    if (assistantProfileButton) {
+      openAssistantProfile('identity');
+      return;
+    }
+
+    const submitProposalAnswersButton = target.closest('[data-db-proposal-submit-answers-message]');
+    if (submitProposalAnswersButton) {
+      submitAssistantProposalAnswers(submitProposalAnswersButton.dataset.dbProposalSubmitAnswersMessage);
+      return;
+    }
+
+    const applyAssistantTransactionButton = target.closest('[data-assistant-transaction-apply-message]');
+    if (applyAssistantTransactionButton) {
+      applyAssistantTransaction(applyAssistantTransactionButton.dataset.assistantTransactionApplyMessage);
+      return;
+    }
+
+    const undoAssistantTransactionButton = target.closest('[data-assistant-transaction-undo-message]');
+    if (undoAssistantTransactionButton) {
+      undoAssistantTransaction(undoAssistantTransactionButton.dataset.assistantTransactionUndoMessage);
+      return;
+    }
+
+    const continueBulkButton = target.closest('[data-assistant-bulk-continue-message]');
+    if (continueBulkButton) {
+      continueAssistantBulkJob(continueBulkButton.dataset.assistantBulkContinueMessage);
+      return;
+    }
+
+    const openAssistantTransactionPage = target.closest('[data-assistant-transaction-open-page]');
+    if (openAssistantTransactionPage) {
+      const pageId = openAssistantTransactionPage.dataset.assistantTransactionOpenPage;
+      const noteId = openAssistantTransactionPage.dataset.assistantTransactionOpenNote;
+      if (noteId) {
+        openNoteInNotes(noteId);
+      } else if (pageId) {
+        openPageSafe(pageId);
+      }
+      return;
+    }
+
+    const editAssistantMessage = target.closest('[data-assistant-message-edit]');
+    if (editAssistantMessage) {
+      beginAssistantMessageEdit(editAssistantMessage.dataset.assistantMessageEdit);
+      return;
+    }
+
+    const cancelAssistantMessageEditButton = target.closest('[data-assistant-message-edit-cancel]');
+    if (cancelAssistantMessageEditButton) {
+      cancelAssistantMessageEdit();
+      return;
+    }
+
+    const saveAssistantMessageEditButton = target.closest('[data-assistant-message-edit-save]');
+    if (saveAssistantMessageEditButton) {
+      saveAssistantMessageEdit(saveAssistantMessageEditButton.dataset.assistantMessageEditSave);
+      return;
+    }
+
+    const deleteAssistantMessage = target.closest('[data-assistant-message-delete]');
+    if (deleteAssistantMessage && !activeAssistantBusy) {
+      rollbackAssistantConversationFrom(deleteAssistantMessage.dataset.assistantMessageDelete);
+      return;
+    }
+
+    const prepareProposalButton = target.closest('[data-db-proposal-prepare-message]');
+    if (prepareProposalButton) {
+      updateDatabaseProposal(prepareProposalButton.dataset.dbProposalPrepareMessage, (proposal, operationsApi) => (
+        operationsApi.prepareProposal(proposal, buildSanctumContextCatalog() || {})
+      ));
+      return;
+    }
 
     const assistantAction = target.closest('[data-assistant-action-message][data-assistant-action-id]');
     if (assistantAction) {
@@ -2448,21 +4480,27 @@
     }
 
     if (target.closest('#pageQuickNoteBtn')) {
-      openQuickNote(typeof window.getCurrentPageId === 'function' ? window.getCurrentPageId() : '');
+      openQuickNote(getAssistantCurrentPageId(''));
       return;
     }
 
     if (target.closest('#pageOpenNotesBtn')) {
+      const currentPageId = getAssistantCurrentPageId('');
+      if (currentPageId && !['home', 'search', 'inbox', 'notes', 'settings'].includes(currentPageId)) {
+        setActiveNotesContextId(currentPageId, { preserveActiveNote: true });
+      }
       openPageSafe('notes');
       return;
     }
 
     if (target.closest('#pageNotesToggle')) {
+      const toggle = document.getElementById('pageNotesToggle');
       const tray = document.getElementById('pageNotesTray');
       const chevron = document.getElementById('pageNotesChevron');
       if (tray) {
         const open = tray.classList.toggle('open');
         if (chevron) chevron.textContent = open ? '\u25BE' : '\u25B8';
+        toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
       }
       return;
     }
@@ -2507,6 +4545,22 @@
         }
       }
       resolveInboxItem(item.id, answer);
+      renderEverything();
+      return;
+    }
+
+    const inboxChoice = target.closest('[data-inbox-choice]');
+    if (inboxChoice) {
+      const item = inboxItems.find((entry) => entry.id === inboxChoice.dataset.inboxChoice);
+      const choiceLabel = inboxChoice.dataset.choiceLabel || '';
+      if (!item) return;
+      const lower = choiceLabel.toLowerCase();
+      if ((lower.includes('link') || lower.includes('accept')) && item.suggestedPageId) {
+        linkNoteToPage(item.noteId, item.suggestedPageId, choiceLabel);
+      } else if (lower.includes('loose') || lower.includes('keep')) {
+        if (item.noteId) keepNoteLoose(item.noteId);
+      }
+      resolveInboxItem(item.id, choiceLabel);
       renderEverything();
       return;
     }
@@ -2565,6 +4619,18 @@
   }
 
   function handleDocumentInput(event) {
+    const proposalAnswer = event.target.closest?.('[data-db-proposal-answer-message][data-db-proposal-question-id]');
+    if (proposalAnswer) {
+      const messageId = proposalAnswer.dataset.dbProposalAnswerMessage;
+      updateProposalAnswerWithoutRerender(
+        messageId,
+        proposalAnswer.dataset.dbProposalQuestionId,
+        proposalAnswer.value
+      );
+      syncProposalAnswerAction(messageId);
+      return;
+    }
+
     if (event.target.id === 'noteEditor' || event.target.id === 'noteTitleInput') {
       scheduleNoteSave();
       if (event.target.id === 'noteEditor') {
@@ -2583,6 +4649,20 @@
     if (event.target.id === 'notesGlobalSearchInput') {
       notesGlobalSearch = event.target.value || '';
       renderNotesSurface();
+    }
+  }
+
+  function handleAssistantMessageEditKeydown(event) {
+    const input = event.target.closest?.('[data-assistant-message-edit-input]');
+    if (!input) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelAssistantMessageEdit();
+      return;
+    }
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      saveAssistantMessageEdit(input.dataset.assistantMessageEditInput);
     }
   }
 
@@ -2619,12 +4699,18 @@
       setAssistantOpen(!activeAssistantOpen);
     });
     document.getElementById('assistantDrawerClose')?.addEventListener('click', () => setAssistantOpen(false));
+    document.getElementById('assistantProfileOpen')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setAssistantOpen(false);
+      openAssistantProfile('identity');
+    });
 
     const send = async () => {
       const input = document.getElementById('assistantComposerInput');
       const query = (input?.value || '').trim();
       if (!query || activeAssistantBusy) return;
-      flushPendingNoteSave();
+      if (noteSaveTimer) flushPendingNoteSave();
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setAssistantOpen(true);
       await handleAssistantQuery(query);
@@ -2672,6 +4758,8 @@
 
     document.addEventListener('click', handleDocumentClick);
     document.addEventListener('input', handleDocumentInput);
+    document.addEventListener('change', handleDatabaseProposalChange);
+    document.addEventListener('keydown', handleAssistantMessageEditKeydown);
 
     const previousOnPageOpen = typeof window.onSanctumPageOpen === 'function' ? window.onSanctumPageOpen : null;
     window.onSanctumPageOpen = (pageId) => {
@@ -2682,6 +4770,7 @@
     window.getSanctumAssistantContext = () => getAssistantContext('');
     window.getSanctumAssistantProfile = () => ({ ...activeUser, memoryFacts: (helperMemory.facts || []).map((item) => item.text) });
 
+    renderInboxBadge();
     renderEverything();
   }
 

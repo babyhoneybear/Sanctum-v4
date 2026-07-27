@@ -3,14 +3,16 @@
   const DEFAULT_GRID_HEIGHT = 3200;
   const GRID_PADDING = 720;
   const DEFAULT_TOP_OFFSET = 720;
-  const MIN_SCALE = 0.45;
-  const MAX_SCALE = 1.85;
-  const SCALE_STEP = 0.12;
+  const MIN_SCALE = 0.35;
+  const MAX_SCALE = 2.5;
+  const ZOOM_FACTOR = 1.14;   // ~14% per button click
+  const WHEEL_FACTOR = 1.09;  // ~9% per scroll tick
   const SAVE_DELAY = 160;
 
   let panState = null;
   let saveTimer = null;
   let spacePanEnabled = false;
+  let infiniteForcedEditing = false;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -134,6 +136,7 @@
 
     pageCanvas.classList.add("is-infinite-canvas");
     boardSurface.classList.add("is-infinite-canvas");
+    document.body.classList.add("infinite-canvas-page");
 
     pageCanvas.style.setProperty("--infinite-canvas-scale", String(scale));
     pageCanvas.style.setProperty("--infinite-grid-width", `${Math.round(logicalWidth)}px`);
@@ -153,6 +156,11 @@
     pageCanvas.classList.remove("is-infinite-canvas");
     boardSurface.classList.remove("is-infinite-canvas");
     viewport.classList.remove("is-panning", "is-pan-mode");
+    document.body.classList.remove("infinite-canvas-page", "infinite-canvas-pan-ready");
+    if (infiniteForcedEditing) {
+      document.body.classList.remove("editing");
+      infiniteForcedEditing = false;
+    }
 
     pageCanvas.style.removeProperty("--infinite-canvas-scale");
     pageCanvas.style.removeProperty("--infinite-grid-width");
@@ -344,12 +352,18 @@
   function syncInfiniteCanvasPage(pageId = getCurrentPageIdSafe()) {
     const { toolbar } = getElements();
     const infinite = isInfiniteCanvasPage(pageId);
+    document.body.classList.toggle("infinite-canvas-page", infinite);
 
     if (toolbar) toolbar.hidden = !infinite;
 
     if (!infinite) {
       clearCanvasVariables();
       return;
+    }
+
+    if (!document.body.classList.contains("editing")) {
+      document.body.classList.add("editing");
+      infiniteForcedEditing = true;
     }
 
     requestAnimationFrame(() => {
@@ -391,11 +405,11 @@
 
     const action = actionButton.dataset.infiniteCanvasAction || "";
     if (action === "zoom-in") {
-      zoomTo(pageId, metrics.scale + SCALE_STEP);
+      zoomTo(pageId, metrics.scale * ZOOM_FACTOR);
       return;
     }
     if (action === "zoom-out") {
-      zoomTo(pageId, metrics.scale - SCALE_STEP);
+      zoomTo(pageId, metrics.scale / ZOOM_FACTOR);
       return;
     }
     if (action === "fit") {
@@ -422,8 +436,8 @@
     event.preventDefault();
     const metrics = getMetrics(pageId);
     if (!metrics?.isInfinite) return;
-    const delta = event.deltaY < 0 ? SCALE_STEP : -SCALE_STEP;
-    zoomTo(pageId, metrics.scale + delta, event);
+    const zoomIn = event.deltaY < 0;
+    zoomTo(pageId, zoomIn ? metrics.scale * WHEEL_FACTOR : metrics.scale / WHEEL_FACTOR, event);
   }, { passive: false });
 
   viewportEl?.addEventListener("scroll", () => {

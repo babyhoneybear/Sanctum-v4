@@ -1,11 +1,12 @@
 {
-  "name": "sanctum-v3",
+  "name": "sanctum-v4",
   "version": "0.1.0",
   "private": true,
   "description": "Sanctum local server for Anthropic-powered assistant chat",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

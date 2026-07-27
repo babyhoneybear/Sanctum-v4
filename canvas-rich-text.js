@@ -285,12 +285,12 @@
 
   function getCanvasSlashCommandGroups(commands = []) {
     const groups = [
-      { label: "Study Tools", icon: "S", labels: ["Flashcard Deck", "Typing Drill", "Fill Blank", "Match Pairs"] },
+      { label: "Study Tools", icon: "S", labels: ["Flashcard Deck", "Typing Drill", "Fill Blank", "Match Pairs", "Study Progress", "Daily Streak", "Recent Answers"] },
       { label: "Text", icon: "T", labels: ["Heading 1", "Heading 2", "Heading 3", "Bullet List", "Numbered List", "Toggle List", "Text Box"] },
       { label: "Pages", icon: "P", labels: ["New Page", "Link Page", "Link Page Gallery", "Link Domain", "Link Domain Gallery"] },
       { label: "Databases", icon: "D", labels: ["Inline Database", "Database Page", "Table"] },
       { label: "Media", icon: "M", labels: ["Image", "Web Link"] },
-      { label: "Layout", icon: "L", labels: ["Frame", "Divider", "Vertical Divider", "Up-Down Divider", "Dashed Divider"] },
+      { label: "Layout", icon: "L", labels: ["Frame", "Button", "Divider", "Vertical Divider", "Up-Down Divider", "Dashed Divider"] },
       { label: "Widgets", icon: "W", labels: ["Clock Widget"] }
     ];
 
@@ -449,6 +449,15 @@
       run: (_editable, block) => window.convertCanvasBlockType?.(block, "container")
     },
     {
+      label: "Button",
+      icon: "BTN",
+      keywords: ["button", "action", "click", "cta"],
+      when: (context) => isPlainCanvasTextBlockContext(context) || isFrameCanvasTextContext(context),
+      run: (editable, block) => isFrameCanvasTextContext({ editable, block })
+        ? insertFrameSlashItem(editable, block, "button")
+        : window.convertCanvasBlockType?.(block, "button", { openButtonPicker: true })
+    },
+    {
       label: "Table",
       icon: "TB",
       keywords: ["grid", "columns", "rows"],
@@ -484,6 +493,27 @@
       keywords: ["study", "match", "pairs", "matching", "connect", "quiz"],
       when: isPlainCanvasTextBlockContext,
       run: (_editable, block) => window.convertCanvasBlockType?.(block, "match-pairs", { openMatchPairsPicker: true })
+    },
+    {
+      label: "Study Progress",
+      icon: "SP",
+      keywords: ["study", "session", "progress", "ring", "score", "correct"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "session-progress")
+    },
+    {
+      label: "Daily Streak",
+      icon: "ST",
+      keywords: ["study", "streak", "daily", "duolingo", "freeze", "habit"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "daily-streak")
+    },
+    {
+      label: "Recent Answers",
+      icon: "RA",
+      keywords: ["study", "recent", "answers", "history", "review", "activity"],
+      when: isPlainCanvasTextBlockContext,
+      run: (_editable, block) => window.convertCanvasBlockType?.(block, "recent-answers")
     },
     {
       label: "Divider",

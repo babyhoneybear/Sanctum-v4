@@ -5,10 +5,7 @@
   min-height: 0;
 }
 
-.infinite-canvas-toolbar[hidden] {
-  display: none !important;
-}
-
+.infinite-canvas-toolbar[hidden],
 .page-board-surface:not(.is-infinite-canvas) .infinite-canvas-toolbar {
   display: none !important;
 }
@@ -35,87 +32,37 @@
   min-width: 0;
 }
 
+body.infinite-canvas-page #editToggle {
+  display: none !important;
+}
+
 .page-board-surface.is-infinite-canvas {
+  --infinite-dot-color: color-mix(in srgb, var(--text-main) 18%, transparent);
+  --infinite-tool-bg: color-mix(in srgb, var(--topbar) 96%, transparent);
+  --infinite-tool-border: var(--surface-border);
+  --infinite-card-bg: var(--surface-bg-raised);
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   min-height: calc(100vh - 62px);
-}
-
-.infinite-canvas-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #2a2a2a;
-  border-radius: 2px;
-  background: rgba(20, 20, 20, 0.94);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
-  position: sticky;
-  top: 56px;
-  z-index: 24;
-  backdrop-filter: blur(10px);
-}
-
-.infinite-canvas-toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.infinite-canvas-toolbar-spacer {
-  flex: 1;
-}
-
-.infinite-canvas-toolbar-btn {
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid #2f2f2f;
-  border-radius: 2px;
-  background: #181818;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1;
-}
-
-.infinite-canvas-toolbar-btn:hover {
-  background: #202020;
-  color: var(--text-main);
-  border-color: #404040;
-}
-
-.infinite-canvas-toolbar-zoom {
-  min-width: 52px;
-  text-align: center;
-  color: var(--text-main);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-
-.infinite-canvas-toolbar-hint {
-  color: var(--muted3);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.infinite-canvas-viewport {
-  position: relative;
+  background: var(--mainpage-bg);
+  isolation: isolate;
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: calc(100vh - 62px);
+  max-height: none;
   overflow: auto;
-  min-height: min(74vh, calc(100vh - 210px));
-  max-height: calc(100vh - 164px);
-  border: 1px solid #272727;
-  border-radius: 2px;
+  border: 0;
+  border-radius: 0;
   background:
-    radial-gradient(circle at top left, rgba(255,255,255,0.045), transparent 28%),
-    linear-gradient(180deg, #141414 0%, #101010 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+    linear-gradient(180deg, color-mix(in srgb, var(--mainpage-bg) 96%, var(--surface-bg-raised)) 0%, var(--mainpage-bg) 100%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-main) 4%, transparent);
   overscroll-behavior: contain;
-  scrollbar-color: #3a3a3a #121212;
+  scrollbar-color: color-mix(in srgb, var(--surface-border-strong) 82%, transparent) transparent;
   scrollbar-width: thin;
 }
 
@@ -125,12 +72,16 @@
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-track {
-  background: #121212;
+  background: transparent;
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: color-mix(in srgb, var(--surface-border-strong) 82%, transparent);
   border-radius: 999px;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-main) 24%, var(--surface-border-strong));
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport.is-pan-mode {
@@ -148,54 +99,478 @@
 }
 
 .page-board-surface.is-infinite-canvas .grid {
+  position: relative;
   width: var(--infinite-grid-width, 4800px);
   min-width: var(--infinite-grid-width, 4800px);
   min-height: var(--infinite-grid-height, 3200px);
   padding-bottom: 0;
-  transform-origin: 0 0;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
   transform: scale(var(--infinite-canvas-scale, 1));
+  transform-origin: 0 0;
 }
 
 .page-board-surface.is-infinite-canvas .grid::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: var(--infinite-grid-width, 4800px);
+  height: var(--infinite-grid-height, 3200px);
   pointer-events: none;
-  background-image:
-    radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 24%);
-  background-size: 24px 24px, 100% 100%;
-  opacity: 0.35;
-}
-
-body.editing .page-board-surface.is-infinite-canvas .grid {
-  background-image:
-    linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.14) 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--infinite-dot-color) 1.5px, transparent 1.5px);
+  background-position: 12px 12px;
   background-size: 24px 24px;
-  background-position: -1px -1px;
+  opacity: clamp(0, calc((var(--infinite-canvas-scale, 1) - 0.58) * 13), 0.65);
+  transition: opacity 200ms ease;
 }
 
-body.editing .page-board-surface.is-infinite-canvas .grid::before {
-  opacity: 0.16;
+.page-canvas.is-infinite-canvas {
+  padding: 0;
+  overflow: visible;
+}
+
+.page-canvas.is-infinite-canvas #pageHero,
+.page-canvas.is-infinite-canvas #pageContent {
+  display: none !important;
+}
+
+.page-canvas.is-infinite-canvas .block {
+  z-index: 3;
+  border: 1px solid color-mix(in srgb, var(--surface-border-strong) 60%, transparent);
+  border-radius: 2px;
+  background: var(--infinite-card-bg);
+  color: var(--text-main);
+  box-shadow:
+    0 1px 3px color-mix(in srgb, var(--shadow-strong) 55%, transparent),
+    0 6px 18px color-mix(in srgb, var(--shadow-strong) 42%, transparent);
+}
+
+.page-canvas.is-infinite-canvas .block:hover {
+  border-color: var(--surface-border-strong);
+  box-shadow:
+    0 2px 6px color-mix(in srgb, var(--shadow-strong) 65%, transparent),
+    0 10px 28px color-mix(in srgb, var(--shadow-strong) 55%, transparent);
+}
+
+.page-canvas.is-infinite-canvas .block.selected {
+  outline: 2px solid color-mix(in srgb, var(--text-main) 42%, transparent);
+  outline-offset: 2px;
+  box-shadow:
+    0 2px 8px color-mix(in srgb, var(--shadow-strong) 68%, transparent),
+    0 12px 32px color-mix(in srgb, var(--shadow-strong) 58%, transparent);
+}
+
+.page-canvas.is-infinite-canvas .block[data-type="text"],
+.page-canvas.is-infinite-canvas .block[data-type="list"] {
+  min-height: 76px;
+  padding: 12px 14px;
+}
+
+.page-canvas.is-infinite-canvas .block[data-type="page"],
+.page-canvas.is-infinite-canvas .block[data-type="domain"] {
+  min-height: 78px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.page-canvas.is-infinite-canvas .block-page-card {
+  height: 100%;
+  padding: 0;
+  gap: 0;
+  align-items: stretch;
+  background: transparent;
+}
+
+.page-canvas.is-infinite-canvas .page-card-media {
+  width: 54px;
+  min-width: 54px;
+  height: auto;
+  margin: 8px;
+  border: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-bg-raised));
+}
+
+.page-canvas.is-infinite-canvas .page-card-info {
+  justify-content: center;
+  min-width: 0;
+  padding: 10px 12px 10px 2px;
+}
+
+.page-canvas.is-infinite-canvas .page-card-title {
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.page-canvas.is-infinite-canvas .page-card-summary,
+.page-canvas.is-infinite-canvas .page-card-type-label,
+.page-canvas.is-infinite-canvas .block-body {
+  color: var(--muted2);
+}
+
+.page-canvas.is-infinite-canvas .block.ghost {
+  border: 1px dashed color-mix(in srgb, var(--text-main) 24%, transparent);
+  background: color-mix(in srgb, var(--surface-bg-raised) 52%, transparent);
+  box-shadow: none;
+}
+
+body.infinite-canvas-page .edit-dock {
+  top: 58px;
+  right: 14px;
+  bottom: 80px;
+  left: auto;
+  width: 50px;
+  max-width: 50px;
+  max-height: none;
+  padding: 4px 4px;
+  border: 1px solid var(--infinite-tool-border);
+  border-radius: 2px;
+  background: var(--infinite-tool-bg);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow-strong) 80%, transparent);
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  z-index: 78;
+}
+
+body.infinite-canvas-page .dock-tools-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  scrollbar-width: none;
+}
+
+body.infinite-canvas-page .dock-tools-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+body.infinite-canvas-page .edit-dock .dock-mode {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+body.infinite-canvas-page .edit-dock .dock-mode-create {
+  display: flex;
+}
+
+body.infinite-canvas-page.block-selected .edit-dock .dock-mode-create,
+body.infinite-canvas-page.block-selected.dock-study-open .edit-dock .dock-mode-create {
+  display: none;
+}
+
+body.infinite-canvas-page.dock-study-open .edit-dock .dock-mode-study,
+body.infinite-canvas-page.block-selected.block-type-text .edit-dock .dock-mode-text,
+body.infinite-canvas-page.block-selected.block-type-list .edit-dock .dock-mode-list,
+body.infinite-canvas-page.block-selected.block-type-image .edit-dock .dock-mode-image,
+body.infinite-canvas-page.block-selected.block-type-container .edit-dock .dock-mode-container,
+body.infinite-canvas-page.block-selected.block-type-table .edit-dock .dock-mode-table,
+body.infinite-canvas-page.block-selected.block-type-button .edit-dock .dock-mode-button {
+  display: flex;
+}
+
+body.infinite-canvas-page .edit-dock .dock-btn {
+  width: 38px;
+  min-width: 38px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 2px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+body.infinite-canvas-page .edit-dock .dock-btn:hover,
+body.infinite-canvas-page .edit-dock .dock-btn.active {
+  background: var(--icon-hover);
+  color: var(--text-main);
+  box-shadow: none;
+}
+
+body.infinite-canvas-page .edit-dock .dock-btn[data-label]::after {
+  display: none;
+}
+
+body.infinite-canvas-page .edit-dock .dock-divider {
+  width: 28px;
+  min-width: 28px;
+  height: 1px;
+  min-height: 1px;
+  margin: 2px auto;
+  background: var(--surface-border);
+}
+
+body:not(.infinite-canvas-page) #toolLine {
+  display: none !important;
+}
+
+body.infinite-canvas-page #toolLine {
+  display: flex;
+}
+
+body.infinite-canvas-page #toolDivider {
+  display: none !important;
+}
+
+.dock-zoom-section {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+body.infinite-canvas-page .dock-zoom-section {
+  display: flex;
+  flex-shrink: 0;
+}
+
+body.infinite-canvas-page .dock-zoom-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+body.infinite-canvas-page .dock-zoom-label:hover {
+  color: var(--text-main);
+}
+
+body.infinite-canvas-page #editToggle {
+  display: none !important;
+}
+
+/* zoom controls live in the dock on canvas pages — hide the standalone toolbar */
+body.infinite-canvas-page .infinite-canvas-toolbar {
+  display: none !important;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar {
+  position: fixed;
+  right: 14px;
+  bottom: 82px;
+  left: auto;
+  top: auto;
+  z-index: 76;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: auto;
+  max-width: none;
+  padding: 3px;
+  border: 1px solid var(--surface-border);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--menu-bg) 97%, transparent);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow-strong) 80%, transparent);
+  transform: none;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-group,
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-spacer,
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-hint {
+  display: none;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--surface-border);
+  flex-shrink: 0;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 100ms, color 100ms;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-btn:hover {
+  background: var(--subtle-fill-hover);
+  color: var(--text-main);
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+  transition: background 100ms, color 100ms;
+}
+
+.page-board-surface.is-infinite-canvas .infinite-canvas-toolbar-zoom:hover {
+  background: var(--subtle-fill-hover);
+  color: var(--text-main);
+}
+
+/* ── Canvas Lines Layer ────────────────────────────────── */
+
+.canvas-lines-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.canvas-lines-layer marker path {
+  fill: var(--text-main);
+}
+
+.canvas-line {
+  pointer-events: visiblePainted;
+}
+
+.canvas-line-glow,
+.canvas-line-path {
+  pointer-events: none;
+}
+
+.canvas-line-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.canvas-line-path {
+  transition: stroke-opacity 80ms;
+}
+
+.canvas-line.selected .canvas-line-path {
+  stroke-opacity: 1;
+}
+
+.canvas-line-handle {
+  fill: var(--surface-bg-raised);
+  stroke: color-mix(in srgb, var(--text-main) 55%, transparent);
+  stroke-width: 1.5px;
+  pointer-events: all;
+  cursor: move;
+  transition: stroke 80ms, fill 80ms;
+}
+
+.canvas-line-handle:hover {
+  fill: var(--topbar);
+  stroke: var(--text-main);
+}
+
+.canvas-line-handle-curve {
+  fill: color-mix(in srgb, var(--text-main) 12%, transparent);
+  stroke: color-mix(in srgb, var(--text-main) 35%, transparent);
+  cursor: crosshair;
+}
+
+.canvas-line-handle-curve:hover {
+  fill: color-mix(in srgb, var(--text-main) 22%, transparent);
+  stroke: color-mix(in srgb, var(--text-main) 60%, transparent);
+}
+
+/* Crosshair cursor during line drawing */
+body.canvas-line-mode .infinite-canvas-viewport {
+  cursor: crosshair !important;
+}
+
+/* Active state for line tool button */
+body.canvas-line-mode #toolLine {
+  background: var(--icon-hover);
+  color: var(--text-main);
+}
+
+.canvas-line-toolbar {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--surface-border);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--menu-bg) 98%, transparent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--shadow-strong) 76%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.canvas-line-toolbar[hidden] {
+  display: none !important;
+}
+
+.canvas-line-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-line-toolbar button:hover,
+.canvas-line-toolbar button.active {
+  background: var(--icon-hover);
+  color: var(--text-main);
 }
 
 @media (max-width: 860px) {
-  .infinite-canvas-toolbar {
-    flex-wrap: wrap;
-    top: 52px;
+  body.infinite-canvas-page .edit-dock {
+    top: 58px;
+    right: 10px;
+    bottom: 80px;
+    left: auto;
+    width: 50px;
+    max-width: 50px;
   }
 
-  .infinite-canvas-toolbar-spacer {
-    display: none;
-  }
-
-  .infinite-canvas-toolbar-hint {
-    width: 100%;
-  }
-
-  .page-board-surface.is-infinite-canvas .infinite-canvas-viewport {
-    min-height: calc(100vh - 226px);
-    max-height: calc(100vh - 184px);
+  .page-board-surface.is-infinite-canvas .infinite-canvas-toolbar {
+    right: 10px;
+    bottom: 82px;
   }
 }
