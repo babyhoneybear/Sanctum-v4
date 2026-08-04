@@ -303,7 +303,7 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
     const typeEl    = card.querySelector(".page-card-type-label");
 
     if (titleEl) titleEl.textContent = page.title;
-    if (iconEl) setIconElementContent(iconEl, page.icon, "📄");
+    if (iconEl) setIconElementContent(iconEl, page.icon, "📄", { scale: page.iconScale });
     if (summaryEl) summaryEl.textContent = page.summary || "";
     if (typeEl) typeEl.textContent = page.type || "";
 
@@ -902,7 +902,7 @@ function renderPageHero(pageId) {
 
   // icon
   heroIcon.style.display = settings.showIcon ? "" : "none";
-  setIconElementContent(heroIcon, page.icon, "📄");
+  setIconElementContent(heroIcon, page.icon, "📄", { scale: page.iconScale });
   heroIcon.title = "Click to change icon, image, or GIF";
 
   // title
@@ -927,10 +927,18 @@ function renderPageHero(pageId) {
 
 let iconPickerPageId = null;
 
-function refreshPageIconPickerPreview(value = "", fallback = "📄") {
+function getPageIconPickerScale() {
+  return normalizeIconImageScale((Number(document.getElementById("pageIconScale")?.value) || 100) / 100, 1);
+}
+
+function refreshPageIconPickerPreview(value = "", fallback = "📄", scale = getPageIconPickerScale()) {
   const preview = document.getElementById("pageIconPreview");
   if (!preview) return;
-  setIconElementContent(preview, value, fallback);
+  setIconElementContent(preview, value, fallback, { scale });
+  const scaleControl = document.getElementById("pageIconScaleControl");
+  if (scaleControl) scaleControl.hidden = !isImageIconValue(value);
+  const scaleValue = document.getElementById("pageIconScaleValue");
+  if (scaleValue) scaleValue.textContent = `${Math.round(scale * 100)}%`;
 }
 
 function closePageIconPicker() {
@@ -957,7 +965,7 @@ function savePageIconPickerSelection() {
     ? ""
     : (typedValue || input.dataset.currentIcon || "");
 
-  const saved = applyPageIconEverywhere(iconPickerPageId, nextIcon);
+  const saved = applyPageIconEverywhere(iconPickerPageId, nextIcon, getPageIconPickerScale());
   if (saved === false) {
     alert("That icon file is too large to store here. Try a smaller image or shorter GIF.");
     return;
@@ -977,13 +985,16 @@ function openPageIconPicker(pageId) {
   iconPickerPageId = pageId;
   const fallback = page.type === "domain" ? "⌂" : "📄";
   const currentIcon = typeof page.icon === "string" ? page.icon : "";
+  const currentScale = normalizeIconImageScale(page.iconScale, 1);
+  const scaleInput = document.getElementById("pageIconScale");
 
   input.dataset.currentIcon = currentIcon;
   input.dataset.clear = "false";
   input.dataset.fallback = fallback;
   input.value = currentIcon.startsWith("data:image/") ? "" : currentIcon;
+  if (scaleInput) scaleInput.value = String(Math.round(currentScale * 100));
 
-  refreshPageIconPickerPreview(currentIcon, fallback);
+  refreshPageIconPickerPreview(currentIcon, fallback, currentScale);
 
   if (typeof openOverlay === "function") {
     openOverlay("pageIconOverlay", overlay);
@@ -1000,6 +1011,13 @@ function openPageIconPicker(pageId) {
 document.getElementById("pageIconInput")?.addEventListener("input", (e) => {
   const input = e.currentTarget;
   input.dataset.clear = "false";
+  const previewValue = input.value.trim() || input.dataset.currentIcon || "";
+  refreshPageIconPickerPreview(previewValue, input.dataset.fallback || "📄");
+});
+
+document.getElementById("pageIconScale")?.addEventListener("input", () => {
+  const input = document.getElementById("pageIconInput");
+  if (!input) return;
   const previewValue = input.value.trim() || input.dataset.currentIcon || "";
   refreshPageIconPickerPreview(previewValue, input.dataset.fallback || "📄");
 });
@@ -1288,7 +1306,7 @@ function pinPage(pageId) {
   // don't duplicate
   if (pinnedPages.find(p => p.id === pageId)) return;
 
-  pinnedPages.push({ id: pageId, title: page.title, type: page.type || "canvas", icon: page.icon || "" });
+  pinnedPages.push({ id: pageId, title: page.title, type: page.type || "canvas", icon: page.icon || "", iconScale: normalizeIconImageScale(page.iconScale, 1) });
   activePinIndex = pinnedPages.length - 1;
   savePins();
   renderSidebarPins();
@@ -1314,6 +1332,7 @@ function renderPinList() {
   }
 
   pinnedPages.forEach((pin, i) => {
+    const sourcePage = userPages.find((page) => page.id === pin.id) || userDomains.find((domain) => domain.id === pin.id);
     const item = document.createElement("div");
     item.className = "pin-list-item" + (i === activePinIndex ? " active" : "");
     item.innerHTML = `
@@ -1370,7 +1389,7 @@ function renderPinListView() {
     const item = document.createElement("div");
     item.className = "pin-list-big-item";
     item.innerHTML = `
-      ${getIconMarkup(pin.icon, "📄", "pin-list-big-icon")}
+      ${getIconMarkup(sourcePage?.icon || pin.icon, "📄", "pin-list-big-icon", { scale: sourcePage?.iconScale || pin.iconScale })}
       <div class="pin-list-big-info">
         <div class="pin-list-big-title">${escapeHTML(pin.title)}</div>
         <div class="pin-list-big-type">${escapeHTML(pin.type)}</div>
@@ -1410,7 +1429,7 @@ function renderPinPageView() {
   if (titleEl) {
     titleEl.innerHTML = `
       <button class="pin-back-btn" id="pinBackBtn">‹ Pins</button>
-      <span class="pin-page-topbar-title">${getIconMarkup(icon, "📄", "pin-page-title-icon")}<span>${escapeHTML(pin.title)}</span></span>
+      <span class="pin-page-topbar-title">${getIconMarkup(icon, "📄", "pin-page-title-icon", { scale: page?.iconScale || pin.iconScale })}<span>${escapeHTML(pin.title)}</span></span>
     `;
     document.getElementById("pinBackBtn").addEventListener("click", () => {
       pinViewMode = "list";
@@ -1896,7 +1915,7 @@ function showInlineLinkPopup(query, range, editable) {
     const item = document.createElement("div");
     item.className = `inline-link-item${i === 0 ? " active" : ""}`;
     item.innerHTML = `
-      ${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "inline-link-icon")}
+      ${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "inline-link-icon", { scale: page.iconScale })}
       <span class="inline-link-text">
         <span class="inline-link-title">${escapeHTML(page.title)}</span>
         <span class="inline-link-meta">${escapeHTML(getVaultCandidateMetaV2(page, currentScopeId))}</span>
@@ -2464,7 +2483,7 @@ function openPeek(pageId) {
     <div class="peek-scroll">
       ${rowCoverHTML}
       <div class="peek-header">
-        ${getIconMarkup(displayIcon, page.type === "domain" ? "⌂" : "📄", "peek-icon")}
+        ${getIconMarkup(displayIcon, page.type === "domain" ? "⌂" : "📄", "peek-icon", { scale: page.iconScale })}
         <div>
           <div class="peek-title">${escapeHTML(displayTitle)}</div>
           <div class="peek-type">${escapeHTML(displayType)}</div>
@@ -2691,6 +2710,213 @@ function openRenameModal(targetId, currentTitle) {
   setTimeout(() => { inputEl.focus(); inputEl.select(); }, 30);
 }
 
+// == Whole-page clipboard ==
+const PAGE_CONTENT_CLIPBOARD_KEY = "sanctum_page_content_clipboard_v1";
+const PAGE_CONTENT_STORAGE_KEYS = [
+  "pageBlocks",
+  "pageSettings",
+  "pageActivity",
+  "documents",
+  "docSettings",
+  "journals",
+  "pageDatabases",
+  "stickers",
+  "threads",
+  "anchors",
+  "annotations",
+  "canvasLines",
+  "pageProps"
+];
+let pageContentClipboard = null;
+
+function clonePageClipboardValue(value) {
+  if (value === undefined) return undefined;
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {}
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getPageContentStorageKey(keyName) {
+  return STORAGE_KEYS[keyName] || {
+    threads: "sanctum_threads",
+    anchors: "sanctum_anchors",
+    annotations: "sanctum_annotations"
+  }[keyName] || "";
+}
+
+function saveLivePageBeforeCopy(pageId) {
+  if (pageId !== currentPageId) return;
+  if (typeof saveCurrentDocSection === "function") saveCurrentDocSection();
+  if (typeof saveCurrentPageBlocks === "function") saveCurrentPageBlocks();
+  window.persistInfiniteCanvasView?.(pageId, { immediate: true });
+}
+
+function createPageContentSnapshot(pageId) {
+  const page = userPages.find((entry) => entry.id === pageId)
+    || userDomains.find((entry) => entry.id === pageId);
+  if (!page) return null;
+
+  saveLivePageBeforeCopy(pageId);
+
+  const scopedData = {};
+  PAGE_CONTENT_STORAGE_KEYS.forEach((keyName) => {
+    const storageKey = getPageContentStorageKey(keyName);
+    if (!storageKey) return;
+    const allValues = readStorageJSON(storageKey, {});
+    if (Object.prototype.hasOwnProperty.call(allValues, pageId)) {
+      scopedData[keyName] = clonePageClipboardValue(allValues[pageId]);
+    }
+  });
+
+  return {
+    version: 1,
+    copiedAt: new Date().toISOString(),
+    sourcePageId: pageId,
+    sourceTitle: page.title || "Untitled",
+    sourceKind: userDomains.some((entry) => entry.id === pageId) ? "domain" : "page",
+    pageAppearance: {
+      layout: page.layout || "board-canvas",
+      category: page.category || "none",
+      openBehavior: page.openBehavior || "",
+      icon: page.icon || "",
+      iconScale: page.iconScale,
+      summary: page.summary || "",
+      tags: clonePageClipboardValue(page.tags || [])
+    },
+    scopedData
+  };
+}
+
+function storePageContentClipboard(snapshot) {
+  pageContentClipboard = clonePageClipboardValue(snapshot);
+  try {
+    sessionStorage.setItem(PAGE_CONTENT_CLIPBOARD_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Large image-heavy pages can exceed sessionStorage; the in-memory copy still works.
+  }
+}
+
+function readPageContentClipboard() {
+  if (pageContentClipboard) return clonePageClipboardValue(pageContentClipboard);
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(PAGE_CONTENT_CLIPBOARD_KEY) || "null");
+    if (stored?.version === 1 && stored?.scopedData) {
+      pageContentClipboard = stored;
+      return clonePageClipboardValue(stored);
+    }
+  } catch {}
+  return null;
+}
+
+function makePageClipboardId(prefix = "item") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function remapPageClipboardContent(snapshot, destinationPageId) {
+  const scopedData = clonePageClipboardValue(snapshot.scopedData || {});
+  const sourcePageId = snapshot.sourcePageId || "";
+  const idMap = new Map();
+
+  if (Array.isArray(scopedData.pageBlocks)) {
+    scopedData.pageBlocks.forEach((block) => {
+      if (!block || typeof block !== "object") return;
+      const oldId = String(block.id || "");
+      const newId = makePageClipboardId("block");
+      if (oldId) idMap.set(oldId, newId);
+      block.id = newId;
+    });
+  }
+
+  const remapReferences = (value) => {
+    if (typeof value === "string") {
+      if (sourcePageId && value === sourcePageId) return destinationPageId;
+      return idMap.get(value) || value;
+    }
+    if (Array.isArray(value)) return value.map(remapReferences);
+    if (!value || typeof value !== "object") return value;
+    Object.keys(value).forEach((key) => {
+      value[key] = remapReferences(value[key]);
+    });
+    return value;
+  };
+
+  remapReferences(scopedData);
+
+  if (Array.isArray(scopedData.canvasLines)) {
+    scopedData.canvasLines.forEach((line) => {
+      if (line && typeof line === "object") line.id = makePageClipboardId("line");
+    });
+  }
+
+  return scopedData;
+}
+
+function destinationHasPageContent(pageId) {
+  const meaningfulKeys = ["pageBlocks", "documents", "journals", "pageDatabases", "stickers", "canvasLines"];
+  return meaningfulKeys.some((keyName) => {
+    const storageKey = getPageContentStorageKey(keyName);
+    const value = readStorageJSON(storageKey, {})?.[pageId];
+    if (Array.isArray(value)) return value.length > 0;
+    return !!(value && typeof value === "object" && Object.keys(value).length > 0);
+  });
+}
+
+function applyPageContentSnapshot(snapshot, destinationPageId, options = {}) {
+  const destinationPage = userPages.find((entry) => entry.id === destinationPageId);
+  const destinationDomain = userDomains.find((entry) => entry.id === destinationPageId);
+  const destination = destinationPage || destinationDomain;
+  if (!destination || !snapshot?.scopedData) return false;
+
+  saveLivePageBeforeCopy(destinationPageId);
+
+  const destinationIsDomain = !!destinationDomain;
+  if (!options.skipConfirmation && (destinationIsDomain || destinationHasPageContent(destinationPageId))) {
+    const message = destinationIsDomain
+      ? `Paste the copied page "${snapshot.sourceTitle || "Untitled"}" into the domain "${destination.title}"?\n\nThis replaces only the domain's visible page content and appearance. The domain itself, its name, and every page already inside it will stay where they are.`
+      : `Replace the content and layout on "${destination.title}" with the copied page "${snapshot.sourceTitle || "Untitled"}"?\n\nThe destination page's name and location will stay the same.`;
+    const accepted = window.confirm(message);
+    if (!accepted) return false;
+  }
+
+  const scopedData = remapPageClipboardContent(snapshot, destinationPageId);
+  PAGE_CONTENT_STORAGE_KEYS.forEach((keyName) => {
+    const storageKey = getPageContentStorageKey(keyName);
+    if (!storageKey) return;
+    const allValues = readStorageJSON(storageKey, {});
+    if (Object.prototype.hasOwnProperty.call(scopedData, keyName)) {
+      allValues[destinationPageId] = clonePageClipboardValue(scopedData[keyName]);
+    } else {
+      delete allValues[destinationPageId];
+    }
+    writeStorageJSON(storageKey, allValues);
+    if (keyName === "pageDatabases") {
+      writeStorageJSON(STORAGE_KEYS.legacyCalendarDatabases, allValues);
+    }
+  });
+
+  const appearance = snapshot.pageAppearance || {};
+  if (!destinationIsDomain) {
+    destination.layout = appearance.layout || destination.layout || "board-canvas";
+    destination.category = appearance.category || "none";
+    destination.openBehavior = appearance.openBehavior || getDefaultOpenBehavior(destination.category, destination.containerType || "page");
+  }
+  destination.icon = appearance.icon || "";
+  if (appearance.iconScale === undefined) delete destination.iconScale;
+  else destination.iconScale = appearance.iconScale;
+  destination.summary = appearance.summary || "";
+  destination.tags = clonePageClipboardValue(appearance.tags || []);
+  saveSanctumRegistry();
+
+  if (destinationPageId === currentPageId) {
+    hasOpenedPage = false;
+  }
+  openPage(destinationPageId, { skipTabHistory: true });
+  return true;
+}
+
 // == More button dropdown ==
 function openCurrentPageMoreMenu(anchorEl, options = {}) {
   if (!anchorEl) return;
@@ -2734,20 +2960,50 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
       action: () => {
         const orig = userPages.find(p => p.id === currentPageId);
         if (!orig) return;
+        const snapshot = createPageContentSnapshot(orig.id);
         const copy = {
           ...orig,
-          id: `page-${Date.now()}`,
+          id: makePageClipboardId("page"),
           title: `${orig.title} (copy)`,
         };
         userPages.push(copy);
         saveSanctumRegistry();
+        if (snapshot) {
+          applyPageContentSnapshot(snapshot, copy.id, { skipConfirmation: true });
+        } else {
+          openPage(copy.id);
+        }
+      }
+    });
 
-        // copy blocks
-        const all = readAllPageBlocks();
-        all[copy.id] = JSON.parse(JSON.stringify(all[orig.id] || []));
-        writeAllPageBlocks(all);
+    if (isPage || isDomain) items.push({
+      label: "Copy whole page",
+      action: () => {
+        const snapshot = createPageContentSnapshot(currentPageId);
+        if (!snapshot) return;
+        storePageContentClipboard(snapshot);
+        showAppToast(`Copied the whole page "${snapshot.sourceTitle}".`, "success");
+      }
+    });
 
-        openPage(copy.id);
+    if (isPage || isDomain) items.push({
+      label: "Paste whole page",
+      action: () => {
+        const snapshot = readPageContentClipboard();
+        if (!snapshot) {
+          showAppToast("Copy a page first, then paste it here.", "info");
+          return;
+        }
+        if (snapshot.sourcePageId === currentPageId) {
+          showAppToast("That page is already the copied page.", "info");
+          return;
+        }
+        if (applyPageContentSnapshot(snapshot, currentPageId)) {
+          showAppToast(
+            `Pasted "${snapshot.sourceTitle}" here. This page kept its own name and location.`,
+            "success"
+          );
+        }
       }
     });
 
@@ -2930,6 +3186,7 @@ const editToggle = document.getElementById("editToggle");
 editToggle.addEventListener("click", () => {
   const pageObj = userPages.find(p => p.id === currentPageId);
   const isDocPage = pageObj?.layout === "document";
+  const isJournalPage = pageObj?.layout === "journal";
   // Chronicle removed — no layout-specific toolbar overrides needed
 
   if (isDocPage) {
@@ -2937,6 +3194,11 @@ editToggle.addEventListener("click", () => {
       setDocUIState({ mode: "annotate" });
     }
     openDocAnnotateDock();
+    return;
+  }
+
+  if (isJournalPage && typeof window.toggleJournalEditorMode === "function") {
+    window.toggleJournalEditorMode();
     return;
   }
 

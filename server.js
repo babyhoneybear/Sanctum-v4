@@ -9,9 +9,18 @@ const app = express();
 const PORT = Number(process.env.PORT || 3005);
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 const ROUTER_MODEL = process.env.ANTHROPIC_ROUTER_MODEL || MODEL;
+const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || MODEL;
 const ASSISTANT_MAX_TOKENS = Math.max(
   2400,
   Math.min(16000, Number(process.env.ANTHROPIC_ASSISTANT_MAX_TOKENS) || 12000)
+);
+const ASSISTANT_ASSIST_TOKENS = Math.max(
+  2400,
+  Math.min(8000, Number(process.env.ANTHROPIC_ASSIST_TOKENS) || 6000)
+);
+const ASSISTANT_FAST_TOKENS = Math.max(
+  600,
+  Math.min(2400, Number(process.env.ANTHROPIC_FAST_TOKENS) || 1400)
 );
 const HOST = process.env.HOST || '127.0.0.1';
 const anthropic = process.env.ANTHROPIC_API_KEY
@@ -497,6 +506,73 @@ ${ASSISTANT_PERSONA_PROMPTS[personalityId]}
 `;
 }
 
+function normalizeAssistantMode(value = '') {
+  return ['fast', 'assist', 'build'].includes(value) ? value : 'assist';
+}
+
+function buildFastPrompt(body = {}) {
+  const user = body.user || {};
+  const context = body.context || {};
+  const currentPage = context.currentPage || {};
+  const retrievedRecords = Array.isArray(context.retrievedRecords) ? context.retrievedRecords.slice(0, 32) : [];
+  const conversationHistory = Array.isArray(context.conversationHistory) ? context.conversationHistory.slice(-6) : [];
+  const helperMemory = Array.isArray(context.helperMemory) ? context.helperMemory.slice(0, 12) : [];
+
+  return `
+You are the user's personal assistant inside Sanctum.
+${buildAssistantPersona(user)}
+
+Fast mode:
+- Answer directly and concisely from the supplied context. Say when the answer is not present.
+- This mode is read-only. Do not draft changes, claim to edit Sanctum, or return a change proposal.
+- You may suggest an open-note or open-page action only when its exact ID appears in context.
+- Keep ordinary replies under four compact sentences unless a short list is genuinely clearer.
+- Memory writes are allowed only for stable user preferences or habits, never app facts, secrets, medical details, schedules, or one-off plans.
+
+Return strict JSON only:
+{
+  "reply": "string",
+  "memoryWrites": ["string"],
+  "suggestedActions": [{"type":"open-note|open-page","label":"string","noteId":"string","pageId":"string","detail":"string"}],
+  "inboxQuestions": [],
+  "renameSuggestions": [],
+  "changeProposal": null
+}
+
+Current page:
+${JSON.stringify({
+  id: safeText(currentPage.pageId || '', 160),
+  title: safeText(currentPage.title || 'Home', 240),
+  layout: safeText(currentPage.layout || '', 80),
+  breadcrumbTitles: Array.isArray(currentPage.breadcrumbTitles) ? currentPage.breadcrumbTitles.slice(0, 12) : [],
+  descriptor: safeText(currentPage.descriptor || '', 1200),
+}, null, 2)}
+
+Relevant Sanctum records:
+${JSON.stringify(retrievedRecords.map((record) => ({
+  ref: safeText(record?.ref || '', 240),
+  kind: safeText(record?.kind || '', 80),
+  id: safeText(record?.id || '', 180),
+  title: safeText(record?.title || '', 240),
+  breadcrumb: Array.isArray(record?.breadcrumb) ? record.breadcrumb.slice(0, 12) : [],
+  text: safeText(record?.text || '', 1200),
+  properties: Array.isArray(record?.properties) ? record.properties.slice(0, 16) : [],
+})), null, 2)}
+
+Recent conversation:
+${JSON.stringify(conversationHistory.map((message) => ({
+  role: message?.role,
+  text: safeText(message?.text || '', 4000),
+})), null, 2)}
+
+Relevant helper memory:
+${JSON.stringify(helperMemory, null, 2)}
+
+User message:
+${safeText(body.message || '', 12000)}
+`;
+}
+
 function buildPrompt(body = {}) {
   const user = body.user || {};
   const context = body.context || {};
@@ -892,7 +968,7 @@ ${safeText(body.message || '', 60000)}
 
 
 app.get('/api/assistant/health', (_req, res) => {
-  res.json({ ok: true, provider: 'anthropic', configured: !!anthropic, model: MODEL, routerModel: ROUTER_MODEL });
+  res.json({ ok: true, provider: 'anthropic', configured: !!anthropic, model: MODEL, fastModel: FAST_MODEL, routerModel: ROUTER_MODEL });
 });
 
 app.post('/api/assistant/route-context', async (req, res) => {
@@ -941,10 +1017,19 @@ app.post('/api/assistant/chat', async (req, res) => {
   }
 
   try {
-    const prompt = buildPrompt(req.body || {});
+    const assistantMode = normalizeAssistantMode(req.body?.assistantMode);
+    const prompt = assistantMode === 'fast'
+      ? buildFastPrompt(req.body || {})
+      : buildPrompt(req.body || {});
+    const model = assistantMode === 'fast' ? FAST_MODEL : MODEL;
+    const maxTokens = assistantMode === 'fast'
+      ? ASSISTANT_FAST_TOKENS
+      : assistantMode === 'build'
+        ? ASSISTANT_MAX_TOKENS
+        : ASSISTANT_ASSIST_TOKENS;
     const response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: ASSISTANT_MAX_TOKENS,
+      model,
+      max_tokens: maxTokens,
       temperature: 0.35,
       system: 'You are a careful personal assistant inside the Sanctum platform. Return valid JSON only.',
       messages: [{ role: 'user', content: prompt }],
@@ -1121,6 +1206,108 @@ Do not use JavaScript, code fences, property access, or functions outside the su
   } catch (error) {
     console.error('Anthropic formula error:', error);
     return res.status(500).json({ error: 'AI had trouble drafting that formula just now.' });
+  }
+});
+
+app.post('/api/assistant/button', async (req, res) => {
+  if (!anthropic) {
+    return res.status(503).json({ error: 'AI is not configured yet. Add your key in the local setup first.' });
+  }
+
+  const request = safeText(req.body?.request || '', 1600).trim();
+  const databases = Array.isArray(req.body?.databases)
+    ? req.body.databases.slice(0, 40).map((database) => ({
+        value: safeText(database?.value || '', 240),
+        label: safeText(database?.label || 'Database', 120),
+        fields: Array.isArray(database?.fields)
+          ? database.fields.slice(0, 80).map((field) => ({
+              id: safeText(field?.id || '', 160),
+              name: safeText(field?.name || 'Field', 100),
+              type: safeText(field?.type || 'text', 40),
+              options: Array.isArray(field?.options)
+                ? field.options.slice(0, 50).map(option => safeText(option || '', 120)).filter(Boolean)
+                : [],
+            })).filter(field => field.id)
+          : [],
+      })).filter(database => database.value)
+    : [];
+  const pages = Array.isArray(req.body?.pages)
+    ? req.body.pages.slice(0, 100).map((page) => ({
+        id: safeText(page?.id || '', 160),
+        title: safeText(page?.title || 'Untitled', 160),
+      })).filter(page => page.id)
+    : [];
+  const currentConfig = {
+    label: safeText(req.body?.currentConfig?.label || '', 120),
+    icon: safeText(req.body?.currentConfig?.icon || '', 10),
+    inputPrompt: safeText(req.body?.currentConfig?.inputPrompt || '', 300),
+    confirmMessage: safeText(req.body?.currentConfig?.confirmMessage || '', 300),
+  };
+  if (!request) return res.status(400).json({ error: 'Describe the button you want first.' });
+
+  const prompt = `
+Draft a Sanctum button configuration for this request:
+${request}
+
+Existing basic button settings: ${JSON.stringify(currentConfig)}
+Available databases and their exact source/field IDs: ${JSON.stringify(databases)}
+Available pages and exact IDs: ${JSON.stringify(pages)}
+
+Supported action types:
+1. create-row: databaseSource, rowTitle, presetValues, openAfter.
+2. update-today-row: databaseSource, datePropertyId, presetValues, fieldModes, createIfMissing.
+   This finds the existing row whose selected date field is today. Use it whenever the user wants to log, add, record, or update something today without duplicate daily rows.
+   fieldModes maps field IDs to "set" or "append". Append is supported only for text, notes, and tag fields. Prefer append for accumulating symptoms, activities, notes, or multiple tags.
+3. create-page: title, parentPageId, layout (board-canvas, document, or sheet), openAfter.
+4. create-note: title, body, askTitle, askBody, sourceType (normal or quick), openAfter.
+5. open-page: targetPageId.
+
+Rules:
+- Use only exact databaseSource, field IDs, and page IDs supplied above. Never invent IDs.
+- presetValues is an object keyed by exact field ID. Values are strings.
+- Use "{input}" in a value when the button should ask the user what to log. Set inputPrompt to that question.
+- Do not put the date field in presetValues for update-today-row; the action finds or creates today's row automatically.
+- For status, select, and tag fields, prefer exact existing option names when the request names one. "{input}" is allowed.
+- A draft never executes. Give the user a concise explanation of what the button will do.
+
+Return JSON only:
+{
+  "label": "short button label",
+  "icon": "one short symbol or emoji",
+  "inputPrompt": "",
+  "confirmMessage": "",
+  "actions": [],
+  "afterAction": "nothing",
+  "afterPageId": "",
+  "explanation": "one short plain-English sentence"
+}
+`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1400,
+      temperature: 0.1,
+      system: 'Return valid JSON only. Draft safe Sanctum button configurations using only the supplied IDs and supported actions.',
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const parsed = extractJSONObject(extractTextFromAnthropicContent(response.content));
+    if (!parsed || !Array.isArray(parsed.actions)) {
+      return res.status(500).json({ error: 'AI did not return a usable button draft.' });
+    }
+    return res.json({
+      label: safeText(parsed.label || '', 120),
+      icon: safeText(parsed.icon || '', 10),
+      inputPrompt: safeText(parsed.inputPrompt || '', 300),
+      confirmMessage: safeText(parsed.confirmMessage || '', 300),
+      actions: parsed.actions.slice(0, 8),
+      afterAction: safeText(parsed.afterAction || 'nothing', 30),
+      afterPageId: safeText(parsed.afterPageId || '', 160),
+      explanation: safeText(parsed.explanation || 'Review the actions before saving.', 400),
+    });
+  } catch (error) {
+    console.error('Anthropic button draft error:', error);
+    return res.status(500).json({ error: 'AI had trouble drafting that button just now.' });
   }
 });
 

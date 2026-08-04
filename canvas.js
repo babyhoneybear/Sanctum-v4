@@ -1309,8 +1309,24 @@ document.addEventListener("mouseup", (e) => {
 const addBlockBtn = document.getElementById("addBlockBtn");
 const addUndoBtn = document.getElementById("addUndoBtn");
 const addRedoBtn = document.getElementById("addRedoBtn");
-if (addUndoBtn) addUndoBtn.addEventListener("click", (e) => { e.preventDefault(); undo(); });
-if (addRedoBtn) addRedoBtn.addEventListener("click", (e) => { e.preventDefault(); redo(); });
+
+function getActiveJournalSurface() {
+  const surface = window.SanctumJournalSurface;
+  return surface?.isActive?.() ? surface : null;
+}
+
+if (addUndoBtn) addUndoBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  const journal = getActiveJournalSurface();
+  if (journal) journal.undo();
+  else undo();
+});
+if (addRedoBtn) addRedoBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  const journal = getActiveJournalSurface();
+  if (journal) journal.redo();
+  else redo();
+});
 
 const gridEl = document.getElementById("grid");
 const toolText = document.getElementById("toolText");
@@ -1320,6 +1336,7 @@ const toolPage = document.getElementById("toolPage");
 const toolDomain = document.getElementById("toolDomain");
 const toolDivider = document.getElementById("toolDivider");
 const toolDataCallout = document.getElementById("toolDataCallout");
+const toolLiveDatabaseCard = document.getElementById("toolLiveDatabaseCard");
 const toolProgress = document.getElementById("toolProgress");
 const toolClock = document.getElementById("toolClock");
 const toolStudy = document.getElementById("toolStudy");
@@ -1334,6 +1351,11 @@ const toolRecentAnswers = document.getElementById("toolRecentAnswers");
 
 
 function startPlacingPreset(preset) {
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.startPlacement(preset);
+    return;
+  }
   if (!document.body.classList.contains("editing")) {
     if (!window.isInfiniteCanvasPage?.()) return;
     document.body.classList.add("editing");
@@ -1349,6 +1371,7 @@ toolImage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPre
 toolPage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("page"); });
 toolDomain.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("domain"); });
 toolDataCallout?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("data-callout"); });
+toolLiveDatabaseCard?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("live-database-card"); });
 toolProgress?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("progress"); });
 toolClock?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("clock"); });
 toolStudy?.addEventListener("click", (e) => {
@@ -1412,6 +1435,10 @@ function getDefaultBlockDimensions(type = "text") {
 
   if (type === "data-callout") {
     return { width: snap(GRID_SIZE * 11), height: snap(GRID_SIZE * 3) };
+  }
+
+  if (type === "live-database-card") {
+    return { width: snap(GRID_SIZE * 15), height: snap(GRID_SIZE * 7) };
   }
 
   if (type === "progress") {
@@ -1818,10 +1845,11 @@ function setPageCardImageSource(block, src = "", options = {}) {
   const fallbackIcon = block.querySelector(".page-card-media-icon");
   const fallbackGlyph = options.fallbackGlyph || (block.dataset.type === "domain" ? "⌂" : "📄");
   const iconValue = options.iconValue || block.dataset.pageCardIcon || fallbackGlyph;
+  const iconScale = normalizeIconImageScale(options.iconScale ?? block.dataset.pageCardIconScale, 1);
   const nextSrc = typeof src === "string" ? src.trim() : "";
 
   if (fallbackIcon) {
-    setIconElementContent(fallbackIcon, iconValue, fallbackGlyph);
+    setIconElementContent(fallbackIcon, iconValue, fallbackGlyph, { scale: iconScale });
   }
 
   if (!media || !image) {
@@ -1869,6 +1897,7 @@ function applyPageCardImage(block, options = {}) {
 
   const fallbackGlyph = options.fallbackGlyph || (block.dataset.type === "domain" ? "⌂" : "📄");
   const iconValue = options.iconValue || block.dataset.pageCardIcon || fallbackGlyph;
+  const iconScale = normalizeIconImageScale(options.iconScale ?? block.dataset.pageCardIconScale, 1);
   const requestedMode = options.mode;
   const nextMode = requestedMode === "custom" || requestedMode === "linked" || requestedMode === "none"
     ? requestedMode
@@ -1882,7 +1911,8 @@ function applyPageCardImage(block, options = {}) {
 
   setPageCardImageSource(block, nextMode === "none" ? "" : nextSrc, {
     iconValue,
-    fallbackGlyph
+    fallbackGlyph,
+    iconScale
   });
 
   setPageCardImagePosition(block, Object.prototype.hasOwnProperty.call(options, "pos")
@@ -2560,6 +2590,7 @@ function buildFrameItemElement(data = {}) {
     if (data.linkedPageId) item.dataset.linkedPageId = data.linkedPageId;
     if (data.cardStyle) item.dataset.cardStyle = data.cardStyle;
     if (data.pageCardIcon) item.dataset.pageCardIcon = data.pageCardIcon;
+    item.dataset.pageCardIconScale = String(normalizeIconImageScale(data.pageCardIconScale, 1));
     if (getPageCardView(data) === "gallery") item.dataset.pageCardView = "gallery";
     item.dataset.pageCardImageMode = getPageCardImageMode(data);
     if (data.pageCardImageSrc) item.dataset.pageCardImageSrc = data.pageCardImageSrc;
@@ -2575,7 +2606,7 @@ function buildFrameItemElement(data = {}) {
       syncLinkedPageBlockFromRecord(item, linkedRecord);
     } else {
       if (titleEl) titleEl.textContent = data.pageCardTitle || (type === "domain" ? "Domain" : "Page");
-      if (iconEl) setIconElementContent(iconEl, data.pageCardIcon || (type === "domain" ? "⌂" : "📄"), type === "domain" ? "⌂" : "📄");
+      if (iconEl) setIconElementContent(iconEl, data.pageCardIcon || (type === "domain" ? "⌂" : "📄"), type === "domain" ? "⌂" : "📄", { scale: data.pageCardIconScale });
       if (summaryEl) summaryEl.textContent = data.pageCardSummary || "";
       if (typeLabelEl) typeLabelEl.textContent = data.pageCardTypeLabel || (type === "domain" ? "domain" : "page");
       applyPageCardImage(item, {
@@ -2583,6 +2614,7 @@ function buildFrameItemElement(data = {}) {
         src: getStoredPageCardImageSource(data),
         pos: getPageCardImagePosition(data),
         iconValue: data.pageCardIcon || (type === "domain" ? "⌂" : "📄"),
+        iconScale: data.pageCardIconScale,
         fallbackGlyph: type === "domain" ? "⌂" : "📄"
       });
     }
@@ -2661,6 +2693,7 @@ function serializeFrameItemElement(item) {
     payload.linkedPageId = item.dataset.linkedPageId || "";
     payload.pageCardTitle = item.querySelector(".page-card-title")?.textContent || "";
     payload.pageCardIcon = item.dataset.pageCardIcon || item.querySelector(".page-card-icon")?.textContent || "";
+    payload.pageCardIconScale = normalizeIconImageScale(item.dataset.pageCardIconScale, 1);
     payload.pageCardSummary = item.querySelector(".page-card-summary")?.textContent || "";
     payload.pageCardTypeLabel = item.querySelector(".page-card-type-label")?.textContent || "";
     payload.pageCardImageSrc = item.dataset.pageCardImageSrc || "";
@@ -2895,6 +2928,7 @@ function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
     pageCardTitle: itemData.pageCardTitle || "",
     pageCardMeta: "",
     pageCardIcon: itemData.pageCardIcon || "",
+    pageCardIconScale: normalizeIconImageScale(itemData.pageCardIconScale, 1),
     pageCardSummary: itemData.pageCardSummary || "",
     pageCardTypeLabel: itemData.pageCardTypeLabel || "",
     pageCardImageSrc: itemData.pageCardImageSrc || "",
@@ -3035,6 +3069,7 @@ function buildFrameItemDataFromBlock(block) {
     linkedPageId: serialized.linkedPageId || "",
     pageCardTitle: serialized.pageCardTitle || "",
     pageCardIcon: serialized.pageCardIcon || "",
+    pageCardIconScale: normalizeIconImageScale(serialized.pageCardIconScale, 1),
     pageCardSummary: serialized.pageCardSummary || "",
     pageCardTypeLabel: serialized.pageCardTypeLabel || "",
     pageCardImageSrc: serialized.pageCardImageSrc || "",
@@ -3178,8 +3213,10 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.dataCalloutSourcePageId;
   delete block.dataset.dataCalloutSourceBlockId;
   delete block.dataset.dataCalloutPropertyId;
+  delete block.dataset.dataCalloutSecondaryPropertyId;
   delete block.dataset.dataCalloutMode;
   delete block.dataset.dataCalloutRowId;
+  delete block.dataset.dataCalloutDatePropertyId;
   delete block.dataset.dataCalloutAlign;
   delete block.dataset.dataCalloutSize;
   delete block.dataset.dataCalloutLabelPos;
@@ -4434,7 +4471,14 @@ function getLivePageActivityWeekMs(pageId = "", referenceDate = new Date()) {
 
 function normalizeDataCalloutMode(value = "") {
   const safe = String(value || "").trim().toLowerCase();
-  return ["row", "count", "sum"].includes(safe) ? safe : "row";
+  return [
+    "row",
+    "today",
+    "latest",
+    "count",
+    "sum",
+    "most-common-month"
+  ].includes(safe) ? safe : "row";
 }
 
 function normalizeDataCalloutAlign(value = "") {
@@ -5117,8 +5161,10 @@ function normalizeDataCalloutConfig(raw = {}) {
     sourcePageId: String(raw?.sourcePageId || "").trim(),
     sourceBlockId: String(raw?.sourceBlockId || "").trim(),
     propertyId: String(raw?.propertyId || "").trim(),
+    secondaryPropertyId: String(raw?.secondaryPropertyId || "").trim(),
     mode: normalizeDataCalloutMode(raw?.mode || "row"),
     rowId: String(raw?.rowId || "").trim(),
+    datePropertyId: String(raw?.datePropertyId || "").trim(),
     systemKey,
     systemTargetKind: normalizeDataCalloutSystemTargetKind(raw?.systemTargetKind || "current"),
     systemTargetPageId: String(raw?.systemTargetPageId || "").trim(),
@@ -5143,8 +5189,10 @@ function readDataCalloutConfig(block) {
     sourcePageId: block.dataset.dataCalloutSourcePageId || "",
     sourceBlockId: block.dataset.dataCalloutSourceBlockId || "",
     propertyId: block.dataset.dataCalloutPropertyId || "",
+    secondaryPropertyId: block.dataset.dataCalloutSecondaryPropertyId || "",
     mode: block.dataset.dataCalloutMode || "row",
     rowId: block.dataset.dataCalloutRowId || "",
+    datePropertyId: block.dataset.dataCalloutDatePropertyId || "",
     systemKey: block.dataset.dataCalloutSystemKey || "current-date",
     systemTargetKind: block.dataset.dataCalloutSystemTargetKind || "current",
     systemTargetPageId: block.dataset.dataCalloutSystemTargetPageId || "",
@@ -5169,8 +5217,12 @@ function writeDataCalloutConfig(block, config) {
   block.dataset.dataCalloutSourcePageId = normalized.sourcePageId;
   block.dataset.dataCalloutSourceBlockId = normalized.sourceBlockId;
   block.dataset.dataCalloutPropertyId = normalized.propertyId;
+  block.dataset.dataCalloutSecondaryPropertyId = normalized.secondaryPropertyId;
   block.dataset.dataCalloutMode = normalized.mode;
   block.dataset.dataCalloutRowId = normalized.rowId;
+  block.dataset.dataCalloutDatePropertyId = normalized.datePropertyId;
+  delete block.dataset.dataCalloutEventPropertyId;
+  delete block.dataset.dataCalloutEventValue;
   block.dataset.dataCalloutSystemKey = normalized.systemKey;
   block.dataset.dataCalloutSystemTargetKind = normalized.systemTargetKind;
   block.dataset.dataCalloutSystemTargetPageId = normalized.systemTargetPageId;
@@ -5211,11 +5263,36 @@ function ensureDataCalloutStructure(block) {
     shellEl.insertBefore(contentEl, configBtn || null);
   }
 
+  if (type === "live-database-card") {
+    return `
+      <section class="live-database-card-shell">
+        <div class="live-database-card-head">
+          <span class="live-database-card-title">Live database card</span>
+          <div class="live-database-card-actions">
+            <button type="button" data-live-db-action="connect">Connect database</button>
+            <button type="button" data-live-db-action="add-line">+ Add line</button>
+          </div>
+        </div>
+        <div class="live-database-card-lines"><div class="live-database-card-empty">Connect a database, then add the pieces you want to see here.</div></div>
+      </section>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  let secondaryValueEl = contentEl.querySelector(".data-callout-secondary-value");
+  if (!secondaryValueEl) {
+    secondaryValueEl = document.createElement("span");
+    secondaryValueEl.className = "data-callout-secondary-value";
+    const labelEl = contentEl.querySelector(".data-callout-label");
+    contentEl.insertBefore(secondaryValueEl, labelEl || null);
+  }
+
   return {
     shellEl,
     iconEl,
     contentEl,
     valueEl: contentEl.querySelector(".data-callout-value"),
+    secondaryValueEl,
     labelEl: contentEl.querySelector(".data-callout-label")
   };
 }
@@ -5258,6 +5335,30 @@ function formatDataCalloutFieldValue(property, rawValue = "") {
   }
 
   return safeValue;
+}
+
+function getDataCalloutDayKey(date = new Date()) {
+  const safeDate = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(safeDate.getTime())) return "";
+  return `${safeDate.getFullYear()}-${String(safeDate.getMonth() + 1).padStart(2, "0")}-${String(safeDate.getDate()).padStart(2, "0")}`;
+}
+
+function getDataCalloutDateStart(value = "") {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return getDataCalloutDateStart(value.start || value.date || "");
+  }
+
+  const safeValue = String(value || "").trim();
+  if (!safeValue) return "";
+  if (safeValue.startsWith("{")) {
+    try {
+      return getDataCalloutDateStart(JSON.parse(safeValue));
+    } catch (error) {
+      return "";
+    }
+  }
+
+  return safeValue.match(/\d{4}-\d{2}-\d{2}/)?.[0] || "";
 }
 
 function getDataCalloutSourcePayload(config) {
@@ -5513,6 +5614,31 @@ function computeSystemDataCalloutValue(config) {
   };
 }
 
+function getDataCalloutTagColor(property, label = "") {
+  const options = Array.isArray(property?.tagOptions)
+    ? property.tagOptions
+    : Array.isArray(property?.selectOptions)
+      ? property.selectOptions
+      : [];
+  const match = options.find((option) => String(option?.name || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
+  const color = String(match?.color || "none").trim().toLowerCase();
+  return /^[a-z0-9-]+$/.test(color) ? color : "none";
+}
+
+function buildDataCalloutTagGridHTML(items = [], property = null, limit = 8) {
+  const visibleItems = items.slice(0, Math.max(1, limit));
+  if (!visibleItems.length) return "";
+  return `
+    <span class="data-callout-tag-grid">
+      ${visibleItems.map((item) => {
+        const label = String(item?.label || "").trim();
+        const color = getDataCalloutTagColor(property, label);
+        return `<span class="page-db-cell-pill data-callout-tag-pill status-${escapeDataCalloutHTML(color)}">${escapeDataCalloutHTML(label)}</span>`;
+      }).join("")}
+    </span>
+  `;
+}
+
 function computeDataCalloutValue(sourcePayload, config) {
   const database = sourcePayload?.database;
   if (!database) {
@@ -5527,19 +5653,19 @@ function computeDataCalloutValue(sourcePayload, config) {
   const rows = Array.isArray(database.rows) ? database.rows : [];
   const property = properties.find((entry) => entry.id === config.propertyId) || null;
 
-  if (!property) {
-    return {
-      valueText: "—",
-      subline: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
-      configured: false
-    };
-  }
-
   if (config.mode === "count") {
     return {
       valueText: formatDataCalloutNumber(rows.length),
       subline: `Count of rows in ${database.title}`,
       configured: true
+    };
+  }
+
+  if (!property) {
+    return {
+      valueText: "—",
+      subline: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+      configured: false
     };
   }
 
@@ -5555,6 +5681,118 @@ function computeDataCalloutValue(sourcePayload, config) {
     };
   }
 
+  if (config.mode === "most-common-month") {
+    const dateProperty = properties.find((entry) => (
+      entry.id === config.datePropertyId && entry.type === "date"
+    )) || null;
+    if (!dateProperty) {
+      return {
+        valueText: "â€”",
+        subline: "Choose the date field used to find this month.",
+        configured: false
+      };
+    }
+
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const counts = new Map();
+    rows.forEach((row) => {
+      if (row?.archived) return;
+      const dateValue = getDataCalloutDateStart(row?.values?.[dateProperty.id] || "");
+      if (!dateValue.startsWith(monthKey)) return;
+      const rawValue = String(row?.values?.[property.id] || "").trim();
+      if (!rawValue) return;
+      const values = property.type === "tag"
+        ? rawValue.split(",").map((entry) => entry.trim()).filter(Boolean)
+        : [rawValue];
+      new Set(values.map((entry) => entry.toLowerCase())).forEach((normalizedValue) => {
+        const displayValue = values.find((entry) => entry.toLowerCase() === normalizedValue) || normalizedValue;
+        const current = counts.get(normalizedValue) || { label: displayValue, count: 0 };
+        current.count += 1;
+        counts.set(normalizedValue, current);
+      });
+    });
+
+    const ranked = Array.from(counts.values()).sort((left, right) => (
+      right.count - left.count || left.label.localeCompare(right.label)
+    ));
+    if (!ranked.length) {
+      return {
+        valueText: "â€”",
+        secondaryText: "No logged values this month",
+        subline: `No ${property.name} values were logged this month.`,
+        configured: true
+      };
+    }
+
+    const highestCount = ranked[0].count;
+    return {
+      valueText: "",
+      html: buildDataCalloutTagGridHTML(ranked, property, 8),
+      secondaryText: `${ranked.length} value${ranked.length === 1 ? "" : "s"} logged · top appears on ${highestCount} day${highestCount === 1 ? "" : "s"}`,
+      subline: `Most common ${property.name} this month`,
+      configured: true
+    };
+  }
+
+  if (config.mode === "today") {
+    const dateProperty = properties.find((entry) => (
+      entry.id === config.datePropertyId && entry.type === "date"
+    )) || null;
+    if (!dateProperty) {
+      return {
+        valueText: "—",
+        subline: "Choose the date field used to find today.",
+        configured: false
+      };
+    }
+
+    const todayKey = getDataCalloutDayKey();
+    const row = rows.find((entry) => (
+      getDataCalloutDateStart(entry?.values?.[dateProperty.id] || "") === todayKey
+    )) || null;
+    if (!row) {
+      return {
+        valueText: "—",
+        subline: `No row has ${dateProperty.name} set to today.`,
+        configured: false
+      };
+    }
+
+    return {
+      valueText: formatDataCalloutFieldValue(property, row?.values?.[property.id] || ""),
+      subline: `${property.name} from today's row`,
+      configured: true,
+      row
+    };
+  }
+
+  if (config.mode === "latest") {
+    const latestDatedRow = rows.reduce((latest, entry) => {
+      const entryTime = Date.parse(entry?.createdAt || "");
+      if (!Number.isFinite(entryTime)) return latest;
+      if (!latest || entryTime > latest.time) {
+        return { entry, time: entryTime };
+      }
+      return latest;
+    }, null);
+    const row = latestDatedRow?.entry || rows.at(-1) || null;
+    if (!row) {
+      return {
+        valueText: "—",
+        subline: "This database has no rows yet.",
+        configured: false
+      };
+    }
+
+    return {
+      valueText: formatDataCalloutFieldValue(property, row?.values?.[property.id] || ""),
+      subline: `${property.name} from the most recently added row`,
+      configured: true,
+      row
+    };
+  }
+
   const row = rows.find((entry) => entry.id === config.rowId) || null;
   if (!row) {
     return {
@@ -5567,23 +5805,47 @@ function computeDataCalloutValue(sourcePayload, config) {
   return {
     valueText: formatDataCalloutFieldValue(property, row?.values?.[property.id] || ""),
     subline: `${property.name} from ${row.title || "row"}`,
-    configured: true
+    configured: true,
+    row
   };
+}
+
+function computeDataCalloutSecondaryValue(sourcePayload, config, primaryResult) {
+  if (primaryResult?.secondaryText) return primaryResult.secondaryText;
+  if (!config.secondaryPropertyId || config.sourceType !== "database") return "";
+  const database = sourcePayload?.database;
+  const properties = Array.isArray(database?.properties) ? database.properties : [];
+  const rows = Array.isArray(database?.rows) ? database.rows : [];
+  const property = properties.find((entry) => entry.id === config.secondaryPropertyId) || null;
+  if (!property) return "";
+
+  if (config.mode === "sum") {
+    const total = rows.reduce((sum, row) => (
+      sum + parseDataCalloutNumericValue(row?.values?.[property.id] || "")
+    ), 0);
+    return formatDataCalloutNumber(total);
+  }
+
+  const row = primaryResult?.row || null;
+  if (!row) return "";
+  return formatDataCalloutFieldValue(property, row?.values?.[property.id] || "");
 }
 
 function renderDataCalloutBlock(block) {
   if (!block || block.dataset.type !== "data-callout") return;
 
   const refs = ensureDataCalloutStructure(block);
-  if (!refs?.labelEl || !refs?.valueEl || !refs?.shellEl || !refs?.iconEl) return;
+  if (!refs?.labelEl || !refs?.valueEl || !refs?.secondaryValueEl || !refs?.shellEl || !refs?.iconEl) return;
   const valueEl = refs.valueEl;
 
   const config = readDataCalloutConfig(block);
+  const sourcePayload = config.sourceType === "database" ? getDataCalloutSourcePayload(config) : null;
   const result = config.sourceType === "system"
     ? computeSystemDataCalloutValue(config)
-    : computeDataCalloutValue(getDataCalloutSourcePayload(config), config);
+    : computeDataCalloutValue(sourcePayload, config);
 
   refs.labelEl.textContent = config.label || getDefaultDataCalloutLabel(config);
+  valueEl.classList.toggle("has-structured-content", !!(result.configured && result.html));
   if (result.configured && result.html) {
     valueEl.innerHTML = result.html;
     valueEl.querySelectorAll("[data-callout-open-page]").forEach((button) => {
@@ -5598,6 +5860,9 @@ function renderDataCalloutBlock(block) {
     valueEl.textContent = result.configured ? result.valueText : "—";
   }
   refs.iconEl.textContent = config.icon || "✦";
+  const secondaryValue = computeDataCalloutSecondaryValue(sourcePayload, config, result);
+  refs.secondaryValueEl.textContent = secondaryValue;
+  refs.secondaryValueEl.hidden = !secondaryValue;
   refs.iconEl.hidden = !config.showIcon;
   refs.shellEl.classList.toggle("is-configured", !!result.configured);
   refs.shellEl.dataset.sourceType = config.sourceType;
@@ -5606,6 +5871,151 @@ function renderDataCalloutBlock(block) {
   refs.shellEl.dataset.labelPos = config.labelPos;
   refs.shellEl.dataset.showIcon = config.showIcon ? "true" : "false";
 }
+
+function fitStructuredDataCalloutBlock(block, mode = "") {
+  if (!block) return;
+  const minimumWidth = mode === "most-common-month" ? 430 : 0;
+  const currentWidth = parseInt(block.style.width || "0", 10) || block.getBoundingClientRect().width || 0;
+  if (minimumWidth && currentWidth < minimumWidth) {
+    block.style.width = `${minimumWidth}px`;
+  }
+  if (minimumWidth) {
+    autoGrowBlock(block, { allowShrink: false });
+    expandGrid();
+  }
+}
+
+function createLiveDatabaseCardId() {
+  return `live-line-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function readLiveDatabaseCardConfig(block) {
+  try {
+    const parsed = JSON.parse(block?.dataset?.liveDatabaseCard || "{}");
+    return {
+      title: String(parsed.title || "Live database card"),
+      sourceKind: parsed.sourceKind === "block" ? "block" : "page",
+      sourcePageId: String(parsed.sourcePageId || ""),
+      sourceBlockId: String(parsed.sourceBlockId || ""),
+      lines: Array.isArray(parsed.lines) ? parsed.lines.slice(0, 12) : []
+    };
+  } catch {
+    return { title: "Live database card", sourceKind: "page", sourcePageId: "", sourceBlockId: "", lines: [] };
+  }
+}
+
+function writeLiveDatabaseCardConfig(block, config) {
+  if (!block) return;
+  block.dataset.liveDatabaseCard = JSON.stringify({
+    title: String(config.title || "Live database card").slice(0, 120),
+    sourceKind: config.sourceKind === "block" ? "block" : "page",
+    sourcePageId: String(config.sourcePageId || ""),
+    sourceBlockId: String(config.sourceBlockId || ""),
+    lines: Array.isArray(config.lines) ? config.lines.slice(0, 12).map((line) => ({
+      id: String(line.id || createLiveDatabaseCardId()),
+      label: String(line.label || "").slice(0, 90),
+      kind: ["latest", "most-common-month", "count", "sum", "average"].includes(line.kind) ? line.kind : "latest",
+      propertyId: String(line.propertyId || ""),
+      datePropertyId: String(line.datePropertyId || "")
+    })) : []
+  });
+}
+
+function getLiveDatabaseCardPayload(config) {
+  if (!config.sourcePageId || typeof window.getDatabaseCalloutSourceData !== "function") return null;
+  return window.getDatabaseCalloutSourceData({
+    kind: config.sourceKind,
+    pageId: config.sourcePageId,
+    blockId: config.sourceKind === "block" ? config.sourceBlockId : ""
+  });
+}
+
+function getLiveDatabaseCardSources() {
+  return typeof window.getDatabaseCalloutSources === "function" ? window.getDatabaseCalloutSources() || [] : [];
+}
+
+function parseLiveDatabaseCardSource(value = "") {
+  const [kind = "page", pageId = "", blockId = ""] = String(value || "").split("|");
+  return { sourceKind: kind === "block" ? "block" : "page", sourcePageId: pageId, sourceBlockId: kind === "block" ? blockId : "" };
+}
+
+function getLiveDatabaseCardLineResult(database, line) {
+  const rows = Array.isArray(database?.rows) ? database.rows.filter((row) => !row?.archived) : [];
+  const properties = Array.isArray(database?.properties) ? database.properties : [];
+  const property = properties.find((entry) => entry.id === line.propertyId) || null;
+  const dateProperty = properties.find((entry) => entry.id === line.datePropertyId && entry.type === "date") || null;
+  if (line.kind === "count") return { value: formatDataCalloutNumber(rows.length), fallbackLabel: "Rows" };
+  if (!property) return { value: "—", fallbackLabel: "Choose a field" };
+  if (line.kind === "sum" || line.kind === "average") {
+    const values = rows.map((row) => parseDataCalloutNumericValue(row?.values?.[property.id] || "")).filter((value) => Number.isFinite(value));
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return { value: formatDataCalloutNumber(line.kind === "average" && values.length ? total / values.length : total), fallbackLabel: `${line.kind === "average" ? "Average" : "Total"} ${property.name}` };
+  }
+  if (line.kind === "most-common-month") {
+    if (!dateProperty) return { value: "—", fallbackLabel: "Choose a date field" };
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const counts = new Map();
+    rows.forEach((row) => {
+      if (!getDataCalloutDateStart(row?.values?.[dateProperty.id] || "").startsWith(monthKey)) return;
+      const values = property.type === "tag" ? parseTagValuesForLiveCard(row?.values?.[property.id] || "") : [String(row?.values?.[property.id] || "").trim()];
+      values.filter(Boolean).forEach((value) => counts.set(value.toLowerCase(), { value, count: (counts.get(value.toLowerCase())?.count || 0) + 1 }));
+    });
+    const top = Array.from(counts.values()).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)).slice(0, 4);
+    return { value: top.length ? top.map((entry) => entry.value).join(", ") : "—", fallbackLabel: `Most common ${property.name} this month` };
+  }
+  const dated = dateProperty ? rows.slice().sort((a, b) => getDataCalloutDateStart(b?.values?.[dateProperty.id] || "").localeCompare(getDataCalloutDateStart(a?.values?.[dateProperty.id] || ""))) : rows.slice().sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  return { value: dated.length ? formatDataCalloutFieldValue(property, dated[0]?.values?.[property.id] || "") || "—" : "—", fallbackLabel: `Latest ${property.name}` };
+}
+
+function parseTagValuesForLiveCard(value = "") {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function renderLiveDatabaseCardBlock(block) {
+  if (!block || block.dataset.type !== "live-database-card") return;
+  const shell = block.querySelector(".live-database-card-shell");
+  if (!shell) return;
+  const config = readLiveDatabaseCardConfig(block);
+  const payload = getLiveDatabaseCardPayload(config);
+  const database = payload?.database || null;
+  const editing = document.body.classList.contains("editing");
+  const sources = getLiveDatabaseCardSources();
+  const sourceValue = `${config.sourceKind}|${config.sourcePageId}|${config.sourceBlockId}`;
+  const properties = Array.isArray(database?.properties) ? database.properties : [];
+  const propertyOptions = `<option value="">Choose a field…</option>${properties.map((property) => `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name || "Untitled")}</option>`).join("")}`;
+  const dateOptions = `<option value="">Use recently added</option>${properties.filter((property) => property.type === "date").map((property) => `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name || "Date")}</option>`).join("")}`;
+  shell.innerHTML = `
+    <div class="live-database-card-head">
+      <span class="live-database-card-title" ${editing ? 'contenteditable="true" data-live-db-title' : ""}>${escapeDataCalloutHTML(config.title)}</span>
+      ${editing ? `<div class="live-database-card-actions"><button type="button" data-live-db-action="connect">${database ? "Change database" : "Connect database"}</button><button type="button" data-live-db-action="add-line" ${database ? "" : "disabled"}>+ Add line</button></div>` : ""}
+    </div>
+    ${editing ? `<select class="live-database-card-source" data-live-db-source><option value="">Choose a database…</option>${sources.map((source) => { const value = `${source.kind || "page"}|${source.pageId || ""}|${source.blockId || ""}`; return `<option value="${escapeDataCalloutHTML(value)}" ${value === sourceValue ? "selected" : ""}>${escapeDataCalloutHTML(source.label || source.title || "Database")}</option>`; }).join("")}</select>` : ""}
+    <div class="live-database-card-lines">${database ? (config.lines.length ? config.lines.map((line) => {
+      const result = getLiveDatabaseCardLineResult(database, line);
+      return `<div class="live-database-card-line" data-live-db-line="${escapeDataCalloutHTML(line.id)}"><span class="live-database-card-line-label">${editing ? `<input data-live-db-line-label value="${escapeDataCalloutHTML(line.label || result.fallbackLabel)}">` : escapeDataCalloutHTML(line.label || result.fallbackLabel)}</span><strong>${escapeDataCalloutHTML(result.value)}</strong>${editing ? `<div class="live-database-card-line-edit"><select data-live-db-line-kind><option value="latest" ${line.kind === "latest" ? "selected" : ""}>Latest value</option><option value="most-common-month" ${line.kind === "most-common-month" ? "selected" : ""}>Most common this month</option><option value="count" ${line.kind === "count" ? "selected" : ""}>Count rows</option><option value="sum" ${line.kind === "sum" ? "selected" : ""}>Total</option><option value="average" ${line.kind === "average" ? "selected" : ""}>Average</option></select>${line.kind !== "count" ? `<select data-live-db-line-property>${propertyOptions.replace(`value="${escapeDataCalloutHTML(line.propertyId)}"`, `value="${escapeDataCalloutHTML(line.propertyId)}" selected`)}</select>` : ""}${["latest", "most-common-month"].includes(line.kind) ? `<select data-live-db-line-date>${dateOptions.replace(`value="${escapeDataCalloutHTML(line.datePropertyId)}"`, `value="${escapeDataCalloutHTML(line.datePropertyId)}" selected`)}</select>` : ""}<button type="button" data-live-db-action="remove-line">Remove</button></div>` : ""}</div>`;
+    }).join("") : `<div class="live-database-card-empty">Add a line for the value you want to see.</div>`) : `<div class="live-database-card-empty">${editing ? `<button type="button" data-live-db-action="connect">Connect a database</button>` : "No database connected."}</div>`}</div>`;
+}
+
+function saveLiveDatabaseCardFromElement(block) {
+  if (!block) return;
+  const config = readLiveDatabaseCardConfig(block);
+  config.title = block.querySelector("[data-live-db-title]")?.textContent?.trim() || config.title;
+  block.querySelectorAll("[data-live-db-line]").forEach((lineEl) => {
+    const line = config.lines.find((item) => item.id === lineEl.dataset.liveDbLine);
+    if (!line) return;
+    line.label = lineEl.querySelector("[data-live-db-line-label]")?.value?.trim() || line.label;
+    line.kind = lineEl.querySelector("[data-live-db-line-kind]")?.value || line.kind;
+    line.propertyId = lineEl.querySelector("[data-live-db-line-property]")?.value || "";
+    line.datePropertyId = lineEl.querySelector("[data-live-db-line-date]")?.value || "";
+  });
+  writeLiveDatabaseCardConfig(block, config);
+  renderLiveDatabaseCardBlock(block);
+  if (typeof saveState === "function") saveState();
+}
+
+window.mountLiveDatabaseCardBlock = function(block) { renderLiveDatabaseCardBlock(block); };
+window.refreshLiveDatabaseCards = function() { document.querySelectorAll('.block[data-type="live-database-card"]').forEach(renderLiveDatabaseCardBlock); };
 
 function renderVisibleDataCalloutBlocks() {
   document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
@@ -5639,7 +6049,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
   picker.innerHTML = `
     <div class="topbar-dropdown-label">Info card</div>
     <label class="data-callout-picker-field">
-      <span>Label</span>
+      <span>Title</span>
       <input type="text" data-callout-input="label" />
     </label>
     <label class="data-callout-picker-field">
@@ -5659,16 +6069,27 @@ function openDataCalloutPicker(block, anchorEl = null) {
         <select data-callout-input="property"></select>
       </label>
       <label class="data-callout-picker-field">
+        <span>Smaller value underneath</span>
+        <select data-callout-input="secondaryProperty"></select>
+      </label>
+      <label class="data-callout-picker-field">
         <span>Value mode</span>
         <select data-callout-input="mode">
           <option value="row">Specific row value</option>
+          <option value="today">Row matching today</option>
+          <option value="latest">Most recently added row</option>
           <option value="count">Count rows</option>
           <option value="sum">Sum field</option>
+          <option value="most-common-month">Common values this month</option>
         </select>
       </label>
       <label class="data-callout-picker-field" data-callout-row-wrap>
         <span>Row</span>
         <select data-callout-input="row"></select>
+      </label>
+      <label class="data-callout-picker-field" data-callout-date-wrap hidden>
+        <span>Date field used to find today</span>
+        <select data-callout-input="dateProperty"></select>
       </label>
     </div>
     <div data-callout-system-wrap hidden>
@@ -5793,9 +6214,13 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const databaseWrap = picker.querySelector('[data-callout-database-wrap]');
   const sourceSelect = picker.querySelector('[data-callout-input="source"]');
   const propertySelect = picker.querySelector('[data-callout-input="property"]');
+  const secondaryPropertySelect = picker.querySelector('[data-callout-input="secondaryProperty"]');
   const modeSelect = picker.querySelector('[data-callout-input="mode"]');
   const rowWrap = picker.querySelector('[data-callout-row-wrap]');
   const rowSelect = picker.querySelector('[data-callout-input="row"]');
+  const dateWrap = picker.querySelector('[data-callout-date-wrap]');
+  const datePropertySelect = picker.querySelector('[data-callout-input="dateProperty"]');
+  const datePropertyLabel = dateWrap?.querySelector("span");
   const systemWrap = picker.querySelector('[data-callout-system-wrap]');
   const systemKeySelect = picker.querySelector('[data-callout-input="systemKey"]');
   const systemTargetWrap = picker.querySelector('[data-callout-system-target-wrap]');
@@ -5815,7 +6240,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const saveBtn = picker.querySelector('[data-callout-action="save"]');
   const clearBtn = picker.querySelector('[data-callout-action="clear"]');
 
-  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !modeSelect || !rowSelect || !rowWrap || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !projectImageWrap || !showProjectImageSelect || !projectImageLayoutWrap || !projectImageLayoutSelect || !projectImageSizeWrap || !projectImageSizeSelect || !showIconSelect || !iconInput || !saveBtn || !clearBtn) {
+  if (!labelInput || !sourceTypeSelect || !databaseWrap || !sourceSelect || !propertySelect || !secondaryPropertySelect || !modeSelect || !rowSelect || !rowWrap || !dateWrap || !datePropertySelect || !systemWrap || !systemKeySelect || !systemTargetWrap || !systemTargetSelect || !systemFormatSelect || !projectImageWrap || !showProjectImageSelect || !projectImageLayoutWrap || !projectImageLayoutSelect || !projectImageSizeWrap || !projectImageSizeSelect || !showIconSelect || !iconInput || !saveBtn || !clearBtn) {
     closeDataCalloutPicker();
     return;
   }
@@ -5862,6 +6287,14 @@ function openDataCalloutPicker(block, anchorEl = null) {
     if (selectedPropertyId) propertySelect.value = selectedPropertyId;
   };
 
+  const fillSecondaryPropertyOptions = (database, selectedPropertyId = "") => {
+    const properties = Array.isArray(database?.properties) ? database.properties : [];
+    secondaryPropertySelect.innerHTML = '<option value="">None</option>' + properties.map((property) => (
+      `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name)}</option>`
+    )).join("");
+    if (selectedPropertyId) secondaryPropertySelect.value = selectedPropertyId;
+  };
+
   const fillRowOptions = (database, selectedRowId = "") => {
     const rows = Array.isArray(database?.rows) ? database.rows : [];
     rowSelect.innerHTML = '<option value="">Choose a row...</option>' + rows.map((row) => (
@@ -5869,6 +6302,17 @@ function openDataCalloutPicker(block, anchorEl = null) {
     )).join("");
     if (selectedRowId) rowSelect.value = selectedRowId;
   };
+
+  const fillDatePropertyOptions = (database, selectedPropertyId = "") => {
+    const properties = Array.isArray(database?.properties) ? database.properties : [];
+    const dateProperties = properties.filter((property) => property.type === "date");
+    datePropertySelect.innerHTML = '<option value="">Choose a date field...</option>' + dateProperties.map((property) => (
+      `<option value="${escapeDataCalloutHTML(property.id)}">${escapeDataCalloutHTML(property.name)}</option>`
+    )).join("");
+    if (selectedPropertyId) datePropertySelect.value = selectedPropertyId;
+  };
+
+
 
   const fillSystemTargetOptions = (selectedValue = "") => {
     const options = getDataCalloutPageTargetOptions();
@@ -5932,12 +6376,27 @@ function openDataCalloutPicker(block, anchorEl = null) {
     }) : null;
 
     fillPropertyOptions(payload?.database || null, propertySelect.value || config.propertyId);
+    fillSecondaryPropertyOptions(payload?.database || null, secondaryPropertySelect.value || config.secondaryPropertyId);
     fillRowOptions(payload?.database || null, rowSelect.value || config.rowId);
+    fillDatePropertyOptions(payload?.database || null, datePropertySelect.value || config.datePropertyId);
 
     const mode = normalizeDataCalloutMode(modeSelect.value || "row");
+    const needsDateProperty = mode === "today" || mode === "most-common-month";
     rowWrap.hidden = mode !== "row";
+    dateWrap.hidden = !needsDateProperty;
+    if (datePropertyLabel) {
+      datePropertyLabel.textContent = mode === "most-common-month"
+        ? "Date field used to find this month"
+        : "Date field used to find today";
+    }
+    const propertyFieldLabel = propertySelect.closest("label")?.querySelector("span");
+    if (propertyFieldLabel) {
+      propertyFieldLabel.textContent = "Field";
+    }
     propertySelect.disabled = mode === "count";
+    secondaryPropertySelect.disabled = mode === "count" || mode === "most-common-month";
     rowSelect.disabled = mode !== "row";
+    datePropertySelect.disabled = !needsDateProperty;
   };
 
   const refreshSystemOptions = () => {
@@ -5980,11 +6439,23 @@ function openDataCalloutPicker(block, anchorEl = null) {
 
   sourceSelect.addEventListener("change", () => {
     propertySelect.value = "";
+    secondaryPropertySelect.value = "";
     rowSelect.value = "";
+    datePropertySelect.value = "";
     refreshDependentOptions();
   });
 
-  modeSelect.addEventListener("change", refreshDependentOptions);
+  modeSelect.addEventListener("change", () => {
+    const mode = normalizeDataCalloutMode(modeSelect.value || "row");
+    const currentLabel = String(labelInput.value || "").trim();
+    if (!currentLabel || currentLabel === "Value" || currentLabel === autoLabel) {
+      if (mode === "most-common-month") labelInput.value = "Common Values";
+    }
+    if (mode === "most-common-month" && labelPosSelect?.value === "below") {
+      labelPosSelect.value = "above";
+    }
+    refreshDependentOptions();
+  });
   sourceTypeSelect.addEventListener("change", () => {
     maybeSyncAutoLabel();
     syncPickerSections();
@@ -6021,8 +6492,10 @@ function openDataCalloutPicker(block, anchorEl = null) {
         sourcePageId: "",
         sourceBlockId: "",
         propertyId: "",
+        secondaryPropertyId: "",
         mode: "row",
         rowId: "",
+        datePropertyId: "",
         systemKey,
         systemTargetKind: (
           systemKey === "page-activity"
@@ -6076,6 +6549,16 @@ function openDataCalloutPicker(block, anchorEl = null) {
       return;
     }
 
+    if ((mode === "today" || mode === "most-common-month") && !datePropertySelect.value) {
+      showAppToast?.(
+        mode === "today"
+          ? "Choose the date field used to find today's row."
+          : "Choose the date field used to find this month.",
+        "info"
+      );
+      return;
+    }
+
     writeDataCalloutConfig(block, {
       label: labelInput.value || "Value",
       sourceType,
@@ -6083,8 +6566,10 @@ function openDataCalloutPicker(block, anchorEl = null) {
       sourcePageId: sourceInfo.pageId,
       sourceBlockId: sourceInfo.blockId,
       propertyId: propertySelect.value || "",
+      secondaryPropertyId: mode === "most-common-month" ? "" : (secondaryPropertySelect.value || ""),
       mode,
-      rowId: rowSelect.value || "",
+      rowId: mode === "row" ? (rowSelect.value || "") : "",
+      datePropertyId: (mode === "today" || mode === "most-common-month") ? (datePropertySelect.value || "") : "",
       systemKey: systemKeySelect.value || "current-date",
       systemTargetKind: "current",
       systemTargetPageId: "",
@@ -6100,6 +6585,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
     });
 
     renderDataCalloutBlock(block);
+    fitStructuredDataCalloutBlock(block, mode);
     if (typeof saveState === "function") saveState();
     closeDataCalloutPicker();
   });
@@ -6113,8 +6599,10 @@ function openDataCalloutPicker(block, anchorEl = null) {
       sourcePageId: "",
       sourceBlockId: "",
       propertyId: "",
+      secondaryPropertyId: "",
       mode: "row",
       rowId: "",
+      datePropertyId: "",
       systemKey: "current-date",
       systemTargetKind: "current",
       systemTargetPageId: "",
@@ -10389,7 +10877,8 @@ window.renderStudySourceBlocks = renderStudySourceBlocks;
 function renderLiveDataCalloutBlocks() {
   document.querySelectorAll('.block[data-type="data-callout"]').forEach((block) => {
     const config = readDataCalloutConfig(block);
-    if (config.sourceType !== "system") return;
+    const liveDatabaseModes = new Set(["today", "most-common-month"]);
+    if (config.sourceType !== "system" && !(config.sourceType === "database" && liveDatabaseModes.has(config.mode))) return;
     renderDataCalloutBlock(block);
   });
 }
@@ -10831,6 +11320,7 @@ function buildLinkedPageCardPayload(target, options = {}) {
     linkedPageId: target?.id || "",
     pageCardTitle: target?.title || (isDomain ? "Domain" : "Page"),
     pageCardIcon: target?.icon || (isDomain ? "⌂" : "📄"),
+    pageCardIconScale: normalizeIconImageScale(target?.iconScale, 1),
     pageCardSummary: target?.summary || "",
     pageCardTypeLabel: isDomain ? "domain" : (target?.type || "page"),
     pageCardImageSrc: requestedImageMode === "custom"
@@ -10914,6 +11404,7 @@ function applyLinkedPageTargetToBlock(block, target, options = {}) {
   block.dataset.linkedPageId = payload.linkedPageId;
   block.dataset.cardStyle = payload.cardStyle;
   block.dataset.pageCardIcon = payload.pageCardIcon;
+  block.dataset.pageCardIconScale = String(payload.pageCardIconScale);
   block.dataset.pageCardImageMode = payload.pageCardImageMode;
   block.dataset.pageCardImagePos = String(payload.pageCardImagePos);
 
@@ -10923,7 +11414,7 @@ function applyLinkedPageTargetToBlock(block, target, options = {}) {
   const cardTypeLabel = block.querySelector(".page-card-type-label");
 
   if (cardTitle) cardTitle.textContent = payload.pageCardTitle;
-  if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄");
+  if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄", { scale: payload.pageCardIconScale });
   if (cardSummary) cardSummary.textContent = payload.pageCardSummary;
   if (cardTypeLabel) cardTypeLabel.textContent = getLinkedPageCardVisibleTypeLabel(block, payload.pageCardTypeLabel);
   applyPageCardImage(block, {
@@ -10931,6 +11422,7 @@ function applyLinkedPageTargetToBlock(block, target, options = {}) {
     src: payload.pageCardImageSrc,
     pos: payload.pageCardImagePos,
     iconValue: payload.pageCardIcon,
+    iconScale: payload.pageCardIconScale,
     fallbackGlyph: nextType === "domain" ? "⌂" : "📄"
   });
 
@@ -10960,6 +11452,7 @@ function syncLinkedPageBlockFromRecord(block, linkedRecord = null) {
   block.dataset.linkedPageId = payload.linkedPageId;
   block.dataset.cardStyle = payload.cardStyle;
   block.dataset.pageCardIcon = payload.pageCardIcon;
+  block.dataset.pageCardIconScale = String(payload.pageCardIconScale);
   block.dataset.pageCardImageMode = payload.pageCardImageMode;
   block.dataset.pageCardImagePos = String(payload.pageCardImagePos);
 
@@ -10969,7 +11462,7 @@ function syncLinkedPageBlockFromRecord(block, linkedRecord = null) {
   const cardTypeLabel = block.querySelector(".page-card-type-label");
 
   if (cardTitle) cardTitle.textContent = payload.pageCardTitle;
-  if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄");
+  if (cardIcon) setIconElementContent(cardIcon, payload.pageCardIcon, nextType === "domain" ? "⌂" : "📄", { scale: payload.pageCardIconScale });
   if (cardSummary) cardSummary.textContent = payload.pageCardSummary;
   if (cardTypeLabel) cardTypeLabel.textContent = getLinkedPageCardVisibleTypeLabel(block, payload.pageCardTypeLabel);
   applyPageCardImage(block, {
@@ -10977,6 +11470,7 @@ function syncLinkedPageBlockFromRecord(block, linkedRecord = null) {
     src: payload.pageCardImageSrc,
     pos: payload.pageCardImagePos,
     iconValue: payload.pageCardIcon,
+    iconScale: payload.pageCardIconScale,
     fallbackGlyph: nextType === "domain" ? "⌂" : "📄"
   });
 
@@ -11011,6 +11505,7 @@ function serializeBlockElement(b) {
     bg: b.style.backgroundColor || "",
     borderColor: b.style.borderColor || "",
     textColor: b.style.color || "",
+    titleColor: b.dataset.titleColor || "",
     padding: b.style.padding || "",
     radius: b.style.borderRadius || "",
     imageCropShape: blockType === "image" ? normalizeImageCropShape(b.dataset.imageCropShape) : "original",
@@ -11020,6 +11515,7 @@ function serializeBlockElement(b) {
     pageCardTitle: isLinkedCardBlock ? (b.querySelector(".page-card-title")?.textContent || "") : "",
     pageCardMeta: isLinkedCardBlock ? (b.querySelector(".page-card-meta")?.textContent || "") : "",
     pageCardIcon: isLinkedCardBlock ? (b.dataset.pageCardIcon || b.querySelector(".page-card-icon")?.textContent || "") : "",
+    pageCardIconScale: isLinkedCardBlock ? normalizeIconImageScale(b.dataset.pageCardIconScale, 1) : 1,
     pageCardSummary: isLinkedCardBlock ? (b.querySelector(".page-card-summary")?.textContent || "") : "",
     pageCardTypeLabel: isLinkedCardBlock ? (b.querySelector(".page-card-type-label")?.textContent || "") : "",
     pageCardImageSrc: isLinkedCardBlock ? (b.dataset.pageCardImageSrc || "") : "",
@@ -11038,6 +11534,7 @@ function serializeBlockElement(b) {
     dbFilters: blockType === "calendar" ? (b.dataset.dbFilters || "[]") : "[]",
     dbSorts: blockType === "calendar" ? (b.dataset.dbSorts || "[]") : "[]",
     dbGroupBy: blockType === "calendar" ? (b.dataset.dbGroupBy || "") : "",
+    dbHiddenPropertyIds: blockType === "calendar" ? (b.dataset.dbHiddenPropertyIds || "[]") : "[]",
     dbFolderState: blockType === "calendar" ? (b.dataset.dbFolderState || "{}") : "{}",
     dbResetConfig: blockType === "calendar" ? (b.dataset.dbResetConfig || "{}") : "{}",
     dbChecklistAutomation: blockType === "calendar" ? (b.dataset.dbChecklistAutomation || "{}") : "{}",
@@ -11060,8 +11557,10 @@ function serializeBlockElement(b) {
     dataCalloutSourcePageId: blockType === "data-callout" ? (b.dataset.dataCalloutSourcePageId || "") : "",
     dataCalloutSourceBlockId: blockType === "data-callout" ? (b.dataset.dataCalloutSourceBlockId || "") : "",
     dataCalloutPropertyId: blockType === "data-callout" ? (b.dataset.dataCalloutPropertyId || "") : "",
+    dataCalloutSecondaryPropertyId: blockType === "data-callout" ? (b.dataset.dataCalloutSecondaryPropertyId || "") : "",
     dataCalloutMode: blockType === "data-callout" ? (b.dataset.dataCalloutMode || "") : "",
     dataCalloutRowId: blockType === "data-callout" ? (b.dataset.dataCalloutRowId || "") : "",
+    dataCalloutDatePropertyId: blockType === "data-callout" ? (b.dataset.dataCalloutDatePropertyId || "") : "",
     dataCalloutSystemKey: blockType === "data-callout" ? (b.dataset.dataCalloutSystemKey || "") : "",
     dataCalloutSystemTargetKind: blockType === "data-callout" ? (b.dataset.dataCalloutSystemTargetKind || "") : "",
     dataCalloutSystemTargetPageId: blockType === "data-callout" ? (b.dataset.dataCalloutSystemTargetPageId || "") : "",
@@ -11074,6 +11573,7 @@ function serializeBlockElement(b) {
     dataCalloutShowProjectImage: blockType === "data-callout" ? (b.dataset.dataCalloutShowProjectImage || "") : "",
     dataCalloutProjectImageLayout: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageLayout || "") : "",
     dataCalloutProjectImageSize: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageSize || "") : "",
+    liveDatabaseCard: blockType === "live-database-card" ? (b.dataset.liveDatabaseCard || "") : "",
     flashcardsConfig: blockType === "flashcards" ? (b.dataset.flashcardsConfig || "") : "",
     typingDrillConfig: blockType === "typing-drill" ? (b.dataset.typingDrillConfig || "") : "",
     fillBlankConfig: blockType === "fill-blank" ? (b.dataset.fillBlankConfig || "") : "",
@@ -11844,6 +12344,11 @@ function placePresetAtPointer(preset, clientX, clientY) {
 // Click + to enter place mode (toggle)
 addBlockBtn.addEventListener("click", (e) => {
   e.preventDefault();
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.togglePlacement();
+    return;
+  }
   if (!document.body.classList.contains("editing")) return;
 
   if (placing) stopPlacing(true);
@@ -11934,6 +12439,10 @@ gridEl.addEventListener("mousedown", (e) => {
     window.mountDataCalloutBlock?.(real, { openPicker: true });
   }
 
+  if (placePreset === "live-database-card") {
+    window.mountLiveDatabaseCardBlock?.(real);
+  }
+
   if (placePreset === "progress") {
     window.mountProgressBlock?.(real, { openPicker: true });
   }
@@ -11984,6 +12493,93 @@ document.addEventListener("keydown", (e) => {
 let selectedBlock = null;
 let topZIndex = 10;
 const editorDock = document.getElementById("editorDock");
+const CANVAS_BLOCK_CLIPBOARD_KEY = "sanctum_canvas_block_clipboard_v1";
+
+function cloneCanvasBlockClipboardValue(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function loadCanvasBlockClipboard() {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(CANVAS_BLOCK_CLIPBOARD_KEY) || "null");
+    return parsed?.data && typeof parsed.data === "object"
+      ? { data: parsed.data, pasteCount: Math.max(0, Number(parsed.pasteCount) || 0) }
+      : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+let copiedCanvasBlock = loadCanvasBlockClipboard();
+
+function persistCanvasBlockClipboard() {
+  try {
+    if (copiedCanvasBlock) {
+      sessionStorage.setItem(CANVAS_BLOCK_CLIPBOARD_KEY, JSON.stringify(copiedCanvasBlock));
+    } else {
+      sessionStorage.removeItem(CANVAS_BLOCK_CLIPBOARD_KEY);
+    }
+  } catch (_error) {
+    // Large embedded images can exceed session storage; the in-memory copy still works.
+  }
+}
+
+function makeCopiedCanvasBlockId() {
+  return `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function copySelectedCanvasBlock() {
+  const journal = getActiveJournalSurface();
+  if (journal) return journal.copy();
+  if (!document.body.classList.contains("editing") || !selectedBlock) return false;
+  if (isFrameItemTarget(selectedBlock)) {
+    window.showAppToast?.("Select the whole frame to copy it as a block.", "info");
+    return false;
+  }
+
+  const snapshot = cloneCanvasBlockClipboardValue(serializeBlockElement(selectedBlock));
+  if (!snapshot) return false;
+  copiedCanvasBlock = { data: snapshot, pasteCount: 0 };
+  persistCanvasBlockClipboard();
+  refreshCanvasDockToolState();
+  window.showAppToast?.("Block copied.", "info");
+  return true;
+}
+
+function pasteCopiedCanvasBlock() {
+  const journal = getActiveJournalSurface();
+  if (journal) return journal.paste();
+  if (!document.body.classList.contains("editing") || !copiedCanvasBlock?.data) return null;
+  const data = cloneCanvasBlockClipboardValue(copiedCanvasBlock.data);
+  if (!data) return null;
+
+  copiedCanvasBlock.pasteCount = Math.max(0, Number(copiedCanvasBlock.pasteCount) || 0) + 1;
+  const offset = GRID_SIZE * Math.min(6, copiedCanvasBlock.pasteCount);
+  const sourceId = String(data.id || "");
+  const nextId = makeCopiedCanvasBlockId();
+  data.id = nextId;
+  data.x = Math.max(0, snap((Number(data.x) || 0) + offset));
+  data.y = Math.max(0, snap((Number(data.y) || 0) + offset));
+  data.z = ++topZIndex;
+
+  if (data.dbSourceKind === "block" && data.dbSourceBlockId === sourceId) data.dbSourceBlockId = nextId;
+  if (data.dataCalloutSourceKind === "block" && data.dataCalloutSourceBlockId === sourceId) data.dataCalloutSourceBlockId = nextId;
+  if (data.progressSourceKind === "block" && data.progressSourceBlockId === sourceId) data.progressSourceBlockId = nextId;
+
+  const pastedBlock = buildBlockFromData(data);
+  if (!pastedBlock) return null;
+  gridEl.appendChild(pastedBlock);
+  selectBlock(pastedBlock);
+  expandGrid();
+  if (typeof saveState === "function") saveState();
+  persistCanvasBlockClipboard();
+  window.showAppToast?.("Block pasted.", "info");
+  return pastedBlock;
+}
 
 function isFrameItemTarget(target) {
   return !!target?.classList?.contains("frame-item");
@@ -12041,6 +12637,11 @@ function applyLayerOrder(blocks) {
 }
 
 function moveSelectedLayer(action) {
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.moveLayer(action);
+    return;
+  }
   if (!document.body.classList.contains("editing")) return;
   const target = getSelectedLayerTarget();
   if (!target) return;
@@ -12095,7 +12696,7 @@ function moveSelectedBlockIntoFrame() {
 }
 
 function clearDockTypeClasses() {
-  document.body.classList.remove("block-type-text", "block-type-list", "block-type-image", "block-type-container", "block-type-table", "block-type-button");
+  document.body.classList.remove("block-type-text", "block-type-list", "block-type-image", "block-type-container", "block-type-table", "block-type-button", "block-has-title-control");
 }
 
 function selectBlock(block) {
@@ -12125,6 +12726,7 @@ function selectBlock(block) {
     if (type === "image") document.body.classList.add("block-type-image");
     if (type === "container") document.body.classList.add("block-type-container");
     if (type === "table") document.body.classList.add("block-type-table");
+    if (getCanvasTitleColorElements(selectedBlock).length) document.body.classList.add("block-has-title-control");
 
     if (type !== "table" || (activeTableCell && !selectedBlock.contains(activeTableCell))) {
       setActiveTableCell(type === "table" ? getActiveTableCellForTarget(selectedBlock) : null);
@@ -12154,6 +12756,11 @@ window.selectCanvasBlock = selectBlock;
 window.clearCanvasSelection = clearSelection;
 
 function deleteSelectedBlock() {
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.deleteSelected();
+    return;
+  }
   if (!document.body.classList.contains("editing")) return;
   if (!selectedBlock) return;
 
@@ -12191,6 +12798,7 @@ function deleteSelectedBlock() {
 const blockBgBtn        = document.getElementById("blockBgBtn");
 const blockBorderBtn    = document.getElementById("blockBorderBtn");
 const blockTextColorBtn = document.getElementById("blockTextColorBtn");
+const blockTitleColorBtn = document.getElementById("blockTitleColorBtn");
 const blockPaddingBtn   = document.getElementById("blockPaddingBtn");
 const blockRadiusBtn    = document.getElementById("blockRadiusBtn");
 const blockNoteBtn      = document.getElementById("blockNoteBtn");
@@ -12200,6 +12808,8 @@ const layerBackwardBtn  = document.getElementById("layerBackwardBtn");
 const layerForwardBtn   = document.getElementById("layerForwardBtn");
 const layerBringFrontBtn = document.getElementById("layerBringFrontBtn");
 const layerIntoFrameBtn = document.getElementById("layerIntoFrameBtn");
+const blockCopyBtn      = document.getElementById("blockCopyBtn");
+const blockPasteBtn     = document.getElementById("blockPasteBtn");
 const buttonBgBtn       = document.getElementById("buttonBgBtn");
 const buttonTextColorBtn = document.getElementById("buttonTextColorBtn");
 const buttonBorderBtn   = document.getElementById("buttonBorderBtn");
@@ -12237,6 +12847,7 @@ const CANVAS_BORDER_DEFAULT_COLORS = Array.from(new Set([
 const CANVAS_COLOR_TRIGGER_SELECTOR = [
   "#blockBgBtn",
   "#blockTextColorBtn",
+  "#blockTitleColorBtn",
   "#blockBorderBtn",
   "#listBorderBtn",
   "#imageCropBtn",
@@ -12244,7 +12855,8 @@ const CANVAS_COLOR_TRIGGER_SELECTOR = [
   "#containerBorderBtn",
   "#buttonBgBtn",
   "#buttonTextColorBtn",
-  "#buttonBorderBtn"
+  "#buttonBorderBtn",
+  "[data-journal-color]"
 ].join(", ");
 
 let activeCanvasColorMode = "";
@@ -12332,6 +12944,7 @@ function getCanvasColorTriggerButtons(mode = "") {
   const idsByMode = {
     bg: ["blockBgBtn", "buttonBgBtn"],
     text: ["blockTextColorBtn", "buttonTextColorBtn"],
+    title: ["blockTitleColorBtn"],
     border: ["blockBorderBtn", "listBorderBtn", "containerBorderBtn", "buttonBorderBtn"]
   };
 
@@ -12341,6 +12954,8 @@ function getCanvasColorTriggerButtons(mode = "") {
 }
 
 function getSelectedCanvasColorValue(mode = "") {
+  const journal = getActiveJournalSurface();
+  if (journal) return journal.getSelectedColor?.(mode) || "";
   if (!selectedBlock) return "";
 
   if (mode === "bg") {
@@ -12353,12 +12968,22 @@ function getSelectedCanvasColorValue(mode = "") {
     return selectedBlock.style.borderColor || "";
   }
 
+  if (mode === "title") {
+    return selectedBlock.dataset.titleColor || "";
+  }
+
   return selectedBlock.style.color || "";
 }
 
 function refreshCanvasDockToolState() {
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.refreshDock();
+    return;
+  }
   const bgColor = getSelectedCanvasColorValue("bg");
   const textColor = getSelectedCanvasColorValue("text");
+  const titleColor = getSelectedCanvasColorValue("title");
   const borderColor = getSelectedCanvasColorValue("border");
   const ui = typeof getUIState === "function" ? getUIState() : { openOverlay: null };
   const cropButton = document.getElementById("imageCropBtn");
@@ -12372,6 +12997,7 @@ function refreshCanvasDockToolState() {
 
   setDockToolTint(blockBgBtn, bgColor);
   setDockToolTint(blockTextColorBtn, textColor);
+  setDockToolTint(blockTitleColorBtn, titleColor);
   getCanvasColorTriggerButtons("border").forEach((button) => setDockToolTint(button, borderColor));
   setDockToolTint(buttonBgBtn, bgColor);
   setDockToolTint(buttonTextColorBtn, textColor);
@@ -12385,6 +13011,8 @@ function refreshCanvasDockToolState() {
   if (layerForwardBtn) layerForwardBtn.disabled = !canLayer || layerIndex === layerBlocks.length - 1;
   if (layerBringFrontBtn) layerBringFrontBtn.disabled = !canLayer || layerIndex === layerBlocks.length - 1;
   if (layerIntoFrameBtn) layerIntoFrameBtn.disabled = !selectedBlock || isFrameItemTarget(selectedBlock) || !getExplicitFrameTargetForBlock(selectedBlock);
+  if (blockCopyBtn) blockCopyBtn.disabled = !selectedBlock || isFrameItemTarget(selectedBlock);
+  if (blockPasteBtn) blockPasteBtn.disabled = !copiedCanvasBlock?.data;
 
   cropButton?.classList.toggle("active", imageShape !== "original");
   frameButton?.classList.toggle("active", imageFrame !== "none");
@@ -12437,6 +13065,13 @@ function applyCanvasSelectedColor(mode, color, options = {}) {
     if (options.savePalette) saveCanvasPaletteColor(nextColor);
   }
 
+  const journal = getActiveJournalSurface();
+  if (journal) {
+    journal.applySelectedColor?.(mode, nextColor);
+    closeCanvasColorPopover();
+    return;
+  }
+
   withSelectedBlock((block) => {
     if (mode === "bg") {
       applyBlockBackgroundTone(block, nextColor);
@@ -12444,6 +13079,8 @@ function applyCanvasSelectedColor(mode, color, options = {}) {
     } else if (mode === "border") {
       applyBlockBorderTone(block, nextColor);
       block.dataset.borderState = nextColor ? "custom" : "default";
+    } else if (mode === "title") {
+      applyBlockTitleTone(block, nextColor);
     } else {
       applyBlockTextTone(block, nextColor);
       block.dataset.textState = nextColor ? "custom" : "default";
@@ -12473,7 +13110,13 @@ function buildCanvasColorPopover(mode) {
   const recentSection = makeCanvasColorSection("Recent");
   recentSection.row.appendChild(makeCanvasColorSwatch({
     className: "canvas-color-swatch-clear",
-    title: mode === "bg" ? "Clear fill" : mode === "border" ? "Clear border color" : "Reset text color",
+    title: mode === "bg"
+      ? "Clear fill"
+      : mode === "border"
+        ? "Clear border color"
+        : mode === "title"
+          ? "Reset title color"
+          : "Reset text color",
     onPick: () => applyCanvasSelectedColor(mode, "")
   }));
 
@@ -12568,7 +13211,7 @@ function closeCanvasColorPopover() {
 }
 
 function toggleCanvasColorPopover(mode, trigger) {
-  if (!canvasColorPopover || !selectedBlock || !trigger) return;
+  if (!canvasColorPopover || (!selectedBlock && !getActiveJournalSurface()) || !trigger) return;
 
   if (!canvasColorPopover.hidden && activeCanvasColorMode === mode && activeCanvasColorTrigger === trigger) {
     closeCanvasColorPopover();
@@ -12963,6 +13606,7 @@ function applyBlockTextTone(block, value = "") {
     const body = block.querySelector(".container-body");
     if (title) title.style.color = value || "";
     if (body) body.style.color = value || "";
+    if (block.dataset.titleColor) applyBlockTitleTone(block, block.dataset.titleColor);
     return;
   }
 
@@ -12988,6 +13632,7 @@ function applyBlockTextTone(block, value = "") {
     if (icon) icon.style.color = value || "";
     if (summary) summary.style.color = value || "";
     if (typeLabel) typeLabel.style.color = value || "";
+    if (block.dataset.titleColor) applyBlockTitleTone(block, block.dataset.titleColor);
     return;
   }
 
@@ -13012,6 +13657,47 @@ function applyBlockTextTone(block, value = "") {
   const body = block.querySelector(".block-body");
   if (title) title.style.color = value || "";
   if (body) body.style.color = value || "";
+
+  if (block.dataset.titleColor) {
+    applyBlockTitleTone(block, block.dataset.titleColor);
+  }
+}
+
+const CANVAS_TITLE_COLOR_SELECTOR = [
+  ".data-callout-label",
+  ".progress-block-title",
+  ".study-widget-title",
+  ".flashcard-deck-title",
+  ".typing-drill-title",
+  ".match-pairs-title",
+  ".container-title",
+  ".page-card-title",
+  ".page-database-block-title",
+  ".block-title"
+].join(", ");
+
+function getCanvasTitleColorElements(block) {
+  return block ? Array.from(block.querySelectorAll(CANVAS_TITLE_COLOR_SELECTOR)) : [];
+}
+
+function applyBlockTitleTone(block, value = "") {
+  if (!block) return;
+  const nextColor = value ? (normalizeHexColor(value) || value) : "";
+  if (nextColor) {
+    block.dataset.titleColor = nextColor;
+    block.style.setProperty("--canvas-title-color", nextColor);
+  } else {
+    delete block.dataset.titleColor;
+    block.style.removeProperty("--canvas-title-color");
+  }
+
+  const fallbackColor = block.style.color || "";
+  getCanvasTitleColorElements(block).forEach((part) => {
+    part.style.color = nextColor || fallbackColor;
+    if (part.matches(".page-card-title")) {
+      part.style.textDecorationColor = nextColor || fallbackColor;
+    }
+  });
 }
 
 function getExpandedPaddingValue(block) {
@@ -13071,9 +13757,75 @@ if (blockBorderBtn) {
 if (blockTextColorBtn) {
   blockTextColorBtn.addEventListener("click", (event) => {
     event.preventDefault();
-    toggleCanvasColorPopover("text", blockTextColorBtn);
+    const journal = getActiveJournalSurface();
+    if (journal) journal.openTextColor();
+    else toggleCanvasColorPopover("text", blockTextColorBtn);
   });
 }
+
+if (blockTitleColorBtn) {
+  blockTitleColorBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover("title", blockTitleColorBtn);
+  });
+}
+
+document.querySelectorAll("[data-journal-color]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleCanvasColorPopover(button.dataset.journalColor || "bg", button);
+  });
+});
+
+gridEl.addEventListener("click", (e) => {
+  const actionEl = e.target.closest("[data-live-db-action]");
+  if (!actionEl || !document.body.classList.contains("editing")) return;
+  const block = actionEl.closest('.block[data-type="live-database-card"]');
+  if (!block) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const config = readLiveDatabaseCardConfig(block);
+  const action = actionEl.dataset.liveDbAction;
+  if (action === "connect") {
+    const sourcePicker = block.querySelector("[data-live-db-source]");
+    if (sourcePicker) { sourcePicker.focus(); sourcePicker.click(); return; }
+    const source = getLiveDatabaseCardSources()[0];
+    if (!source) {
+      window.showAppToast?.("Create a database first, then connect this card to it.", "info");
+      return;
+    }
+    Object.assign(config, parseLiveDatabaseCardSource(`${source.kind || "page"}|${source.pageId || ""}|${source.blockId || ""}`));
+  } else if (action === "add-line") {
+    config.lines.push({ id: createLiveDatabaseCardId(), label: "", kind: "latest", propertyId: "", datePropertyId: "" });
+  } else if (action === "remove-line") {
+    const lineEl = actionEl.closest("[data-live-db-line]");
+    config.lines = config.lines.filter((line) => line.id !== lineEl?.dataset.liveDbLine);
+  }
+  writeLiveDatabaseCardConfig(block, config);
+  renderLiveDatabaseCardBlock(block);
+  if (typeof saveState === "function") saveState();
+});
+
+gridEl.addEventListener("change", (e) => {
+  const source = e.target.closest("[data-live-db-source]");
+  if (source) {
+    const block = source.closest('.block[data-type="live-database-card"]');
+    if (!block || !source.value) return;
+    const config = readLiveDatabaseCardConfig(block);
+    Object.assign(config, parseLiveDatabaseCardSource(source.value));
+    writeLiveDatabaseCardConfig(block, config);
+    renderLiveDatabaseCardBlock(block);
+    if (typeof saveState === "function") saveState();
+    return;
+  }
+  const control = e.target.closest("[data-live-db-line-kind], [data-live-db-line-property], [data-live-db-line-date]");
+  if (control) saveLiveDatabaseCardFromElement(control.closest('.block[data-type="live-database-card"]'));
+});
+
+gridEl.addEventListener("focusout", (e) => {
+  const control = e.target.closest("[data-live-db-title], [data-live-db-line-label]");
+  if (control) saveLiveDatabaseCardFromElement(control.closest('.block[data-type="live-database-card"]'));
+});
 
 if (blockPaddingBtn) {
   blockPaddingBtn.addEventListener("click", () => {
@@ -13131,6 +13883,8 @@ layerBackwardBtn?.addEventListener("click", () => moveSelectedLayer("backward"))
 layerForwardBtn?.addEventListener("click", () => moveSelectedLayer("forward"));
 layerBringFrontBtn?.addEventListener("click", () => moveSelectedLayer("front"));
 layerIntoFrameBtn?.addEventListener("click", () => moveSelectedBlockIntoFrame());
+blockCopyBtn?.addEventListener("click", copySelectedCanvasBlock);
+blockPasteBtn?.addEventListener("click", pasteCopiedCanvasBlock);
 
 
 // == List block dock buttons ==
@@ -13166,16 +13920,24 @@ const imageCropBtn    = document.getElementById("imageCropBtn");
 const imageFrameBtn   = document.getElementById("imageFrameBtn");
 
 if (imageDeleteBtn)  imageDeleteBtn.addEventListener("click", () => deleteSelectedBlock());
-if (imageReplaceBtn) imageReplaceBtn.addEventListener("click", () => withSelectedBlock((b) => {
-  promptImageUploadForBlock(b);
-}));
+if (imageReplaceBtn) imageReplaceBtn.addEventListener("click", () => {
+  const journal = getActiveJournalSurface();
+  if (journal) journal.replaceImage();
+  else withSelectedBlock((b) => {
+    promptImageUploadForBlock(b);
+  });
+});
 if (imageCropBtn) imageCropBtn.addEventListener("click", (event) => {
   event.preventDefault();
-  toggleImageCropPopover(imageCropBtn);
+  const journal = getActiveJournalSurface();
+  if (journal) journal.openImageShape();
+  else toggleImageCropPopover(imageCropBtn);
 });
 if (imageFrameBtn) imageFrameBtn.addEventListener("click", (event) => {
   event.preventDefault();
-  toggleImageFramePopover(imageFrameBtn);
+  const journal = getActiveJournalSurface();
+  if (journal) journal.openImageFrame();
+  else toggleImageFramePopover(imageFrameBtn);
 });
 
 // == Container block dock buttons ==
@@ -13705,6 +14467,26 @@ gridEl.addEventListener("mousedown", (e) => {
   // only clear when you click the empty grid background
   if (e.target === gridEl) {
     clearSelection();
+  }
+});
+
+// Copy/paste whole blocks without interfering with normal text or form clipboard behavior.
+document.addEventListener("keydown", (e) => {
+  if (!document.body.classList.contains("editing")) return;
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+
+  const typingInEditable = document.activeElement?.closest?.('[contenteditable="true"]');
+  const typingInInput = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
+  if (typingInEditable || typingInInput) return;
+
+  const key = String(e.key || "").toLowerCase();
+  if (key === "c" && selectedBlock) {
+    e.preventDefault();
+    copySelectedCanvasBlock();
+  }
+  if (key === "v" && copiedCanvasBlock?.data) {
+    e.preventDefault();
+    pasteCopiedCanvasBlock();
   }
 });
 

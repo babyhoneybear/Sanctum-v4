@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="infinite-canvas.css">
   <link rel="stylesheet" href="profile.css">
   <link rel="stylesheet" href="page-props.css">
+  <link rel="stylesheet" href="journal-scrapbook.css">
   <title>Sanctum</title>
 </head>
 
@@ -144,6 +145,7 @@
                 <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame">▤</button>
                 <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table">⊞</button>
                 <button class="dock-btn" id="toolDataCallout" aria-label="Data callout" data-label="Data callout">≈</button>
+                <button class="dock-btn" id="toolLiveDatabaseCard" aria-label="Live database card" data-label="Live data card">▤</button>
                 <button class="dock-btn" id="toolProgress" aria-label="Progress bar" data-label="Progress">▰</button>
                 <button class="dock-btn" id="toolClock" aria-label="Clock widget" data-label="Clock">◴</button>
                 <button class="dock-btn" id="toolStudy" aria-label="Study tools" data-label="Study">S</button>
@@ -167,6 +169,9 @@
               </div>
 
               <div class="dock-mode dock-mode-layer">
+                <button class="dock-btn" id="blockCopyBtn" aria-label="Copy block" data-label="Copy">⧉</button>
+                <button class="dock-btn" id="blockPasteBtn" aria-label="Paste copied block" data-label="Paste">⊞</button>
+                <div class="dock-divider"></div>
                 <button class="dock-btn" id="layerSendBackBtn" aria-label="Send to back" data-label="Back">⇣</button>
                 <button class="dock-btn" id="layerBackwardBtn" aria-label="Send backward" data-label="Backward">↓</button>
                 <button class="dock-btn" id="layerForwardBtn" aria-label="Bring forward" data-label="Forward">↑</button>
@@ -177,6 +182,7 @@
               <div class="dock-mode dock-mode-text">
                 <button class="dock-btn" id="blockBgBtn" aria-label="Color" data-label="Color">▣</button>
                 <button class="dock-btn" id="blockTextColorBtn" aria-label="Text color" data-label="Text">A</button>
+                <button class="dock-btn" id="blockTitleColorBtn" aria-label="Title color" data-label="Title">T</button>
                 <button class="dock-btn" id="blockBorderBtn" aria-label="Block border" data-label="Border">⬚</button>
                 <button class="dock-btn" id="blockPaddingBtn" aria-label="Block padding" data-label="Padding">▥</button>
                 <button class="dock-btn" id="blockRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
@@ -197,6 +203,54 @@
                 <button class="dock-btn" id="imageCropBtn" aria-label="Crop shape" data-label="Shape">◖</button>
                 <button class="dock-btn" id="imageFrameBtn" aria-label="Image frame" data-label="Frame">▧</button>
                 <button class="dock-btn" id="imageDeleteBtn" aria-label="Delete image" data-label="Delete">🗑</button>
+              </div>
+              <div class="dock-mode dock-mode-journal">
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-action="skim" aria-label="Return to book" data-label="Book">‹</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-action="paper-panel" aria-label="Change paper or cover color" data-label="Paper">▤</button>
+                <button class="dock-btn" data-action="overview" aria-label="Open page overview" data-label="Pages">▦</button>
+                <button class="dock-btn" data-action="add-page-panel" aria-label="Add journal page" data-label="Add page">+</button>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-tool="sticker" aria-label="Journal elements" data-label="Elements">✦</button>
+                <button class="dock-btn" data-tool="shape" aria-label="Journal shapes" data-label="Shapes">◇</button>
+                <button class="dock-btn" data-tool="tape" aria-label="Journal tape" data-label="Tape">▰</button>
+              </div>
+              <div class="dock-mode dock-mode-journal-selected">
+                <div class="dock-divider"></div>
+                <div class="journal-dock-group journal-dock-text">
+                  <button class="dock-btn" id="journalBgBtn" data-journal-color="bg" aria-label="Box color" data-label="Color">▣</button>
+                  <button class="dock-btn" id="journalTextColorBtn" data-journal-color="text" aria-label="Text color" data-label="Text">A</button>
+                  <button class="dock-btn" id="journalBorderBtn" data-journal-color="border" aria-label="Box border" data-label="Border">⬚</button>
+                  <button class="dock-btn" data-action="toggle-padding" aria-label="Box padding" data-label="Padding">▥</button>
+                  <button class="dock-btn" data-action="toggle-radius" aria-label="Box corners" data-label="Corners">◼︎</button>
+                  <div class="dock-divider"></div>
+                  <button class="dock-btn" data-action="cycle-font" aria-label="Change typeface" data-label="Font">Aa</button>
+                  <button class="dock-btn" data-action="font-size-down" aria-label="Decrease text size" data-label="Smaller">A−</button>
+                  <button class="dock-btn" data-action="font-size-up" aria-label="Increase text size" data-label="Larger">A+</button>
+                  <button class="dock-btn" data-action="toggle-bold" aria-label="Bold" data-label="Bold"><b>B</b></button>
+                  <button class="dock-btn" data-action="toggle-italic" aria-label="Italic" data-label="Italic"><i>I</i></button>
+                  <button class="dock-btn" data-action="align" aria-label="Text alignment" data-label="Align">≡</button>
+                </div>
+                <div class="journal-dock-group journal-dock-shape">
+                  <button class="dock-btn" id="journalShapeFillBtn" data-journal-color="bg" aria-label="Shape fill" data-label="Fill">▣</button>
+                  <button class="dock-btn" id="journalShapeBorderBtn" data-journal-color="border" aria-label="Shape border" data-label="Border">⬚</button>
+                </div>
+                <div class="journal-dock-group journal-dock-sticker">
+                  <button class="dock-btn" id="journalStickerColorBtn" data-journal-color="bg" aria-label="Element color" data-label="Color">▣</button>
+                </div>
+                <div class="journal-dock-group journal-dock-tape">
+                  <button class="dock-btn" id="journalTapeColorBtn" data-journal-color="bg" aria-label="Tape color" data-label="Color">▣</button>
+                  <button class="dock-btn" data-action="cycle-tape-pattern" aria-label="Tape pattern" data-label="Pattern">▰</button>
+                </div>
+                <div class="journal-dock-group journal-dock-image">
+                  <button class="dock-btn" id="imageReplaceBtnJournal" data-action="replace-photo" aria-label="Replace image" data-label="Replace">🖼</button>
+                  <button class="dock-btn" data-action="open-image-shape" aria-label="Crop shape" data-label="Shape">◖</button>
+                  <button class="dock-btn" data-action="open-image-frame" aria-label="Image frame" data-label="Frame">▧</button>
+                </div>
+                <div class="dock-divider"></div>
+                <button class="dock-btn" data-action="duplicate-element" aria-label="Duplicate item" data-label="Duplicate">⧉</button>
+                <button class="dock-btn" data-action="delete-element" aria-label="Delete item" data-label="Delete">🗑</button>
               </div>
               <div class="dock-mode dock-mode-table">
                 <button class="dock-btn" id="tableStructureBtn" aria-label="Rows and columns" data-label="Grid">▤</button>
@@ -1035,6 +1089,14 @@
       Tip: paste an emoji like `🧙`, a web image URL, or upload a local PNG/GIF.
     </div>
 
+    <div class="page-icon-scale-control" id="pageIconScaleControl">
+      <div class="page-icon-scale-head">
+        <label for="pageIconScale">Image size</label>
+        <span id="pageIconScaleValue">100%</span>
+      </div>
+      <input id="pageIconScale" type="range" min="50" max="250" step="5" value="100" />
+    </div>
+
     <div class="page-icon-row">
       <button class="page-icon-btn" id="pageIconUploadBtn">Upload image/GIF</button>
       <button class="page-icon-btn" id="pageIconClearBtn">Remove icon</button>
@@ -1061,6 +1123,7 @@
       "infinite-canvas.js",
       "canvas.js",
       "history-state.js",
+      "journal-data.js",
       "journal.js",
       "app-core.js",
       "relationship-graph.js",

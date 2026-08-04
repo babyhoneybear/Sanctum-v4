@@ -464,31 +464,39 @@ function isImageIconValue(value = "") {
   return /^(data:image\/|blob:|https?:\/\/|file:|\/|\.\/|\.\.\/)/i.test(trimmed);
 }
 
-function getIconMarkup(iconValue, fallback = "📄", className = "") {
+function normalizeIconImageScale(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0.5, Math.min(2.5, parsed)) : fallback;
+}
+
+function getIconMarkup(iconValue, fallback = "📄", className = "", options = {}) {
   const value = typeof iconValue === "string" && iconValue.trim() ? iconValue.trim() : fallback;
   const safeClassName = typeof className === "string" && className.trim()
     ? ` class="${className}"`
     : "";
 
   if (isImageIconValue(value)) {
-    return `<span${safeClassName} data-icon-type="image"><img class="icon-render-img" src="${escapeHTML(value)}" alt=""></span>`;
+    const scale = normalizeIconImageScale(options?.scale, 1);
+    return `<span${safeClassName} data-icon-type="image" style="--icon-image-user-scale:${scale}"><img class="icon-render-img" src="${escapeHTML(value)}" alt=""></span>`;
   }
 
   return `<span${safeClassName} data-icon-type="glyph">${escapeHTML(value)}</span>`;
 }
 
-function setIconElementContent(el, iconValue, fallback = "📄") {
+function setIconElementContent(el, iconValue, fallback = "📄", options = {}) {
   if (!el) return;
 
   const value = typeof iconValue === "string" && iconValue.trim() ? iconValue.trim() : fallback;
 
   if (isImageIconValue(value)) {
     el.dataset.iconType = "image";
+    el.style.setProperty("--icon-image-user-scale", String(normalizeIconImageScale(options?.scale, 1)));
     el.innerHTML = `<img class="icon-render-img" src="${escapeHTML(value)}" alt="">`;
     return;
   }
 
   el.dataset.iconType = "glyph";
+  el.style.removeProperty("--icon-image-user-scale");
   el.textContent = value;
 }
 
@@ -497,7 +505,8 @@ function normalizePin(pin = {}) {
     id: typeof pin.id === "string" ? pin.id : "",
     title: typeof pin.title === "string" && pin.title.trim() ? pin.title : "Untitled",
     type: typeof pin.type === "string" && pin.type.trim() ? pin.type : "canvas",
-    icon: typeof pin.icon === "string" ? pin.icon : ""
+    icon: typeof pin.icon === "string" ? pin.icon : "",
+    iconScale: normalizeIconImageScale(pin.iconScale, 1)
   };
 }
 
@@ -913,8 +922,9 @@ function updatePinnedPageTitle(pageId, newTitle) {
   }
 }
 
-function updateLinkedCardIconsEverywhere(pageId, newIcon) {
+function updateLinkedCardIconsEverywhere(pageId, newIcon, newScale = 1) {
   const icon = newIcon || "📄";
+  const iconScale = normalizeIconImageScale(newScale, 1);
   const allBlocks = readAllPageBlocks();
   let changed = false;
 
@@ -925,13 +935,13 @@ function updateLinkedCardIconsEverywhere(pageId, newIcon) {
 
       if (b.linkedPageId === pageId) {
         changed = true;
-        nextBlock = { ...b, pageCardIcon: icon };
+        nextBlock = { ...b, pageCardIcon: icon, pageCardIconScale: iconScale };
       }
 
       const nextItems = getSerializedContainerItems(nextBlock).map((item) => {
         if (item.linkedPageId !== pageId) return item;
         changed = true;
-        return { ...item, pageCardIcon: icon };
+        return { ...item, pageCardIcon: icon, pageCardIconScale: iconScale };
       });
 
       if (nextItems.length) {
@@ -953,9 +963,10 @@ function updateLinkedCardIconsEverywhere(pageId, newIcon) {
       const cardIcon = cardHost.querySelector(".page-card-icon");
       const mediaIcon = cardHost.querySelector(".page-card-media-icon");
 
-      if (cardIcon) setIconElementContent(cardIcon, icon, fallbackGlyph);
-      if (mediaIcon) setIconElementContent(mediaIcon, icon, fallbackGlyph);
+      if (cardIcon) setIconElementContent(cardIcon, icon, fallbackGlyph, { scale: iconScale });
+      if (mediaIcon) setIconElementContent(mediaIcon, icon, fallbackGlyph, { scale: iconScale });
       cardHost.dataset.pageCardIcon = icon;
+      cardHost.dataset.pageCardIconScale = String(iconScale);
     });
 }
 
@@ -1030,12 +1041,12 @@ function setPageCardIconHidden(block, hidden = false) {
   }
 }
 
-function updatePinnedPageIcon(pageId, newIcon) {
+function updatePinnedPageIcon(pageId, newIcon, newScale = 1) {
   let changed = false;
   pinnedPages = pinnedPages.map((pin) => {
     if (pin.id === pageId) {
       changed = true;
-      return { ...pin, icon: newIcon || "" };
+      return { ...pin, icon: newIcon || "", iconScale: normalizeIconImageScale(newScale, 1) };
     }
     return pin;
   });
@@ -1098,6 +1109,12 @@ function applyPageRenameEverywhere(pageId, newTitle, options = {}) {
     }
   }
 
+  // Sheet pages are the canonical name for their database. Refresh linked
+  // views too, so an inline database never keeps its old "New database" label.
+  window.syncDatabasePageTitleFromPage?.(pageId);
+  window.renderVisibleDatabaseEmbeds?.();
+  window.refreshLiveDatabaseCards?.();
+
   updateLinkedCardTitlesEverywhere(pageId, newTitle);
   updatePinnedPageTitle(pageId, newTitle);
   refreshSidebarLabelsAfterRename(pageId);
@@ -1105,7 +1122,7 @@ function applyPageRenameEverywhere(pageId, newTitle, options = {}) {
 }
 window.applyPageRenameEverywhere = applyPageRenameEverywhere;
 
-function applyPageIconEverywhere(pageId, newIcon) {
+function applyPageIconEverywhere(pageId, newIcon, newScale) {
   const page =
     userDomains.find((d) => d.id === pageId) ||
     userPages.find((p) => p.id === pageId);
@@ -1113,18 +1130,23 @@ function applyPageIconEverywhere(pageId, newIcon) {
   if (!page) return false;
 
   const nextIcon = typeof newIcon === "string" ? newIcon : "";
+  const nextScale = normalizeIconImageScale(newScale, normalizeIconImageScale(page.iconScale, 1));
   const previousIcon = page.icon || "";
+  const previousScale = page.iconScale;
   page.icon = nextIcon;
+  page.iconScale = nextScale;
 
   const saved = saveSanctumRegistry();
   if (!saved) {
     page.icon = previousIcon;
+    if (previousScale === undefined) delete page.iconScale;
+    else page.iconScale = previousScale;
     saveSanctumRegistry();
     return false;
   }
 
-  updateLinkedCardIconsEverywhere(pageId, nextIcon);
-  updatePinnedPageIcon(pageId, nextIcon);
+  updateLinkedCardIconsEverywhere(pageId, nextIcon, nextScale);
+  updatePinnedPageIcon(pageId, nextIcon, nextScale);
   renderSidebarDomains();
   renderSidebarPins();
   renderSidebarBookmarks();

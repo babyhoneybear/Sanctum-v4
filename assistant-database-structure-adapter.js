@@ -128,6 +128,7 @@
       dbFilters: JSON.stringify(asArray(view.filters)),
       dbSorts: JSON.stringify(asArray(view.sorts)),
       dbGroupBy: safeString(view.groupBy, 180).trim(),
+      dbHiddenPropertyIds: "[]",
       dbFolderState: "{}",
       dbResetConfig: "{}",
       dbChecklistAutomation: "{}",

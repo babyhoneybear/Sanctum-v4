@@ -73,6 +73,35 @@ test("export falls back to legacy database storage", () => {
   assert.deepEqual(buildBackupData(adapter).pageDatabases, { legacy: { rows: 2 } });
 });
 
+test("export and import preserve scrapbook journal photos", () => {
+  const source = memoryAdapter();
+  const journal = {
+    "journal-1": {
+      version: 2,
+      pages: [{
+        id: "page-1",
+        paper: "grid",
+        elements: [{
+          id: "photo-1",
+          type: "image",
+          src: "data:image/jpeg;base64,cGhvdG8=",
+          x: 100,
+          y: 120,
+          w: 500,
+          h: 400
+        }]
+      }]
+    }
+  };
+  source.values.set(source.keys.journals, journal);
+  const backup = buildBackupData(source);
+  const destination = memoryAdapter();
+
+  importBackupData(backup, destination);
+
+  assert.deepEqual(destination.values.get(destination.keys.journals), journal);
+});
+
 test("corrupt legacy database storage is not exported", () => {
   const adapter = memoryAdapter({
     sanctum_calendar_databases: ["not", "a", "database map"]

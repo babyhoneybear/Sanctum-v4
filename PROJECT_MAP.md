@@ -23,22 +23,23 @@ This is a quick "future me" map of where things live. It is not meant to be form
 8. `infinite-canvas.js`
 9. `canvas.js`
 10. `history-state.js`
-11. `journal.js`
-12. `app-core.js`
-13. `relationship-graph.js`
-14. `page-database.js`
-15. `context-engine.js`
-16. `assistant-operations.js`
-17. `assistant-transactions.js`
-18. `canvas-rich-text.js`
-19. `smart-notes.js`
-20. `assistant-content-adapters.js`
-21. `assistant-page-adapter.js`
-22. `assistant-database-structure-adapter.js`
-23. `profile.js`
-24. `page-props.js`
-25. `button-block.js`
-26. `canvas-lines.js`
+11. `journal-data.js`
+12. `journal.js`
+13. `app-core.js`
+14. `relationship-graph.js`
+15. `page-database.js`
+16. `context-engine.js`
+17. `assistant-operations.js`
+18. `assistant-transactions.js`
+19. `canvas-rich-text.js`
+20. `smart-notes.js`
+21. `assistant-content-adapters.js`
+22. `assistant-page-adapter.js`
+23. `assistant-database-structure-adapter.js`
+24. `profile.js`
+25. `page-props.js`
+26. `button-block.js`
+27. `canvas-lines.js`
 
 If something mysteriously breaks, check whether a file depends on a function that loads later.
 
@@ -71,7 +72,8 @@ If something mysteriously breaks, check whether a file depends on a function tha
 - `assistant-content-adapters.js` - Safe append and exact-match replacement adapters for visible note content, document sections, and page/canvas text. Board and document starter content can target a page created earlier in the same proposal; replacements preserve surrounding HTML and reuse the same atomic transaction receipt and Undo system as databases.
 - `assistant-page-adapter.js` - Transaction adapter for creating reviewed board, infinite-board, document, or journal page trees under retrieved or earlier-created parents. Undo fingerprints board blocks plus document/journal storage and refuses to delete later user work.
 - `assistant-database-structure-adapter.js` - Transaction adapter for creating a reviewed inline database, its hidden row pages, and multiple independently filtered or sorted linked views. Undo removes only the generated structure and refuses after later edits.
-- `journal.js` - Journal layout with page-flip UI.
+- `journal-data.js` - Pure journal normalization and immutable page/element data operations.
+- `journal.js` / `journal-scrapbook.css` - Persistent two-mode scrapbook with a page-flip browser and flat editor.
 - `smart-notes.js` - Notes vault, note shelves, helper inbox, assistant drawer, assistant actions, and the interactive proposal review, Apply receipt, and Undo surface.
 - `soundbar.js` - Ambient sound panel.
 - `stickers.js` - Sticker panel and custom stickers.

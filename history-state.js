@@ -204,6 +204,7 @@ function buildBlockFromData(data) {
     if (data.dbFilters) b.dataset.dbFilters = data.dbFilters;
     if (data.dbSorts) b.dataset.dbSorts = data.dbSorts;
     if (data.dbGroupBy) b.dataset.dbGroupBy = data.dbGroupBy;
+    if (data.dbHiddenPropertyIds) b.dataset.dbHiddenPropertyIds = data.dbHiddenPropertyIds;
     if (data.dbFolderState) b.dataset.dbFolderState = data.dbFolderState;
     if (data.dbResetConfig) b.dataset.dbResetConfig = data.dbResetConfig;
     if (data.dbChecklistAutomation) b.dataset.dbChecklistAutomation = data.dbChecklistAutomation;
@@ -233,8 +234,10 @@ function buildBlockFromData(data) {
     if (data.dataCalloutSourcePageId) b.dataset.dataCalloutSourcePageId = data.dataCalloutSourcePageId;
     if (data.dataCalloutSourceBlockId) b.dataset.dataCalloutSourceBlockId = data.dataCalloutSourceBlockId;
     if (data.dataCalloutPropertyId) b.dataset.dataCalloutPropertyId = data.dataCalloutPropertyId;
+    if (data.dataCalloutSecondaryPropertyId) b.dataset.dataCalloutSecondaryPropertyId = data.dataCalloutSecondaryPropertyId;
     if (data.dataCalloutMode) b.dataset.dataCalloutMode = data.dataCalloutMode;
     if (data.dataCalloutRowId) b.dataset.dataCalloutRowId = data.dataCalloutRowId;
+    if (data.dataCalloutDatePropertyId) b.dataset.dataCalloutDatePropertyId = data.dataCalloutDatePropertyId;
     if (data.dataCalloutSystemKey) b.dataset.dataCalloutSystemKey = data.dataCalloutSystemKey;
     if (data.dataCalloutSystemTargetKind) b.dataset.dataCalloutSystemTargetKind = data.dataCalloutSystemTargetKind;
     if (data.dataCalloutSystemTargetPageId) b.dataset.dataCalloutSystemTargetPageId = data.dataCalloutSystemTargetPageId;
@@ -251,6 +254,11 @@ function buildBlockFromData(data) {
     requestAnimationFrame(() => {
       window.mountDataCalloutBlock?.(b);
     });
+  }
+
+  if (data.type === "live-database-card") {
+    if (data.liveDatabaseCard) b.dataset.liveDatabaseCard = data.liveDatabaseCard;
+    requestAnimationFrame(() => window.mountLiveDatabaseCardBlock?.(b));
   }
 
   if (data.type === "progress") {
@@ -355,6 +363,7 @@ function buildBlockFromData(data) {
   if (data.bg) applyBlockBackgroundTone(b, data.bg);
   if (data.borderColor) applyBlockBorderTone(b, data.borderColor);
   if (data.textColor) applyBlockTextTone(b, data.textColor);
+  if (data.titleColor) applyBlockTitleTone(b, data.titleColor);
   if (data.padding) applyBlockPaddingTone(b, data.padding);
   if (data.radius) b.style.borderRadius = data.radius;
   if (data.hasNote)    b.classList.add("has-note");
@@ -369,6 +378,7 @@ function buildBlockFromData(data) {
   }
 
   if (data.linkedPageId) b.dataset.linkedPageId = data.linkedPageId;
+  if (data.pageCardIconScale) b.dataset.pageCardIconScale = String(normalizeIconImageScale(data.pageCardIconScale, 1));
   if (getPageCardView(data) === "gallery") b.dataset.pageCardView = "gallery";
   b.dataset.pageCardImageMode = getPageCardImageMode(data);
   b.dataset.pageCardImagePos = String(getPageCardImagePosition(data));
@@ -392,7 +402,7 @@ function buildBlockFromData(data) {
     const iconFallback = resolvedType === "domain" ? "⌂" : "📄";
     if (resolvedIcon) {
       const cardIcon = b.querySelector(".page-card-icon");
-      if (cardIcon) setIconElementContent(cardIcon, resolvedIcon, iconFallback);
+      if (cardIcon) setIconElementContent(cardIcon, resolvedIcon, iconFallback, { scale: data.pageCardIconScale });
       b.dataset.pageCardIcon = resolvedIcon;
     }
 

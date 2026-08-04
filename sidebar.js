@@ -306,7 +306,7 @@ function renderSidebarPins() {
     item.dataset.pageId = pin.id;
     if (pin.id === currentPageId) item.classList.add("active");
     item.innerHTML = `
-      ${getIconMarkup(page.icon, userDomains.some(d => d.id === pin.id) ? "⌂" : "📄", "item-icon")}
+      ${getIconMarkup(page.icon, userDomains.some(d => d.id === pin.id) ? "⌂" : "📄", "item-icon", { scale: page.iconScale })}
       <span class="item-name">${escapeHTML(page.title || pin.title)}</span>
     `;
     item.addEventListener("click", () => openPage(pin.id, { revealSidebarPath: false }));
@@ -333,7 +333,7 @@ function renderSidebarBookmarks() {
     item.dataset.pageId = id;
     if (id === currentPageId) item.classList.add("active");
     item.innerHTML = `
-      ${getIconMarkup(page.icon, userDomains.some(d => d.id === id) ? "⌂" : "📄", "item-icon")}
+      ${getIconMarkup(page.icon, userDomains.some(d => d.id === id) ? "⌂" : "📄", "item-icon", { scale: page.iconScale })}
       <span class="item-name">${escapeHTML(page.title)}</span>
     `;
     item.addEventListener("click", () => openPage(id, { revealSidebarPath: false }));
@@ -353,6 +353,7 @@ function renderSidebarDomains() {
     idValue,
     rowClass,
     icon,
+    iconScale,
     title,
     expanded = false,
     hasChildren = false,
@@ -373,7 +374,7 @@ function renderSidebarDomains() {
     else if (isAncestor) row.classList.add("active-ancestor");
     row.innerHTML = `
       <span class="item-expand">▸</span>
-      ${getIconMarkup(icon, "📄", "item-icon")}
+      ${getIconMarkup(icon, "📄", "item-icon", { scale: iconScale })}
       <span class="item-name">${escapeHTML(title)}</span>
       ${menuHTML}
     `;
@@ -418,7 +419,7 @@ function renderSidebarDomains() {
     pageItem.dataset.pageId = page.id;
     if (page.id === currentPageId) pageItem.classList.add("active");
     pageItem.innerHTML = `
-      ${getIconMarkup(page.icon, "📄", "item-icon")}
+      ${getIconMarkup(page.icon, "📄", "item-icon", { scale: page.iconScale })}
       <span class="item-name">${escapeHTML(page.title)}</span>
     `;
     pageItem.addEventListener("click", () => openPage(page.id));
@@ -439,6 +440,7 @@ function renderSidebarDomains() {
       idValue: project.id,
       rowClass: "item-project",
       icon: project.icon || "🗂",
+      iconScale: project.iconScale,
       title: project.title,
       expanded: shouldSidebarExpand(project.id, activePathIds),
       hasChildren: projectPages.length > 0,
@@ -476,6 +478,7 @@ function renderSidebarDomains() {
         idValue: hub.id,
         rowClass: "item-hub",
         icon: hub.icon || "📂",
+        iconScale: hub.iconScale,
         title: hub.title,
         expanded: shouldSidebarExpand(hub.id, activePathIds),
         hasChildren: hubChildren.childElementCount > 0,
@@ -499,6 +502,7 @@ function renderSidebarDomains() {
       idValue: domain.id,
       rowClass: "item-domain",
       icon: domain.icon || "⌂",
+      iconScale: domain.iconScale,
       title: domain.title,
       expanded: shouldSidebarExpand(domain.id, activePathIds),
       hasChildren: children.childElementCount > 0,
@@ -1127,6 +1131,14 @@ document.getElementById("tabBar")?.addEventListener("auxclick", (e) => {
 document.getElementById("navBackBtn")?.addEventListener("click", navBack);
 document.getElementById("navFwdBtn")?.addEventListener("click", navFwd);
 
+function syncAppWorkspaceHeaderHeight() {
+  const topbar = document.querySelector("#mainPane > .topbar");
+  const height = topbar
+    ? Math.max(0, Math.round(topbar.getBoundingClientRect().bottom))
+    : 0;
+  document.documentElement.style.setProperty("--app-workspace-header-height", `${height}px`);
+}
+
 document.getElementById("tabToggleBtn")?.addEventListener("click", () => {
   const inner = document.getElementById("tabBarInner");
   const wrap = document.getElementById("tabBarWrap");
@@ -1134,7 +1146,18 @@ document.getElementById("tabToggleBtn")?.addEventListener("click", () => {
   if (!wrap) return;
   const collapsed = wrap.classList.toggle("tabs-collapsed");
   if (btn) btn.classList.toggle("active", !collapsed);
+  syncAppWorkspaceHeaderHeight();
 });
+
+const appTabBarWrap = document.getElementById("tabBarWrap");
+if (appTabBarWrap && typeof ResizeObserver === "function") {
+  const appHeaderResizeObserver = new ResizeObserver(syncAppWorkspaceHeaderHeight);
+  appHeaderResizeObserver.observe(appTabBarWrap);
+  const appMainTopbar = document.querySelector("#mainPane > .topbar");
+  if (appMainTopbar) appHeaderResizeObserver.observe(appMainTopbar);
+}
+window.addEventListener("resize", syncAppWorkspaceHeaderHeight);
+syncAppWorkspaceHeaderHeight();
 
 function rememberActivePageForSession(pageId) {
   const visitedAt = Date.now();
@@ -1326,11 +1349,15 @@ function openPage(pageId, options = {}) {
     if (typeof window.renderJournalPage === "function") {
       window.renderJournalPage(pageId);
     } else {
-      window.setTimeout(() => {
-        if (currentPageId === pageId && typeof window.renderJournalPage === "function") {
-          window.renderJournalPage(pageId);
-        }
-      }, 0);
+      let journalRendered = false;
+      const renderJournalWhenReady = () => {
+        if (journalRendered || currentPageId !== pageId || typeof window.renderJournalPage !== "function") return;
+        journalRendered = true;
+        window.removeEventListener("sanctum:journal-ready", renderJournalWhenReady);
+        window.renderJournalPage(pageId);
+      };
+      window.addEventListener("sanctum:journal-ready", renderJournalWhenReady, { once: true });
+      window.setTimeout(renderJournalWhenReady, 0);
     }
   }
 
@@ -1426,7 +1453,7 @@ function renderBreadcrumbs(pageId) {
     const seg = document.createElement("span");
     seg.className = "breadcrumb-seg";
     seg.innerHTML = page.icon
-      ? `${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "breadcrumb-icon")}<span>${escapeHTML(page.title)}</span>`
+      ? `${getIconMarkup(page.icon, page.type === "domain" ? "⌂" : "📄", "breadcrumb-icon", { scale: page.iconScale })}<span>${escapeHTML(page.title)}</span>`
       : `<span>${escapeHTML(page.title)}</span>`;
     if (isCurrent) {
       seg.classList.add("breadcrumb-current");
@@ -1736,7 +1763,7 @@ function renderSplitHero(pageId) {
   // Set icon content using the same helper as main pane
   if (settings.showIcon !== false) {
     const iconEl = container.querySelector(".split-hero-icon");
-    if (iconEl) setIconElementContent(iconEl, page.icon, page.type === "domain" ? "⌂" : "📄");
+    if (iconEl) setIconElementContent(iconEl, page.icon, page.type === "domain" ? "⌂" : "📄", { scale: page.iconScale });
   }
 }
 

@@ -11,6 +11,11 @@
   const ORGANIZE_API_PATH = ((window.SANCTUM_API_BASE || '') + '/api/assistant/organize').replace(/\/\/api/, '/api');
   const USE_AI_CONTEXT_ROUTER = window.SANCTUM_AI_CONTEXT_ROUTER === true;
   const ASSISTANT_BULK_BATCH_SIZE = 20;
+  const ASSISTANT_MODES = Object.freeze([
+    { id: 'fast', label: 'Fast', detail: 'Read-only answers' },
+    { id: 'assist', label: 'Assist', detail: 'Reviewed changes' },
+    { id: 'build', label: 'Build', detail: 'Large projects' },
+  ]);
   const ASSISTANT_PERSONALITIES = Object.freeze([
     {
       id: 'southern-warden',
@@ -126,6 +131,9 @@
         ? profile.assistantGender
         : selectedPersonality.gender,
       assistantPronouns: typeof profile.assistantPronouns === 'string' ? profile.assistantPronouns.trim().slice(0, 60) : '',
+      assistantMode: ASSISTANT_MODES.some((item) => item.id === profile.assistantMode)
+        ? profile.assistantMode
+        : 'assist',
       memoryEnabled: profile.memoryEnabled !== false,
       autoMemory: profile.autoMemory !== false,
     };
@@ -172,6 +180,7 @@
   let activeAssistantTransactionMessageId = '';
   let activeAssistantOpen = false;
   let activeAssistantBusy = false;
+  let activeAssistantStage = '';
   let assistantRenderRevision = 0;
   let activeComposerContextPageId = '';
   let noteSaveTimer = null;
@@ -2137,6 +2146,28 @@
     return activeUser.assistantName || 'Assistant';
   }
 
+  function getAssistantMode() {
+    return ASSISTANT_MODES.find((item) => item.id === activeUser.assistantMode) || ASSISTANT_MODES[1];
+  }
+
+  function setAssistantMode(modeId = 'assist') {
+    if (activeAssistantBusy || !ASSISTANT_MODES.some((item) => item.id === modeId)) return;
+    saveActiveUserProfile({ assistantMode: modeId });
+    document.querySelectorAll('[data-assistant-mode]').forEach((button) => {
+      const selected = button.dataset.assistantMode === modeId;
+      button.classList.toggle('selected', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+    const input = document.getElementById('assistantComposerInput');
+    if (input) input.placeholder = modeId === 'fast'
+      ? `Ask ${getAssistantDisplayName()} a quick question...`
+      : modeId === 'build'
+        ? 'Describe what you want to build...'
+        : `Message ${getAssistantDisplayName()}...`;
+    assistantRenderRevision += 1;
+    renderAssistantMessages();
+  }
+
   function saveActiveUserProfile(patch = {}) {
     Object.assign(activeUser, normalizeUserProfile({ ...activeUser, ...patch }));
     writeJSON(USER_PROFILE_KEY, activeUser);
@@ -2405,6 +2436,11 @@
         avatarEl.innerHTML = `${renderAssistantAvatarContent()}<span class="assistant-drawer-presence"></span>`;
       }
       if (composerInput) composerInput.placeholder = `Message ${getAssistantDisplayName()}...`;
+      document.querySelectorAll('[data-assistant-mode]').forEach((button) => {
+        const selected = button.dataset.assistantMode === getAssistantMode().id;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
       if (!document.getElementById('assistantProfileOpen')) {
         const controls = document.querySelector('#assistantDrawer .assistant-drawer-controls');
         const button = document.createElement('button');
@@ -2432,9 +2468,6 @@
           </div>
           <div class="assistant-drawer-heading">
             <div class="assistant-drawer-name">${escapeHTML(assistantName)}</div>
-            <div class="assistant-drawer-role-row">
-              <span class="assistant-drawer-role">${escapeHTML(personality.label)}</span>
-            </div>
             <div class="assistant-drawer-subtitle">${escapeHTML(personality.subtitle)}</div>
           </div>
         </div>
@@ -2443,6 +2476,17 @@
           <span class="assistant-drawer-spark" aria-hidden="true">&#10022;</span>
           <button class="assistant-drawer-close" id="assistantDrawerClose" aria-label="Close assistant">&minus;</button>
         </div>
+      </div>
+      <div class="assistant-mode-switcher" role="group" aria-label="Assistant response mode">
+        ${ASSISTANT_MODES.map((mode) => `
+          <button
+            type="button"
+            class="assistant-mode-option ${mode.id === getAssistantMode().id ? 'selected' : ''}"
+            data-assistant-mode="${mode.id}"
+            aria-pressed="${mode.id === getAssistantMode().id ? 'true' : 'false'}"
+            title="${escapeHTML(mode.detail)}"
+          >${escapeHTML(mode.label)}</button>
+        `).join('')}
       </div>
       <div class="assistant-messages" id="assistantMessages"></div>
       <div class="assistant-composer">
@@ -3086,15 +3130,22 @@
       activeUser.assistantPersonality,
       activeUser.assistantGender,
       activeUser.assistantAvatar,
+      activeUser.assistantMode,
+      activeAssistantStage,
     ].join('|');
     if (host.dataset.renderSignature === renderSignature) return;
 
     if (!chatMessages.length && !activeAssistantBusy) {
       host.innerHTML = `
         <div class="assistant-empty">
-          <div class="assistant-empty-spark" aria-hidden="true">&#10022;</div>
-          <div class="assistant-empty-title">What can I help with?</div>
-          <p>Ask about this page, find something, or make a change.</p>
+          <div class="assistant-empty-kicker">${escapeHTML(getAssistantMode().label)} mode</div>
+          <div class="assistant-empty-title">What are we working on?</div>
+          <p>${getAssistantMode().id === 'fast' ? 'Quick answers without drafting changes.' : getAssistantMode().id === 'build' ? 'For larger, multi-step work that may take longer.' : 'Ask a question or draft a change for review.'}</p>
+          <div class="assistant-starters">
+            <button type="button" data-assistant-starter="Summarize this page">Summarize this page</button>
+            <button type="button" data-assistant-starter="What should I work on next?">Plan next steps</button>
+            <button type="button" data-assistant-starter="Find my most relevant notes for this page">Find related notes</button>
+          </div>
         </div>
       `;
       host.dataset.renderSignature = renderSignature;
@@ -3151,7 +3202,10 @@
       ? `
         <div class="assistant-message system">
           <div class="assistant-message-role">${escapeHTML(getAssistantDisplayName())}</div>
-          <div class="assistant-message-text assistant-thinking"><span></span><span></span><span></span></div>
+          <div class="assistant-message-text assistant-thinking">
+            <span class="assistant-thinking-orb" aria-hidden="true"></span>
+            <span class="assistant-thinking-copy">${activeAssistantStage === 'context' ? 'Reading the relevant parts of Sanctum' : activeAssistantStage === 'review' ? 'Checking the proposal' : 'Thinking'}</span>
+          </div>
         </div>
       `
       : '';
@@ -3407,6 +3461,7 @@
   };
 
   async function buildAssistantRequestContext(query, options = {}) {
+    const assistantMode = getAssistantMode().id;
     const currentPageId = getAssistantCurrentPageId("home");
     const currentPage = getPageUnderstanding(currentPageId || "home");
     const activeNote = getLiveEditorNoteDraft() || getNoteById(activeNoteId);
@@ -3460,6 +3515,7 @@
 
     return {
       mode: 'ask',
+      assistantMode,
       user: activeUser,
       context: {
         currentPage: {
@@ -3483,11 +3539,11 @@
           notes: noteMatches,
           pages: pageMatches,
         },
-        retrievedRecords: retrievedRecords.map((record) => (
+        retrievedRecords: retrievedRecords.slice(0, assistantMode === 'fast' ? 32 : 140).map((record) => (
           contextEngine.toAssistantRecord(record, { maxText: 1400 })
         )),
         entityResolution: retrievedContext.entityResolution || null,
-        availableSchemas: retrievedContext.schemas,
+        availableSchemas: assistantMode === 'fast' ? [] : retrievedContext.schemas,
         contextRoutePlan: routePlan,
         contextCatalogStats: contextCatalog ? {
           version: contextCatalog.version,
@@ -3505,7 +3561,7 @@
             && message.role === "user"
             && String(message.text || "").trim() === String(query || "").trim()
           ))
-          .slice(-8)
+          .slice(-(assistantMode === 'fast' ? 6 : 8))
           .map((message) => ({
           role: message.role,
           text: message.text,
@@ -3652,10 +3708,13 @@
     if (!clean) return;
     pushChat("user", clean);
     activeAssistantBusy = true;
+    activeAssistantStage = 'context';
     renderAssistantMessages();
 
     try {
       const requestContext = await buildAssistantRequestContext(clean, options);
+      activeAssistantStage = 'thinking';
+      renderAssistantMessages();
       if (options.continuationJob) requestContext.continuationJob = options.continuationJob;
       const response = await fetch(ASSISTANT_API_PATH, {
         method: "POST",
@@ -3677,6 +3736,7 @@
       console.warn("Assistant request failed, falling back to local search.", error);
     } finally {
       activeAssistantBusy = false;
+      activeAssistantStage = '';
       renderAssistantMessages();
     }
 
@@ -4219,6 +4279,18 @@
 
   function handleDocumentClick(event) {
     const target = event.target;
+
+    const assistantModeButton = target.closest('[data-assistant-mode]');
+    if (assistantModeButton) {
+      setAssistantMode(assistantModeButton.dataset.assistantMode);
+      return;
+    }
+
+    const assistantStarter = target.closest('[data-assistant-starter]');
+    if (assistantStarter && !activeAssistantBusy) {
+      handleAssistantQuery(assistantStarter.dataset.assistantStarter);
+      return;
+    }
 
     const assistantProfileButton = target.closest('#assistantProfileOpen');
     if (assistantProfileButton) {

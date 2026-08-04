@@ -3,22 +3,59 @@
   const LEGACY_PAGE_DB_KEY = "sanctum_calendar_databases";
   const STATUS_OPTIONS = ["Not started", "In progress", "Done"];
   const STATUS_COLOR_OPTIONS = [
+    { value: "black", label: "Black" },
+    { value: "charcoal", label: "Charcoal" },
     { value: "gray", label: "Gray" },
+    { value: "silver", label: "Silver" },
+    { value: "white", label: "White" },
+    { value: "ivory", label: "Ivory" },
+    { value: "champagne", label: "Champagne" },
     { value: "light-brown", label: "Light Brown" },
     { value: "coffee-brown", label: "Coffee Brown" },
+    { value: "rust", label: "Rust" },
     { value: "orange", label: "Orange" },
-    { value: "burgundy", label: "Burgundy" },
-    { value: "deep-green", label: "Deep Green" },
-    { value: "blue", label: "Blue" },
-    { value: "green", label: "Green" },
+    { value: "peach", label: "Peach" },
+    { value: "gold", label: "Gold" },
+    { value: "mustard", label: "Mustard" },
     { value: "yellow", label: "Yellow" },
-    { value: "red", label: "Red" },
+    { value: "light-yellow", label: "Light Yellow" },
+    { value: "olive", label: "Olive" },
+    { value: "deep-green", label: "Deep Green" },
+    { value: "green", label: "Green" },
+    { value: "sage-green", label: "Sage" },
+    { value: "mint", label: "Mint" },
+    { value: "teal", label: "Teal" },
+    { value: "turquoise", label: "Turquoise" },
+    { value: "blue", label: "Blue" },
+    { value: "muted-blue", label: "Muted Blue" },
+    { value: "slate-blue", label: "Slate Blue" },
+    { value: "navy-blue", label: "Navy" },
+    { value: "plum", label: "Plum" },
     { value: "purple", label: "Purple" },
-    { value: "pink", label: "Pink" }
+    { value: "violet", label: "Violet" },
+    { value: "lavender", label: "Lavender" },
+    { value: "mauve", label: "Mauve" },
+    { value: "pink", label: "Pink" },
+    { value: "coral", label: "Coral" },
+    { value: "red", label: "Red" },
+    { value: "crimson", label: "Crimson" },
+    { value: "burgundy", label: "Burgundy" }
   ];
   const TAG_COLOR_OPTIONS = [
     { value: "none", label: "No color" },
     ...STATUS_COLOR_OPTIONS
+  ];
+  // New tags/select options should feel varied immediately. Keep the full
+  // palette available, but lead with distinct colors instead of several
+  // near-identical neutrals.
+  const DEFAULT_OPTION_COLOR_CYCLE = [
+    "sage-green", "muted-blue", "gold", "plum", "rust", "teal",
+    "lavender", "coral", "olive", "navy-blue", "peach", "crimson",
+    "turquoise", "champagne", "green", "violet", "mustard", "pink",
+    "deep-green", "blue", "purple", "orange", "burgundy", "mint",
+    "yellow", "mauve", "slate-blue", "red", "light-yellow",
+    "coffee-brown", "light-brown", "ivory", "silver", "gray",
+    "charcoal", "black", "white"
   ];
   const ROW_COLOR_VALUES = {
     gray: "186 181 171",
@@ -29,10 +66,35 @@
     "deep-green": "34 95 68",
     blue: "49 125 223",
     green: "61 145 96",
-    yellow: "176 132 25",
+    yellow: "216 181 46",
     red: "170 63 63",
     purple: "115 79 169",
-    pink: "181 86 133"
+    pink: "181 86 133",
+    gold: "140 101 24",
+    plum: "80 42 78",
+    "navy-blue": "37 60 102",
+    teal: "31 112 113",
+    lavender: "142 112 190",
+    rust: "154 72 40",
+    crimson: "154 34 58",
+    "sage-green": "104 128 91",
+    ivory: "218 207 178",
+    violet: "130 73 182",
+    silver: "143 149 155",
+    white: "245 244 240",
+    olive: "107 112 48",
+    black: "24 24 24",
+    charcoal: "57 61 64",
+    champagne: "191 156 110",
+    turquoise: "41 151 151",
+    "muted-blue": "78 110 139",
+    mustard: "160 132 58",
+    "light-yellow": "227 206 122",
+    coral: "187 92 78",
+    peach: "199 132 95",
+    mauve: "142 91 125",
+    mint: "91 154 126",
+    "slate-blue": "74 91 124"
   };
   const PROPERTY_ICON_PRESETS = [
     { value: "Aa", label: "Aa" },
@@ -66,6 +128,7 @@
     { value: "average", label: "Average" },
     { value: "percentage", label: "Percentage" },
     { value: "days-until-date", label: "Days until date" },
+    { value: "cycle-day", label: "Cycle day (from phase)" },
     { value: "compare", label: "Compare" },
     { value: "auto-complete", label: "Auto-complete" }
   ];
@@ -92,6 +155,7 @@
     { value: "duration-minutes", label: "Duration (minutes)" },
     { value: "duration-hours", label: "Duration (hours)" },
     { value: "rating", label: "Rating" },
+    { value: "range", label: "Range" },
     { value: "unit", label: "Custom unit" }
   ];
   const NUMBER_CURRENCY_OPTIONS = [
@@ -147,6 +211,7 @@
 
   let draggingCalendarItem = null;
   let draggingDatabaseProperty = null;
+  let draggingPropertyOption = null;
   let pendingDatabaseFocus = null;
   let activeColumnResize = null;
   const pendingScheduledResets = new Set();
@@ -1066,6 +1131,27 @@
     });
   }
 
+  function enablePropertyPanelReplaceOnFirstClick(panelEl) {
+    if (!panelEl) return;
+    panelEl.addEventListener("mousedown", (event) => event.stopPropagation());
+    panelEl.addEventListener("focusin", (event) => {
+      const inputEl = event.target.closest(
+        'input[data-db-action="property-panel-name"], input[data-db-action="status-option-name"], input[data-db-action="select-option-name"], input[data-db-action="tag-option-name"]'
+      );
+      if (!inputEl) return;
+      window.requestAnimationFrame(() => {
+        if (!inputEl.isConnected || document.activeElement !== inputEl) return;
+        if (typeof inputEl.select === "function") inputEl.select();
+      });
+    });
+  }
+
+  function focusNewestPropertyOption(panelEl, action = "", extraSelector = "") {
+    if (!panelEl || !action) return;
+    const inputs = panelEl.querySelectorAll(`input[data-db-action="${action}"]${extraSelector}`);
+    focusAndSelectInput(inputs[inputs.length - 1]);
+  }
+
   function normalizeViewMode(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
     if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board" || safe === "checklist") return safe;
@@ -1128,7 +1214,27 @@
   }
 
   function createNameProperty() {
-    return { id: "name", name: "Name", type: "title" };
+    return {
+      id: "name",
+      name: "Name",
+      type: "title",
+      titleConfig: normalizeTitleConfig({})
+    };
+  }
+
+  function normalizeTitleDateFormat(value = "") {
+    const safeValue = String(value || "").trim().toLowerCase();
+    return ["long", "medium", "short", "iso"].includes(safeValue) ? safeValue : "long";
+  }
+
+  function normalizeTitleConfig(rawValue = {}) {
+    const raw = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+    return {
+      sourcePropertyId: String(raw.sourcePropertyId || "").trim(),
+      dateFormat: normalizeTitleDateFormat(raw.dateFormat || "long"),
+      syncMode: String(raw.syncMode || "").trim().toLowerCase() === "sync" ? "sync" : "fill-empty",
+      prefix: String(raw.prefix || "").slice(0, 80)
+    };
   }
 
   function normalizeRowColor(value = "") {
@@ -1196,7 +1302,9 @@
   }
 
   function normalizeStatusOption(raw = {}, fallbackName = "Option") {
-    const safeColor = new Set(["gray", "light-brown", "coffee-brown", "orange", "burgundy", "deep-green", "blue", "green", "yellow", "red", "purple", "pink"]);
+    // Status used to validate against the old, short palette here, so every
+    // newer color silently became gray the next time the database rendered.
+    const safeColor = new Set(STATUS_COLOR_OPTIONS.map((entry) => entry.value));
     return {
       id: typeof raw?.id === "string" && raw.id ? raw.id : createId("status"),
       name: String(raw?.name || fallbackName || "Option").trim() || "Option",
@@ -1336,6 +1444,8 @@
       rightPropertyId: typeof raw?.rightPropertyId === "string" ? raw.rightPropertyId : "",
       checkboxPropertyId: typeof raw?.checkboxPropertyId === "string" ? raw.checkboxPropertyId : "",
       datePropertyId: typeof raw?.datePropertyId === "string" ? raw.datePropertyId : "",
+      phasePropertyId: typeof raw?.phasePropertyId === "string" ? raw.phasePropertyId : "",
+      phaseValue: String(raw?.phaseValue || "").trim(),
       expression: String(raw?.expression || "").trim()
     };
   }
@@ -1360,13 +1470,22 @@
     return Math.max(3, Math.min(10, Math.round(numeric)));
   }
 
+  function normalizeNumberRangeBound(value, fallback) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  }
+
   function normalizeNumberConfig(raw = {}) {
     const source = raw && typeof raw === "object" ? raw : {};
+    const rangeMin = normalizeNumberRangeBound(source.rangeMin ?? source.min, 1);
+    const requestedMax = normalizeNumberRangeBound(source.rangeMax ?? source.max, 10);
     return {
       format: normalizeNumberFormat(source.format || source.style || "number"),
       currencyCode: normalizeNumberCurrencyCode(source.currencyCode || source.currency || DEFAULT_NUMBER_CURRENCY),
       unitLabel: normalizeNumberUnitLabel(source.unitLabel || source.unit || ""),
-      ratingScale: normalizeNumberRatingScale(source.ratingScale || source.scale || DEFAULT_NUMBER_RATING_SCALE)
+      ratingScale: normalizeNumberRatingScale(source.ratingScale || source.scale || DEFAULT_NUMBER_RATING_SCALE),
+      rangeMin,
+      rangeMax: requestedMax > rangeMin ? requestedMax : rangeMin + 1
     };
   }
 
@@ -1631,7 +1750,7 @@
   }
 
   function getNextSelectColor(property) {
-    const palette = TAG_COLOR_OPTIONS.filter((entry) => entry.value !== "none").map((entry) => entry.value);
+    const palette = DEFAULT_OPTION_COLOR_CYCLE;
     const usedColors = new Set(getPropertySelectOptions(property).map((option) => option.color).filter((color) => color && color !== "none"));
     const unused = palette.find((color) => !usedColors.has(color));
     if (unused) return unused;
@@ -1678,7 +1797,7 @@
   }
 
   function getNextTagColor(property) {
-    const palette = TAG_COLOR_OPTIONS.filter((entry) => entry.value !== "none").map((entry) => entry.value);
+    const palette = DEFAULT_OPTION_COLOR_CYCLE;
     const usedColors = new Set(getPropertyTagOptions(property).map((option) => option.color).filter((color) => color && color !== "none"));
     const unused = palette.find((color) => !usedColors.has(color));
     if (unused) return unused;
@@ -1804,7 +1923,9 @@
       folderField: normalizeFolderField(raw.folderField || ""),
       folderAutoFill: normalizeFolderAutoFill(raw.folderAutoFill || "", type)
     };
+    if (type === "date") property.defaultToday = raw.defaultToday === true;
     if (type === "number") property.numberConfig = normalizeNumberConfig(raw.numberConfig || {});
+    if (type === "title") property.titleConfig = normalizeTitleConfig(raw.titleConfig || {});
     if (type === "status") property.statusGroups = normalizeStatusGroups(raw.statusGroups || []);
     if (type === "tag") property.tagOptions = normalizeTagOptions(raw.tagOptions || []);
     if (type === "select") property.selectOptions = normalizeSelectOptions(raw.selectOptions || []);
@@ -1856,7 +1977,12 @@
     if (property.type === "date") return serializeDateCellValue(value || "");
     if (property.type === "number") {
       const safeValue = String(value ?? "").trim().replace(/,/g, "");
-      return safeValue && Number.isFinite(Number(safeValue)) ? safeValue : "";
+      if (!safeValue || !Number.isFinite(Number(safeValue))) return "";
+      const config = getNumberConfig(property);
+      if (config.format === "range") {
+        return String(Math.max(config.rangeMin, Math.min(config.rangeMax, Number(safeValue))));
+      }
+      return safeValue;
     }
     if (property.type === "relation") {
       return serializeRelationValue(value);
@@ -2024,10 +2150,10 @@
     if (property.type === "title") return 190;
     if (property.type === "notes") return 156;
     if (property.type === "checkbox") return 48;
-    if (property.type === "number") return 96;
+    if (property.type === "number" || property.type === "formula") return 56;
     if (property.type === "date") return 122;
     if (property.type === "status" || property.type === "select" || property.type === "tag") return 116;
-    if (property.type === "relation" || property.type === "summary" || property.type === "formula") return 128;
+    if (property.type === "relation" || property.type === "summary") return 128;
     return 108;
   }
 
@@ -2036,16 +2162,16 @@
     if (property.type === "title") return 190;
     if (property.type === "notes") return 156;
     if (property.type === "checkbox") return 48;
-    if (property.type === "number") return 96;
+    if (property.type === "number" || property.type === "formula") return 56;
     if (property.type === "date") return 122;
     if (property.type === "status" || property.type === "select" || property.type === "tag") return 116;
-    if (property.type === "relation" || property.type === "summary" || property.type === "formula") return 128;
+    if (property.type === "relation" || property.type === "summary") return 128;
     return 108;
   }
 
   function getCompactPropertyHeaderThreshold(property) {
     if (!property) return 0;
-    return property.type === "checkbox" ? 64 : 0;
+    return ["checkbox", "number", "formula"].includes(property.type) ? 64 : 0;
   }
 
   function getPageEditorColumnWidths(database, options = {}) {
@@ -2211,7 +2337,7 @@
       rows = rows.map((row) => normalizeRow(row, properties));
     }
 
-    return {
+    const normalizedDatabase = {
       title: normalizeDatabaseTitle(raw.title || raw.calendarTitle || ""),
       view: normalizeViewMode(raw.view || raw.calendarView || "", defaultView),
       month: normalizeMonthKey(raw.month || raw.calendarMonth || "", new Date()),
@@ -2247,6 +2373,8 @@
       properties,
       rows
     };
+    applyAutomaticTitles(normalizedDatabase);
+    return normalizedDatabase;
   }
 
   function getCurrentPageId() {
@@ -2393,9 +2521,16 @@
     if (source && !(source.kind === "block" && source.pageId === getCurrentPageId() && source.blockId === (block?.id || block?.dataset?.frameChildId || ""))) {
       const sourceDatabase = getDatabaseFromSource(source);
       if (sourceDatabase) {
+        const hasVisibilityOverride = !!block?.dataset
+          && Object.prototype.hasOwnProperty.call(block.dataset, "dbHiddenPropertyIds");
         return normalizeDatabase({
           ...sourceDatabase,
           title: sourceDatabase.title || getInlineDatabaseSourceLabel(source),
+          properties: applyViewPropertyVisibility(
+            sourceDatabase.properties,
+            block?.dataset?.dbHiddenPropertyIds || "[]",
+            hasVisibilityOverride
+          ),
           view: normalizeEmbedView(block?.dataset?.calendarView || sourceDatabase.view || "table", "table"),
           filters: block?.dataset?.dbFilters || "[]",
           sorts: block?.dataset?.dbSorts || "[]",
@@ -2455,6 +2590,8 @@
     block.dataset.dbFilters = JSON.stringify(normalized.filters || []);
     block.dataset.dbSorts = JSON.stringify(normalized.sorts || []);
     block.dataset.dbGroupBy = normalized.groupBy || "";
+    delete block.dataset.dbSummaryMetrics;
+    block.dataset.dbHiddenPropertyIds = JSON.stringify(getHiddenPropertyIds(normalized));
     if (!source || ownsBlockSource) {
       block.dataset.calendarMonth = normalized.month;
       block.dataset.dbProperties = JSON.stringify(stored.properties || []);
@@ -2506,9 +2643,15 @@
     if (source) {
       const sourceDatabase = getDatabaseFromSource(source);
       if (sourceDatabase) {
+        const hasVisibilityOverride = Object.prototype.hasOwnProperty.call(blockData || {}, "dbHiddenPropertyIds");
         return normalizeDatabase({
           ...sourceDatabase,
           title: sourceDatabase.title || getInlineDatabaseSourceLabel(source),
+          properties: applyViewPropertyVisibility(
+            sourceDatabase.properties,
+            blockData?.dbHiddenPropertyIds || "[]",
+            hasVisibilityOverride
+          ),
           view: normalizeEmbedView(blockData?.calendarView || sourceDatabase.view || "table", "table"),
           filters: blockData?.dbFilters || "[]",
           sorts: blockData?.dbSorts || "[]",
@@ -2701,16 +2844,24 @@
             formulaConfig: type === "formula" ? normalizeFormulaConfig(property.formulaConfig || {}) : null
           };
         }),
-        rows: safeParseArray(normalized.rows || []).map((row) => ({
-          id: row.id,
-          title: getRowTitle(normalized, row),
-          pageId: row.pageId || "",
-          createdAt: row.createdAt || "",
-          updatedAt: row.updatedAt || "",
-          archived: row.archived === true,
-          checklistChecked: row.checklistChecked === true,
-          values: { ...(row?.values || {}) }
-        }))
+        rows: safeParseArray(normalized.rows || []).map((row) => {
+          const values = { ...(row?.values || {}) };
+          safeParseArray(normalized.properties || []).forEach((property) => {
+            if (property.type === "formula" || property.type === "summary" || isTimestampProperty(property)) {
+              values[property.id] = getComputedPropertyRawValue(normalized, row, property);
+            }
+          });
+          return {
+            id: row.id,
+            title: getRowTitle(normalized, row),
+            pageId: row.pageId || "",
+            createdAt: row.createdAt || "",
+            updatedAt: row.updatedAt || "",
+            archived: row.archived === true,
+            checklistChecked: row.checklistChecked === true,
+            values
+          };
+        })
       }
     };
   }
@@ -3742,7 +3893,18 @@
       document.querySelectorAll(`.block[data-type="calendar"][data-db-source-kind="page"][data-db-source-page-id="${source.pageId}"]`).forEach((blockEl) => {
         renderDatabaseSurface(blockEl, getBlockDatabase(blockEl));
       });
+      window.refreshLiveDatabaseCards?.();
     }
+  }
+
+  function syncDatabasePageTitleFromPage(pageId = "") {
+    const page = getCurrentPageRecord(pageId);
+    if (!page || page.layout !== "sheet") return false;
+    // A database page's display name is its page name. Keeping the stored
+    // schema title in sync means every linked inline view updates immediately.
+    getPageDatabase(page.id);
+    rerenderDatabaseSourceIfVisible({ kind: "page", pageId: page.id, blockId: "" });
+    return true;
   }
 
   function getBacklinkRelationProperties(database, source) {
@@ -3964,6 +4126,61 @@
     return safeParseArray(database?.properties || []).filter((property) => property.id !== propertyId && property.type === "date");
   }
 
+  function getFormulaPhaseCandidates(database, propertyId = "") {
+    const supportedTypes = new Set(["status", "select", "tag", "text"]);
+    return safeParseArray(database?.properties || []).filter((property) => (
+      property.id !== propertyId && supportedTypes.has(property.type)
+    ));
+  }
+
+  function getFormulaPhaseValueOptions(database, property) {
+    if (!property) return [];
+    const values = [];
+    if (property.type === "status") {
+      getPropertyStatusGroups(property).forEach((group) => {
+        safeParseArray(group?.options || []).forEach((option) => values.push(option?.name || ""));
+      });
+    } else if (property.type === "select") {
+      getPropertySelectOptions(property).forEach((option) => values.push(option?.name || ""));
+    } else if (property.type === "tag") {
+      getPropertyTagOptions(property).forEach((option) => values.push(option?.name || ""));
+    }
+
+    safeParseArray(database?.rows || []).forEach((row) => {
+      const rawValue = getRowValue(row, property.id);
+      if (property.type === "tag") parseTagValues(rawValue).forEach((value) => values.push(value));
+      else values.push(String(rawValue || "").trim());
+    });
+
+    const seen = new Set();
+    return values.map((value) => String(value || "").trim()).filter((value) => {
+      const key = value.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function formulaPhaseValueMatches(property, rawValue = "", expectedValue = "") {
+    const expected = String(expectedValue || "").trim().toLowerCase();
+    if (!property || !expected) return false;
+    if (property.type === "tag") {
+      return parseTagValues(rawValue).some((value) => value.toLowerCase() === expected);
+    }
+    return String(rawValue || "").trim().toLowerCase() === expected;
+  }
+
+  function getFormulaCalendarDayDifference(startKey = "", endKey = "") {
+    const start = normalizeDayKey(startKey, "");
+    const end = normalizeDayKey(endKey, "");
+    if (!start || !end) return null;
+    const [startYear, startMonth, startDay] = start.split("-").map(Number);
+    const [endYear, endMonth, endDay] = end.split("-").map(Number);
+    return Math.round((
+      Date.UTC(endYear, endMonth - 1, endDay) - Date.UTC(startYear, startMonth - 1, startDay)
+    ) / 86400000);
+  }
+
   function getFormulaRelationCandidates(database, propertyId = "") {
     return safeParseArray(database?.properties || []).filter((property) => property.id !== propertyId && property.type === "relation");
   }
@@ -4057,6 +4274,41 @@
       return String((numerator / denominator) * 100);
     }
 
+    if (config.simpleType === "cycle-day") {
+      const dateProperty = getPropertyById(database, config.datePropertyId);
+      const phaseProperty = getPropertyById(database, config.phasePropertyId);
+      const currentDate = dateProperty?.type === "date"
+        ? getFormulaDateOperand(database, row, dateProperty.id, visited)
+        : "";
+      if (!currentDate || !phaseProperty || !config.phaseValue) return "";
+
+      const datedRows = safeParseArray(database?.rows || [])
+        .filter((entry) => !entry?.archived)
+        .map((entry, index) => ({
+          row: entry,
+          index,
+          date: getFormulaDateOperand(database, entry, dateProperty.id, visited)
+        }))
+        .filter((entry) => entry.date && entry.date <= currentDate)
+        .sort((left, right) => left.date.localeCompare(right.date) || left.index - right.index);
+
+      let cycleStart = "";
+      let previousMatched = false;
+      datedRows.forEach((entry) => {
+        const matched = formulaPhaseValueMatches(
+          phaseProperty,
+          getComputedPropertyRawValue(database, entry.row, phaseProperty, visited),
+          config.phaseValue
+        );
+        if (matched && !previousMatched) cycleStart = entry.date;
+        previousMatched = matched;
+      });
+
+      if (!cycleStart) return "";
+      const difference = getFormulaCalendarDayDifference(cycleStart, currentDate);
+      return Number.isFinite(difference) && difference >= 0 ? String(difference + 1) : "";
+    }
+
     if (config.simpleType === "days-until-date") {
       const dateKey = getFormulaDateOperand(database, row, config.datePropertyId, visited);
       if (!dateKey) return "";
@@ -4108,6 +4360,15 @@
 
     if (simpleType === "days-until-date" && !getPropertyById(database, config.datePropertyId || "")) {
       return "Choose the date field this formula should count down to.";
+    }
+
+    if (simpleType === "cycle-day") {
+      const dateProperty = getPropertyById(database, config.datePropertyId || "");
+      const phaseProperty = getPropertyById(database, config.phasePropertyId || "");
+      if (!dateProperty || dateProperty.type !== "date") return "Choose the date field used by each log row.";
+      if (!phaseProperty) return "Choose the phase field that marks the beginning of a new cycle.";
+      if (!config.phaseValue) return "Choose the phase value that resets the count to Day 1.";
+      return `Day 1 begins when ${phaseProperty.name} changes to ${config.phaseValue}. Later rows count calendar days from that date.`;
     }
 
     return getFormulaSimpleDescription(property);
@@ -4416,10 +4677,16 @@
       const linkedSource = getEmbedSourceTarget(blockEl);
       if (linkedSource?.pageId) {
         const linkedDatabase = getDatabaseFromSource(linkedSource) || normalizeDatabase({});
+        const linkedPropertiesById = new Map(
+          safeParseArray(linkedDatabase.properties || []).map((property) => [property.id, property])
+        );
         saveDatabaseToSource(linkedSource, {
           ...linkedDatabase,
           title: database.title || linkedDatabase.title,
-          properties: database.properties,
+          properties: safeParseArray(database.properties || []).map((property) => ({
+            ...property,
+            hidden: linkedPropertiesById.get(property.id)?.hidden === true
+          })),
           rows: database.rows,
           columnWidths: database.columnWidths,
           folderState: database.folderState,
@@ -4739,6 +5006,68 @@
     const property = getTitleProperty(database);
     const title = String(getRowValue(row, property.id) || "").trim();
     return title || "Untitled";
+  }
+
+  function getAutomaticTitleSource(database) {
+    const titleProperty = getTitleProperty(database);
+    const config = normalizeTitleConfig(titleProperty.titleConfig || {});
+    const sourceProperty = getPropertyById(database, config.sourcePropertyId);
+    if (!sourceProperty || sourceProperty.type !== "date") {
+      return { titleProperty, config: normalizeTitleConfig({}), sourceProperty: null };
+    }
+    return { titleProperty, config, sourceProperty };
+  }
+
+  function getPreferredNewRowFocusPropertyId(database) {
+    const { titleProperty, sourceProperty } = getAutomaticTitleSource(database);
+    return sourceProperty?.id || titleProperty.id;
+  }
+
+  function formatAutomaticTitleDate(value = "", format = "long") {
+    const dayKey = getDateStartValue(value);
+    if (!dayKey) return "";
+    const normalized = normalizeDayKey(dayKey, "");
+    if (!normalized) return "";
+    if (format === "iso") return normalized;
+    const [yearText, monthText, dayText] = normalized.split("-");
+    const parsed = new Date(Number(yearText), Number(monthText) - 1, Number(dayText));
+    if (Number.isNaN(parsed.getTime())) return normalized;
+    if (format === "short") {
+      return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    if (format === "medium") {
+      return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+    return parsed.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  }
+
+  function getAutomaticTitleValue(database, row) {
+    const { config, sourceProperty } = getAutomaticTitleSource(database);
+    if (!sourceProperty) return "";
+    const dateLabel = formatAutomaticTitleDate(getRowValue(row, sourceProperty.id), config.dateFormat);
+    if (!dateLabel) return "";
+    return `${config.prefix || ""}${dateLabel}`.trim();
+  }
+
+  function applyAutomaticTitleToRow(database, row, options = {}) {
+    if (!database || !row) return false;
+    const { titleProperty, config, sourceProperty } = getAutomaticTitleSource(database);
+    if (!sourceProperty) return false;
+    const currentTitle = String(getRowValue(row, titleProperty.id) || "").trim();
+    const nextTitle = getAutomaticTitleValue(database, row);
+    const shouldSync = config.syncMode === "sync" || options.force === true;
+    if (!shouldSync && currentTitle) return false;
+    if (currentTitle === nextTitle) return false;
+    row.values[titleProperty.id] = normalizeCellValue(titleProperty, nextTitle);
+    return true;
+  }
+
+  function applyAutomaticTitles(database, options = {}) {
+    let changed = false;
+    safeParseArray(database?.rows || []).forEach((row) => {
+      changed = applyAutomaticTitleToRow(database, row, options) || changed;
+    });
+    return changed;
   }
 
   function formatCellDisplay(property, value = "") {
@@ -5555,6 +5884,23 @@
     return property?.hidden !== true;
   }
 
+  function getHiddenPropertyIds(database) {
+    return safeParseArray(database?.properties || [])
+      .filter((property) => property?.hidden === true && property?.id)
+      .map((property) => property.id);
+  }
+
+  function applyViewPropertyVisibility(properties = [], rawHiddenIds = [], hasOverride = false) {
+    if (!hasOverride) {
+      return safeParseArray(properties).map((property) => ({ ...property }));
+    }
+    const hiddenIds = new Set(normalizeIdList(rawHiddenIds));
+    return safeParseArray(properties).map((property) => ({
+      ...property,
+      hidden: hiddenIds.has(property.id)
+    }));
+  }
+
   function getVisibleTableProperties(database) {
     return (database?.properties || []).filter((property) => isPropertyVisibleInTable(property));
   }
@@ -5739,7 +6085,7 @@
     const page = getCurrentPageRecord(pageId);
     const iconValue = page?.icon || "";
     if (typeof window.getIconMarkup === "function") {
-      return window.getIconMarkup(iconValue, "📄", "page-database-page-icon");
+      return window.getIconMarkup(iconValue, "📄", "page-database-page-icon", { scale: page?.iconScale });
     }
     return buildFallbackIconMarkup(iconValue || "📄", "page-database-page-icon");
   }
@@ -5833,6 +6179,12 @@
       const dateText = [parsed.start, parsed.end, formatDateValueLabel(rawValue)].join(" ").toLowerCase();
       if (filter.mode === "empty") return !parsed.start;
       if (filter.mode === "contains") return dateText.includes(filterValue.toLowerCase());
+      if (filter.mode === "last-days") {
+        const days = Math.max(1, Number(filterValue) || 1);
+        const today = toDayKey();
+        const difference = getFormulaCalendarDayDifference(parsed.start, today);
+        return Number.isFinite(difference) && difference >= 0 && difference < days;
+      }
       const normalizedFilterDay = normalizeDayKey(filterValue, "");
       return rawValue === filterValue || parsed.start === normalizedFilterDay || parsed.end === normalizedFilterDay;
     }
@@ -6650,6 +7002,26 @@
     database.filters = next;
   }
 
+  function appendRelativeDateFilterButtons(submenuEl, database, property, onCommit) {
+    const options = [
+      { days: 1, label: "Today" },
+      { days: 2, label: "Last 2 days" },
+      { days: 3, label: "Last 3 days" },
+      { days: 5, label: "Last 5 days" },
+      { days: 7, label: "Last 7 days" },
+      { days: 14, label: "Last 14 days (biweekly)" },
+      { days: 30, label: "Last 30 days (monthly)" }
+    ];
+    const current = getPropertyFilter(database, property.id);
+    options.forEach((option) => {
+      const active = current?.mode === "last-days" && Number(current.value) === option.days;
+      appendMenuButton(submenuEl, option.label, () => {
+        setPropertyFilter(database, property.id, active ? "" : "last-days", active ? "" : String(option.days));
+        onCommit?.();
+      }, { active });
+    });
+  }
+
   function setPropertySort(database, propertyId = "", direction = "") {
     database.sorts = (database.sorts || []).filter((entry) => entry.propertyId !== propertyId);
     if (direction === "asc" || direction === "desc") {
@@ -6691,6 +7063,13 @@
     const safeType = normalizePropertyType(nextType, property.type);
     if (safeType === "title") return;
 
+    const previousType = property.type;
+    const previousSelectOptions = previousType === "select"
+      ? cloneSelectOptions(property.selectOptions || [])
+      : [];
+    const previousTagOptions = previousType === "tag"
+      ? cloneTagOptions(property.tagOptions || [])
+      : [];
     const previousId = property.id;
     property.type = safeType;
     if (safeType === "created-time" || safeType === "edited-time") {
@@ -6709,9 +7088,17 @@
   else delete property.numberConfig;
     if (safeType === "status") property.statusGroups = normalizeStatusGroups(property.statusGroups || []);
     else delete property.statusGroups;
-    if (safeType === "tag") property.tagOptions = normalizeTagOptions(property.tagOptions || []);
+    if (safeType === "tag") {
+      property.tagOptions = previousType === "select"
+        ? normalizeTagOptions(previousSelectOptions)
+        : normalizeTagOptions(property.tagOptions || []);
+    }
     else delete property.tagOptions;
-    if (safeType === "select") property.selectOptions = normalizeSelectOptions(property.selectOptions || []);
+    if (safeType === "select") {
+      property.selectOptions = previousType === "tag"
+        ? normalizeSelectOptions(previousTagOptions)
+        : normalizeSelectOptions(property.selectOptions || []);
+    }
     else delete property.selectOptions;
     if (safeType === "relation") property.relationTarget = normalizeRelationTarget(property.relationTarget || {});
     else delete property.relationTarget;
@@ -6719,10 +7106,16 @@
     else delete property.summaryConfig;
     if (safeType === "formula") property.formulaConfig = normalizeFormulaConfig(property.formulaConfig || {});
     else delete property.formulaConfig;
+    if (safeType === "date") property.defaultToday = property.defaultToday === true;
+    else delete property.defaultToday;
     property.folderAutoFill = normalizeFolderAutoFill(property.folderAutoFill || "", safeType);
     database.rows = database.rows.map((row) => {
       const nextRow = normalizeRow(row, database.properties);
-      nextRow.values[property.id] = normalizeCellValue(property, row?.values?.[property.id] ?? "");
+      const previousValue = row?.values?.[property.id] ?? "";
+      const convertedValue = previousType === "tag" && safeType === "select"
+        ? (parseTagValues(previousValue)[0] || "")
+        : previousValue;
+      nextRow.values[property.id] = normalizeCellValue(property, convertedValue);
       return nextRow;
     });
   }
@@ -6907,6 +7300,66 @@
     if (!option) return;
     option.isDefault = true;
     setStatusGroups(database, propertyId, groups);
+  }
+
+  function moveArrayEntry(items = [], fromIndex = -1, targetIndex = -1, position = "before") {
+    if (!Array.isArray(items) || fromIndex < 0 || targetIndex < 0 || fromIndex >= items.length || targetIndex >= items.length || fromIndex === targetIndex) {
+      return false;
+    }
+    const [moved] = items.splice(fromIndex, 1);
+    let insertIndex = targetIndex;
+    if (fromIndex < targetIndex) insertIndex -= 1;
+    if (position === "after") insertIndex += 1;
+    items.splice(Math.max(0, Math.min(items.length, insertIndex)), 0, moved);
+    return true;
+  }
+
+  function movePropertyOption(database, propertyId = "", source = {}, target = {}, position = "before") {
+    const property = getPropertyById(database, propertyId);
+    if (!property || source.kind !== target.kind) return false;
+
+    if (source.kind === "status" && property.type === "status") {
+      if (source.groupIndex !== target.groupIndex) return false;
+      const groups = cloneStatusGroups(property.statusGroups || []);
+      const options = groups[source.groupIndex]?.options;
+      if (!moveArrayEntry(options, source.optionIndex, target.optionIndex, position)) return false;
+      setStatusGroups(database, propertyId, groups);
+      return true;
+    }
+
+    if (source.kind === "select" && property.type === "select") {
+      const options = cloneSelectOptions(property.selectOptions || []);
+      if (!moveArrayEntry(options, source.optionIndex, target.optionIndex, position)) return false;
+      setSelectOptions(database, propertyId, options);
+      return true;
+    }
+
+    if (source.kind === "tag" && property.type === "tag") {
+      const options = cloneTagOptions(property.tagOptions || []);
+      if (!moveArrayEntry(options, source.optionIndex, target.optionIndex, position)) return false;
+      setTagOptions(database, propertyId, options);
+      return true;
+    }
+
+    return false;
+  }
+
+  function getPropertyOptionRowMeta(rowEl) {
+    if (!rowEl) return null;
+    if (rowEl.dataset.statusOptionIndex !== undefined) {
+      return {
+        kind: "status",
+        groupIndex: Number(rowEl.dataset.statusGroupIndex || 0),
+        optionIndex: Number(rowEl.dataset.statusOptionIndex)
+      };
+    }
+    if (rowEl.dataset.selectOptionIndex !== undefined) {
+      return { kind: "select", optionIndex: Number(rowEl.dataset.selectOptionIndex) };
+    }
+    if (rowEl.dataset.tagOptionIndex !== undefined) {
+      return { kind: "tag", optionIndex: Number(rowEl.dataset.tagOptionIndex) };
+    }
+    return null;
   }
 
   function cycleStatusOptionColor(database, propertyId = "", groupIndex = -1, optionIndex = -1) {
@@ -7131,8 +7584,19 @@
   function addRowToDatabase(database, defaults = {}) {
     if (isFolderDatabase(database)) return null;
     database.properties = ensureTitleProperty(database.properties);
+    const rowDefaults = { ...(defaults || {}) };
+    database.properties.forEach((property) => {
+      if (
+        property.type === "date"
+        && property.defaultToday === true
+        && !Object.prototype.hasOwnProperty.call(rowDefaults, property.id)
+      ) {
+        rowDefaults[property.id] = toDayKey();
+      }
+    });
     const now = new Date().toISOString();
-    const row = normalizeRow({ id: createId("row"), createdAt: now, updatedAt: now, values: defaults }, database.properties);
+    const row = normalizeRow({ id: createId("row"), createdAt: now, updatedAt: now, values: rowDefaults }, database.properties);
+    applyAutomaticTitleToRow(database, row);
     database.rows.push(row);
     return row;
   }
@@ -7194,6 +7658,7 @@
       }
     }
     row.values[propertyId] = normalizedValue;
+    applyAutomaticTitleToRow(database, row);
     row.updatedAt = new Date().toISOString();
     applyStatusAutomation(database, row);
   }
@@ -7394,10 +7859,14 @@
     const baseAttrs = `data-db-row-id="${escapeHTML(row.id)}" data-db-prop-id="${escapeHTML(property.id)}"`;
     const cellClasses = ["page-database-cell"];
     const cellColor = getCellToneColor(row, property.id);
+    const automaticTitleLocked = property.type === "title"
+      && getAutomaticTitleSource(database).sourceProperty
+      && getAutomaticTitleSource(database).config.syncMode === "sync";
     if (property.type === "title") cellClasses.push("is-title");
     if (property.type === "checkbox") cellClasses.push("is-checkbox");
     if (isPropertyFrozen(database, property.id)) cellClasses.push("is-frozen");
     if (isFolderReadonlyProperty(database, property)) cellClasses.push("is-readonly");
+    if (automaticTitleLocked) cellClasses.push("is-readonly", "is-automatic-title");
     if (property.type === "date" || property.type === "status" || property.type === "tag" || property.type === "select" || property.type === "relation" || property.type === "checkbox") cellClasses.push("has-value-trigger");
     if (cellColor) cellClasses.push("has-cell-color");
 
@@ -7461,9 +7930,13 @@
           : property.name;
       const usesTextarea = property.type !== "title" && property.type !== "number" && !isPropertyUnwrapped(database, property.id);
 
+      const numberConfig = property.type === "number" ? getNumberConfig(property) : null;
+      const numberRangeAttrs = numberConfig?.format === "range"
+        ? ` min="${escapeHTML(numberConfig.rangeMin)}" max="${escapeHTML(numberConfig.rangeMax)}"`
+        : "";
       controlHTML = usesTextarea
         ? `<textarea class="page-db-cell-input page-db-cell-textarea${property.type === "title" ? " title-cell" : ""}" ${baseAttrs} placeholder="${escapeHTML(placeholder)}" spellcheck="false" rows="1">${escapeHTML(value)}</textarea>`
-        : `<input type="${property.type === "number" ? "number" : "text"}" class="page-db-cell-input${property.type === "title" ? " title-cell" : ""}${property.type === "number" ? " page-db-cell-number-input" : ""}" ${baseAttrs} value="${escapeHTML(value)}" placeholder="${escapeHTML(placeholder)}" spellcheck="false" ${property.type === "number" ? 'step="any" inputmode="decimal"' : ""} />`;
+        : `<input type="${property.type === "number" ? "number" : "text"}" class="page-db-cell-input${property.type === "title" ? " title-cell" : ""}${property.type === "number" ? " page-db-cell-number-input" : ""}" ${baseAttrs} value="${escapeHTML(value)}" placeholder="${escapeHTML(placeholder)}" spellcheck="false" ${property.type === "number" ? `step="any" inputmode="decimal"${numberRangeAttrs}` : ""}${automaticTitleLocked ? ' readonly title="Automatically named from the date field"' : ""} />`;
     }
 
     const pageIconHTML = property.type === "title" && hasPageIcon(database)
@@ -7505,13 +7978,15 @@
 
   function buildPageTableEditorHTML(database, options = {}) {
     const folderMode = isFolderDatabase(database);
+    const hidePropertyControl = options.hidePropertyControl === true;
     const visibleProperties = getVisibleTableProperties(database);
     const columnWidths = getPageEditorColumnWidths(database, options);
     const gridTemplate = columnWidths.map((width) => `${width}px`).join(" ");
     const visibleRows = getVisibleRows(database);
     const groupedRows = getGroupedRows(database, visibleRows);
-    const headTemplate = `${gridTemplate} ${DB_CONTROL_WIDTH}px`;
-    const rowTemplate = `${gridTemplate} ${DB_CONTROL_WIDTH}px`;
+    const controlTemplate = hidePropertyControl ? "" : ` ${DB_CONTROL_WIDTH}px`;
+    const headTemplate = `${gridTemplate}${controlTemplate}`;
+    const rowTemplate = `${gridTemplate}${controlTemplate}`;
 
     const headerCols = visibleProperties
       .map((property, index) => {
@@ -7556,7 +8031,7 @@
               </div>
               <div class="page-database-row-editor page-database-data-row" style="grid-template-columns:${rowTemplate};">
                 ${visibleProperties.map((property) => buildEditableCellHTML(database, row, property)).join("")}
-                <div class="page-database-cell-pad"></div>
+                ${hidePropertyControl ? "" : '<div class="page-database-cell-pad"></div>'}
               </div>
             </div>
           `).join("");
@@ -7565,7 +8040,7 @@
       : `
           <div class="page-database-row-editor page-database-row-empty" style="grid-template-columns:${rowTemplate};">
             ${visibleProperties.map((property) => `<div class="page-database-cell page-database-cell-pad" data-db-prop-col="${escapeHTML(property.id)}"></div>`).join("")}
-            <div class="page-database-cell-pad"></div>
+            ${hidePropertyControl ? "" : '<div class="page-database-cell-pad"></div>'}
           </div>
         `;
 
@@ -7573,7 +8048,7 @@
       ? `
           <div class="page-database-row-editor page-database-row-footer" style="grid-template-columns:${rowTemplate};">
             ${visibleProperties.map((property) => buildCalculationCellHTML(database, property, visibleRows)).join("")}
-            <div class="page-database-cell-pad"></div>
+            ${hidePropertyControl ? "" : '<div class="page-database-cell-pad"></div>'}
           </div>
         `
       : "";
@@ -7596,7 +8071,7 @@
               <div class="page-database-row-actions page-database-row-actions-left" aria-hidden="true"></div>
               <div class="page-database-row-editor page-database-row-head" style="grid-template-columns:${headTemplate};">
                 ${headerCols}
-                <button type="button" class="page-database-head-control" data-db-action="add-property" aria-label="Add property">+</button>
+                ${hidePropertyControl ? "" : '<button type="button" class="page-database-head-control" data-db-action="add-property" aria-label="Add property">+</button>'}
               </div>
             </div>
             ${rowsHTML}
@@ -8115,6 +8590,11 @@
     const viewportHeight = Math.max(window.innerHeight || 0, viewportPadding * 2 + 160);
     const viewportRight = viewportWidth - viewportPadding;
     const viewportBottom = viewportHeight - viewportPadding;
+    const workspaceTopbar = document.querySelector("#mainPane > .topbar");
+    const workspaceHeaderBottom = workspaceTopbar
+      ? Math.max(0, Math.round(workspaceTopbar.getBoundingClientRect().bottom))
+      : parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-workspace-header-height")) || 0;
+    const viewportTop = Math.max(viewportPadding, Math.min(viewportBottom - 40, workspaceHeaderBottom + 8));
 
     let left = rect.left;
     let top = rect.bottom + offset;
@@ -8134,15 +8614,16 @@
     left = Math.max(viewportPadding, Math.min(viewportRight - width, left));
 
     if (align === "submenu-right") {
-      top = Math.max(viewportPadding, Math.min(viewportBottom - height, top));
+      top = Math.max(viewportTop, Math.min(viewportBottom - height, top));
     } else if (top + height > viewportBottom) {
       const topAbove = rect.top - height - offset;
       const spaceBelow = viewportBottom - rect.bottom - offset;
-      const spaceAbove = rect.top - viewportPadding - offset;
-      top = spaceAbove > spaceBelow ? topAbove : viewportPadding;
-      top = Math.max(viewportPadding, Math.min(viewportBottom - Math.min(height, viewportBottom - viewportPadding), top));
+      const spaceAbove = rect.top - viewportTop - offset;
+      top = spaceAbove > spaceBelow ? topAbove : viewportTop;
+      top = Math.max(viewportTop, Math.min(viewportBottom - Math.min(height, viewportBottom - viewportTop), top));
     }
 
+    top = Math.max(viewportTop, top);
     floatingEl.style.left = `${left}px`;
     floatingEl.style.top = `${top}px`;
     const availableHeight = Math.max(160, viewportBottom - top);
@@ -8263,14 +8744,14 @@
           pendingDatabaseFocus = {
             context,
             rowId: nextRow.id,
-            propId: getTitleProperty(database).id
+            propId: getPreferredNewRowFocusPropertyId(database)
           };
         }
         rerenderCalendarContext(context);
         closeDatabaseMenus();
       });
     }
-    appendMenuButton(menuEl, isArchivedRow ? "Delete permanently" : "Delete", () => {
+    appendMenuButton(menuEl, isArchivedRow ? "Delete row permanently" : "Delete row", () => {
       if (!isArchivedRow) {
         syncRowBacklinksOnDelete(getContextDatabaseSource(context), database, row);
       }
@@ -8407,6 +8888,17 @@
     const parentPageId = context?.pageId || getCurrentPageId();
     const page = createPageFn("New database", parentPageId, "sheet", "none", "page");
     if (!page?.id) return null;
+
+    // This page is a child of the page that owns the inline view. Be explicit
+    // here because its parent is what makes the database's breadcrumb path
+    // follow the rest of the workspace instead of jumping to Home.
+    const createdRecord = Array.isArray(window.userPages)
+      ? window.userPages.find((entry) => entry?.id === page.id)
+      : null;
+    if (createdRecord && createdRecord.parent !== parentPageId) {
+      createdRecord.parent = parentPageId;
+      window.saveSanctumRegistry?.();
+    }
 
     savePageDatabase(page.id, normalizeDatabase({
       title: page.title,
@@ -8616,7 +9108,7 @@
           ? "Gallery"
           : database.view === "checklist"
             ? "Checklist"
-        : "Table";
+            : "Table";
   }
 
   function openPropertyVisibilityMenu(anchorEl, context, database) {
@@ -9441,6 +9933,14 @@
     database.properties.forEach((property) => {
       appendMenuSubmenuButton(menuEl, property.name, (buttonEl) => {
         openPropertySubmenu(buttonEl, property.name, (submenuEl) => {
+          if (property.type === "date") {
+            appendRelativeDateFilterButtons(submenuEl, database, property, () => {
+              saveDatabaseForContext(context, database);
+              rerenderCalendarContext(context);
+              closeDatabaseMenus();
+            });
+            appendMenuDivider(submenuEl);
+          }
           appendMenuButton(submenuEl, "Filter empty", () => {
             const active = getPropertyFilter(database, property.id)?.mode === "empty";
             setPropertyFilter(database, property.id, active ? "" : "empty", "");
@@ -9625,7 +10125,7 @@
     const defaultLabel = defaultName === option.name ? "DEFAULT" : "";
     return `
       <div class="page-database-status-option-row" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}">
-        <span class="page-database-status-grip">⋮⋮</span>
+        <span class="page-database-status-grip" draggable="true" title="Drag to reorder">⋮⋮</span>
         <button type="button" class="page-database-status-chip-btn" data-db-action="set-default-status" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}">
           ${buildValuePillHTML({ type: "status", statusGroups: [{ id: "preview", label: "Preview", options: [option] }] }, option.name)}
         </button>
@@ -9716,7 +10216,7 @@
   function buildSelectEditorOptionRow(option, optionIndex) {
     return `
       <div class="page-database-status-option-row page-database-select-option-row" data-select-option-index="${optionIndex}">
-        <span class="page-database-status-grip">⋮⋮</span>
+        <span class="page-database-status-grip" draggable="true" title="Drag to reorder">⋮⋮</span>
         <span class="page-database-status-chip-btn page-database-select-chip-preview">${buildValuePillHTML({ type: "select", selectOptions: [option] }, option.name)}</span>
         <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="select-option-name" data-select-option-index="${optionIndex}" />
         <span class="page-database-status-default-badge"></span>
@@ -9729,7 +10229,7 @@
   function buildTagEditorOptionRow(option, optionIndex) {
     return `
       <div class="page-database-status-option-row page-database-select-option-row" data-tag-option-index="${optionIndex}">
-        <span class="page-database-status-grip">&vellip;&vellip;</span>
+        <span class="page-database-status-grip" draggable="true" title="Drag to reorder">&vellip;&vellip;</span>
         <span class="page-database-status-chip-btn page-database-select-chip-preview">${buildValuePillHTML({ type: "tag", tagOptions: [option] }, option.name)}</span>
         <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="tag-option-name" data-tag-option-index="${optionIndex}" />
         <span class="page-database-status-default-badge"></span>
@@ -9948,6 +10448,7 @@
     if (config.simpleType === "average") return "Average a number field across linked rows.";
     if (config.simpleType === "percentage") return "Divide one number field by another and show a percent.";
     if (config.simpleType === "days-until-date") return "Count down from today to a date field.";
+    if (config.simpleType === "cycle-day") return "Count calendar days from the latest beginning of a chosen phase.";
     if (config.simpleType === "compare") return "Compare two number fields like budget and actual.";
     if (config.simpleType === "auto-complete") return "Show Complete when a checkbox on this row is checked.";
     return "Choose what this formula should do.";
@@ -9980,11 +10481,13 @@
     const leftProperty = getPropertyById(database, config.leftPropertyId || "");
     const rightProperty = getPropertyById(database, config.rightPropertyId || "");
     const dateProperty = getPropertyById(database, config.datePropertyId || "");
+    const phaseProperty = getPropertyById(database, config.phasePropertyId || "");
     const needsRelation = ["sum", "count", "average"].includes(simpleType);
     const needsRelatedNumber = ["sum", "average"].includes(simpleType);
     const needsCheckbox = ["count", "auto-complete"].includes(simpleType);
     const needsPair = ["subtract", "percentage", "compare"].includes(simpleType);
-    const needsDate = simpleType === "days-until-date";
+    const needsDate = ["days-until-date", "cycle-day"].includes(simpleType);
+    const needsCyclePhase = simpleType === "cycle-day";
     const setupStatus = getFormulaSetupStatus(database, property);
     const formulaFields = safeParseArray(database?.properties || []).filter((entry) => entry.id !== property.id);
     const feedback = getFormulaAdvancedFeedback(database, property);
@@ -10048,8 +10551,18 @@
             ` : ""}
             ${needsDate ? `
               <button type="button" class="page-database-property-panel-item" data-db-action="open-formula-date-menu" data-prop-id="${escapeHTML(property.id)}">
-                <span>Count down to this date</span>
+                <span>${needsCyclePhase ? "Date for each log row" : "Count down to this date"}</span>
                 <span class="page-database-property-panel-item-meta">${escapeHTML(dateProperty?.name || "Choose date field")}</span>
+              </button>
+            ` : ""}
+            ${needsCyclePhase ? `
+              <button type="button" class="page-database-property-panel-item" data-db-action="open-formula-phase-menu" data-prop-id="${escapeHTML(property.id)}">
+                <span>Cycle phase field</span>
+                <span class="page-database-property-panel-item-meta">${escapeHTML(phaseProperty?.name || "Choose phase field")}</span>
+              </button>
+              <button type="button" class="page-database-property-panel-item${phaseProperty ? "" : " is-disabled"}" data-db-action="open-formula-phase-value-menu" data-prop-id="${escapeHTML(property.id)}">
+                <span>Day 1 begins at</span>
+                <span class="page-database-property-panel-item-meta">${escapeHTML(config.phaseValue || "Choose phase")}</span>
               </button>
             ` : ""}
             <div class="page-database-property-panel-note">${escapeHTML(setupStatus)}</div>
@@ -10124,7 +10637,7 @@
           : property.type === "summary"
             ? buildSummaryPropertyPanelHTML(property, database)
             : buildFormulaPropertyPanelHTML(property, database);
-    panel.addEventListener("mousedown", (event) => event.stopPropagation());
+    enablePropertyPanelReplaceOnFirstClick(panel);
     document.body.appendChild(panel);
     focusAndSelectInput(panel.querySelector('.page-database-property-panel-name'));
   }
@@ -10185,6 +10698,96 @@
         commit();
       });
       actionsEl?.appendChild(toggle);
+      appendMenuDivider(actionsEl);
+
+      const titleConfig = normalizeTitleConfig(property.titleConfig || {});
+      const automaticSource = getPropertyById(database, titleConfig.sourcePropertyId);
+      const dateProperties = database.properties.filter((entry) => entry.type === "date");
+      appendMenuSubmenuButton(
+        actionsEl,
+        `Automatic name: ${automaticSource?.type === "date" ? automaticSource.name : "Off"}`,
+        (buttonEl) => {
+          openPropertySubmenu(buttonEl, "Automatic name", (submenuEl) => {
+            appendMenuButton(submenuEl, "Off", () => {
+              property.titleConfig = normalizeTitleConfig({});
+              commit();
+            }, { active: !automaticSource });
+
+            if (dateProperties.length) appendMenuDivider(submenuEl);
+            dateProperties.forEach((dateProperty) => {
+              appendMenuButton(submenuEl, `Use ${dateProperty.name}`, () => {
+                property.titleConfig = normalizeTitleConfig({
+                  ...titleConfig,
+                  sourcePropertyId: dateProperty.id
+                });
+                applyAutomaticTitles(database);
+                commit();
+              }, { active: automaticSource?.id === dateProperty.id });
+            });
+
+            if (!dateProperties.length) {
+              appendMenuLabel(submenuEl, "Add a Date property first");
+            }
+          });
+        },
+        { active: automaticSource?.type === "date" }
+      );
+
+      if (automaticSource?.type === "date") {
+        const titleFormatOptions = [
+          { value: "long", label: "July 29, 2026" },
+          { value: "medium", label: "Jul 29, 2026" },
+          { value: "short", label: "Jul 29" },
+          { value: "iso", label: "2026-07-29" }
+        ];
+        const currentFormat = titleFormatOptions.find((entry) => entry.value === titleConfig.dateFormat) || titleFormatOptions[0];
+        appendMenuSubmenuButton(actionsEl, `Date format: ${currentFormat.label}`, (buttonEl) => {
+          openPropertySubmenu(buttonEl, "Date format", (submenuEl) => {
+            titleFormatOptions.forEach((entry) => {
+              appendMenuButton(submenuEl, entry.label, () => {
+                property.titleConfig = normalizeTitleConfig({ ...titleConfig, dateFormat: entry.value });
+                applyAutomaticTitles(database, { force: titleConfig.syncMode === "sync" });
+                commit();
+              }, { active: titleConfig.dateFormat === entry.value });
+            });
+          });
+        });
+
+        appendMenuSubmenuButton(
+          actionsEl,
+          `Updates: ${titleConfig.syncMode === "sync" ? "Keep synced" : "Fill blank names"}`,
+          (buttonEl) => {
+            openPropertySubmenu(buttonEl, "Name updates", (submenuEl) => {
+              appendMenuButton(submenuEl, "Fill blank names only", () => {
+                property.titleConfig = normalizeTitleConfig({ ...titleConfig, syncMode: "fill-empty" });
+                applyAutomaticTitles(database);
+                commit();
+              }, { active: titleConfig.syncMode !== "sync" });
+              appendMenuButton(submenuEl, "Keep synced to date", () => {
+                const wouldReplaceNames = database.rows.some((row) => {
+                  const currentTitle = String(getRowValue(row, property.id) || "").trim();
+                  const generatedTitle = getAutomaticTitleValue(database, row);
+                  return currentTitle && currentTitle !== generatedTitle;
+                });
+                if (wouldReplaceNames && !window.confirm("Keep every row name synced to its date?\n\nExisting names will be replaced by their generated date names.")) {
+                  return;
+                }
+                property.titleConfig = normalizeTitleConfig({ ...titleConfig, syncMode: "sync" });
+                applyAutomaticTitles(database, { force: true });
+                commit();
+              }, { active: titleConfig.syncMode === "sync" });
+            });
+          }
+        );
+
+        appendMenuButton(actionsEl, `Prefix: ${titleConfig.prefix || "None"}`, () => {
+          const nextPrefix = window.prompt("Text to place before every generated date name", titleConfig.prefix || "");
+          if (nextPrefix === null) return;
+          property.titleConfig = normalizeTitleConfig({ ...titleConfig, prefix: nextPrefix });
+          applyAutomaticTitles(database, { force: titleConfig.syncMode === "sync" });
+          commit();
+        }, { active: !!titleConfig.prefix });
+      }
       appendMenuDivider(actionsEl);
     }
 
@@ -10293,6 +10896,28 @@
           });
         }, { active: numberConfig.ratingScale !== DEFAULT_NUMBER_RATING_SCALE });
       }
+
+      if (numberConfig.format === "range") {
+        appendMenuButton(actionsEl, `Range: ${numberConfig.rangeMin}–${numberConfig.rangeMax}`, () => {
+          const nextMin = window.prompt("Smallest allowed number", String(numberConfig.rangeMin));
+          if (nextMin === null) return;
+          const nextMax = window.prompt("Largest allowed number", String(numberConfig.rangeMax));
+          if (nextMax === null) return;
+          const rangeMin = normalizeNumberRangeBound(nextMin, numberConfig.rangeMin);
+          const rangeMax = normalizeNumberRangeBound(nextMax, numberConfig.rangeMax);
+          if (rangeMax <= rangeMin) {
+            window.showAppToast?.("The largest number must be greater than the smallest.", "info");
+            return;
+          }
+          property.numberConfig = normalizeNumberConfig({
+            ...numberConfig,
+            rangeMin,
+            rangeMax
+          });
+          database.rows = database.rows.map((row) => normalizeRow(row, database.properties));
+          commit();
+        }, { active: true });
+      }
     }
 
     if (isFolderSystemProperty(property)) {
@@ -10310,6 +10935,26 @@
           });
         });
       }, { active: !!normalizeFolderAutoFill(property.folderAutoFill || "", property.type) });
+    }
+
+    if (property.type === "date") {
+      appendMenuSubmenuButton(
+        actionsEl,
+        `New rows: ${property.defaultToday === true ? "Today" : "Empty"}`,
+        (buttonEl) => {
+          openPropertySubmenu(buttonEl, "Default date for new rows", (submenuEl) => {
+            appendMenuButton(submenuEl, "Empty", () => {
+              property.defaultToday = false;
+              commit();
+            }, { active: property.defaultToday !== true });
+            appendMenuButton(submenuEl, "Today's date", () => {
+              property.defaultToday = true;
+              commit();
+            }, { active: property.defaultToday === true });
+          });
+        },
+        { active: property.defaultToday === true }
+      );
     }
 
     appendMenuSubmenuButton(actionsEl, "Icon", (buttonEl) => {
@@ -10386,6 +11031,10 @@
 
     appendMenuSubmenuButton(filtersEl, "Filter", (buttonEl) => {
       openPropertySubmenu(buttonEl, "Filter", (submenuEl) => {
+        if (property.type === "date") {
+          appendRelativeDateFilterButtons(submenuEl, database, property, commit);
+          appendMenuDivider(submenuEl);
+        }
         appendMenuButton(submenuEl, "Filter empty", () => {
           const active = getPropertyFilter(database, property.id)?.mode === "empty";
           setPropertyFilter(database, property.id, active ? "" : "empty", "");
@@ -10554,7 +11203,10 @@
             ? buildGalleryViewHTML({ ...database, view: "gallery" }).bodyHTML
             : activeView === "checklist"
               ? buildChecklistViewHTML({ ...database, view: "checklist" }, { readOnly: false }).bodyHTML
-            : buildPageTableEditorHTML({ ...database, view: "table" });
+            : buildPageTableEditorHTML(
+                { ...database, view: "table" },
+                { hidePropertyControl: collapsed }
+              );
       contentEl.classList.toggle("calendar-mode", activeView === "calendar");
       contentEl.classList.toggle("board-mode", activeView === "board");
       contentEl.classList.toggle("gallery-mode", activeView === "gallery");
@@ -10685,7 +11337,7 @@
           ? "◫ Gallery"
           : database.view === "checklist"
             ? "☑ Checklist"
-        : "▦ Table";
+            : "▦ Table";
   }
 
   function getPageIconButtonMarkup(pageId) {
@@ -10912,7 +11564,7 @@
         pendingDatabaseFocus = {
           context,
           rowId: row.id,
-          propId: getTitleProperty(database).id
+          propId: getPreferredNewRowFocusPropertyId(database)
         };
 
         rerenderCalendarContext(context);
@@ -11066,10 +11718,12 @@
       if (action === "add-status-option") {
         const panel = dbControl.closest(`#${PROPERTY_PANEL_ID}`);
         const propertyId = panel?.dataset.propertyId || "";
-        addStatusOption(database, propertyId, Number(dbControl.dataset.statusGroupIndex || 0));
+        const groupIndex = Number(dbControl.dataset.statusGroupIndex || 0);
+        addStatusOption(database, propertyId, groupIndex);
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         refreshPropertyPanel(context, database, propertyId);
+        focusNewestPropertyOption(panel, "status-option-name", `[data-status-group-index="${groupIndex}"]`);
         return;
       }
 
@@ -11080,6 +11734,7 @@
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         refreshPropertyPanel(context, database, propertyId);
+        focusNewestPropertyOption(panel, "select-option-name");
         return;
       }
 
@@ -11090,6 +11745,7 @@
         saveDatabaseForContext(context, database);
         rerenderCalendarContext(context);
         refreshPropertyPanel(context, database, propertyId);
+        focusNewestPropertyOption(panel, "tag-option-name");
         return;
       }
 
@@ -11354,7 +12010,9 @@
                 checkboxPropertyId: ["count", "auto-complete"].includes(entry.value) ? getPropertyById(database, propertyId)?.formulaConfig?.checkboxPropertyId || "" : "",
                 leftPropertyId: ["subtract", "percentage", "compare"].includes(entry.value) ? getPropertyById(database, propertyId)?.formulaConfig?.leftPropertyId || "" : "",
                 rightPropertyId: ["subtract", "percentage", "compare"].includes(entry.value) ? getPropertyById(database, propertyId)?.formulaConfig?.rightPropertyId || "" : "",
-                datePropertyId: entry.value === "days-until-date" ? getPropertyById(database, propertyId)?.formulaConfig?.datePropertyId || "" : ""
+                datePropertyId: ["days-until-date", "cycle-day"].includes(entry.value) ? getPropertyById(database, propertyId)?.formulaConfig?.datePropertyId || "" : "",
+                phasePropertyId: entry.value === "cycle-day" ? getPropertyById(database, propertyId)?.formulaConfig?.phasePropertyId || "" : "",
+                phaseValue: entry.value === "cycle-day" ? getPropertyById(database, propertyId)?.formulaConfig?.phaseValue || "" : ""
               });
               saveDatabaseForContext(context, database);
               rerenderCalendarContext(context);
@@ -11461,6 +12119,53 @@
               refreshPropertyPanel(context, database, propertyId);
               document.getElementById(DATABASE_SUBMENU_ID)?.remove();
             }, { active: getPropertyById(database, propertyId)?.formulaConfig?.datePropertyId === entry.id });
+          });
+        });
+        return;
+      }
+
+
+      if (action === "open-formula-phase-menu") {
+        const propertyId = dbControl.dataset.propId || dbControl.closest(`#${PROPERTY_PANEL_ID}`)?.dataset.propertyId || "";
+        openPropertySubmenu(dbControl, "Cycle phase field", (submenuEl) => {
+          getFormulaPhaseCandidates(database, propertyId).forEach((entry) => {
+            appendMenuButton(submenuEl, entry.name, () => {
+              setFormulaConfig(database, propertyId, { phasePropertyId: entry.id, phaseValue: "" });
+              saveDatabaseForContext(context, database);
+              rerenderCalendarContext(context);
+              refreshPropertyPanel(context, database, propertyId);
+              document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+            }, { active: getPropertyById(database, propertyId)?.formulaConfig?.phasePropertyId === entry.id });
+          });
+        });
+        return;
+      }
+
+      if (action === "open-formula-phase-value-menu") {
+        const propertyId = dbControl.dataset.propId || dbControl.closest(`#${PROPERTY_PANEL_ID}`)?.dataset.propertyId || "";
+        const formulaProperty = getPropertyById(database, propertyId);
+        const config = normalizeFormulaConfig(formulaProperty?.formulaConfig || {});
+        const phaseProperty = getPropertyById(database, config.phasePropertyId);
+        if (!phaseProperty) return;
+        openPropertySubmenu(dbControl, "Day 1 begins at", (submenuEl) => {
+          getFormulaPhaseValueOptions(database, phaseProperty).forEach((value) => {
+            appendMenuButton(submenuEl, value, () => {
+              setFormulaConfig(database, propertyId, { phaseValue: value });
+              saveDatabaseForContext(context, database);
+              rerenderCalendarContext(context);
+              refreshPropertyPanel(context, database, propertyId);
+              document.getElementById(DATABASE_SUBMENU_ID)?.remove();
+            }, { active: config.phaseValue.toLowerCase() === value.toLowerCase() });
+          });
+          appendMenuDivider(submenuEl);
+          appendMenuButton(submenuEl, "Custom…", () => {
+            const value = window.prompt("Phase value that should begin Day 1", config.phaseValue || "");
+            if (value === null || !String(value).trim()) return;
+            setFormulaConfig(database, propertyId, { phaseValue: String(value).trim() });
+            saveDatabaseForContext(context, database);
+            rerenderCalendarContext(context);
+            refreshPropertyPanel(context, database, propertyId);
+            document.getElementById(DATABASE_SUBMENU_ID)?.remove();
           });
         });
         return;
@@ -11728,6 +12433,25 @@
   });
 
   document.addEventListener("dragstart", (event) => {
+    const optionGrip = event.target.closest('.page-database-status-grip[draggable="true"]');
+    if (optionGrip) {
+      const optionRow = optionGrip.closest(".page-database-status-option-row");
+      const panel = optionGrip.closest(`#${PROPERTY_PANEL_ID}`);
+      const context = getCalendarContext(optionGrip);
+      const source = getPropertyOptionRowMeta(optionRow);
+      const propertyId = panel?.dataset.propertyId || "";
+      if (!optionRow || !context || !source || !propertyId) return;
+
+      event.stopPropagation();
+      draggingPropertyOption = { context, propertyId, source };
+      optionRow.classList.add("is-dragging-option");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", `${source.kind}:${source.optionIndex}`);
+      }
+      return;
+    }
+
     const propertyHeader = event.target.closest('.page-database-col-head-wrap[data-db-header-prop-id][draggable="true"]');
     if (propertyHeader && !event.target.closest('[data-db-resize="property"]')) {
       const context = getCalendarContext(propertyHeader);
@@ -11765,6 +12489,25 @@
   });
 
   document.addEventListener("dragover", (event) => {
+    const optionRow = event.target.closest(".page-database-status-option-row");
+    if (optionRow && draggingPropertyOption) {
+      const context = getCalendarContext(optionRow);
+      const target = getPropertyOptionRowMeta(optionRow);
+      const sameStatusGroup = target?.kind !== "status" || target.groupIndex === draggingPropertyOption.source.groupIndex;
+      if (!sameContext(context, draggingPropertyOption.context) || !target || target.kind !== draggingPropertyOption.source.kind || !sameStatusGroup) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = optionRow.getBoundingClientRect();
+      const position = event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
+      document.querySelectorAll(".page-database-status-option-row.db-option-drop-before, .page-database-status-option-row.db-option-drop-after").forEach((node) => {
+        node.classList.remove("db-option-drop-before", "db-option-drop-after");
+      });
+      optionRow.classList.add(position === "before" ? "db-option-drop-before" : "db-option-drop-after");
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      return;
+    }
+
     const propertyHeader = event.target.closest('.page-database-col-head-wrap[data-db-header-prop-id]');
     if (propertyHeader && draggingDatabaseProperty) {
       const context = getCalendarContext(propertyHeader);
@@ -11801,6 +12544,9 @@
   });
 
   document.addEventListener("dragleave", (event) => {
+    const optionRow = event.target.closest(".page-database-status-option-row");
+    if (optionRow) optionRow.classList.remove("db-option-drop-before", "db-option-drop-after");
+
     const propertyHeader = event.target.closest('.page-database-col-head-wrap[data-db-header-prop-id]');
     if (propertyHeader) propertyHeader.classList.remove("db-prop-drop-before", "db-prop-drop-after");
 
@@ -11812,6 +12558,30 @@
   });
 
   document.addEventListener("drop", (event) => {
+    const optionRow = event.target.closest(".page-database-status-option-row");
+    if (optionRow && draggingPropertyOption) {
+      const context = getCalendarContext(optionRow);
+      const target = getPropertyOptionRowMeta(optionRow);
+      const sameStatusGroup = target?.kind !== "status" || target.groupIndex === draggingPropertyOption.source.groupIndex;
+      if (!sameContext(context, draggingPropertyOption.context) || !target || target.kind !== draggingPropertyOption.source.kind || !sameStatusGroup) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const position = optionRow.classList.contains("db-option-drop-after") ? "after" : "before";
+      document.querySelectorAll(".page-database-status-option-row.db-option-drop-before, .page-database-status-option-row.db-option-drop-after, .page-database-status-option-row.is-dragging-option").forEach((node) => {
+        node.classList.remove("db-option-drop-before", "db-option-drop-after", "is-dragging-option");
+      });
+
+      const database = getDatabaseForContext(context);
+      if (movePropertyOption(database, draggingPropertyOption.propertyId, draggingPropertyOption.source, target, position)) {
+        saveDatabaseForContext(context, database);
+        rerenderCalendarContext(context);
+        refreshPropertyPanel(context, database, draggingPropertyOption.propertyId);
+      }
+      draggingPropertyOption = null;
+      return;
+    }
+
     const propertyHeader = event.target.closest('.page-database-col-head-wrap[data-db-header-prop-id]');
     if (propertyHeader && draggingDatabaseProperty) {
       const context = getCalendarContext(propertyHeader);
@@ -11874,12 +12644,18 @@
     if (!row || !dateProperty) return;
 
     row.values[dateProperty.id] = serializeDateCellValue({ start: normalizeDayKey(day.dataset.calendarDate || "", "") });
+    applyAutomaticTitleToRow(database, row);
+    syncDatabaseRowPageForRow(context, database, row.id);
     saveDatabaseForContext(context, database);
     rerenderCalendarContext(context);
     draggingCalendarItem = null;
   });
 
   document.addEventListener("dragend", () => {
+    draggingPropertyOption = null;
+    document.querySelectorAll(".page-database-status-option-row.db-option-drop-before, .page-database-status-option-row.db-option-drop-after, .page-database-status-option-row.is-dragging-option").forEach((node) => {
+      node.classList.remove("db-option-drop-before", "db-option-drop-after", "is-dragging-option");
+    });
     draggingDatabaseProperty = null;
     document.querySelectorAll('.page-database-col-head-wrap.db-prop-drop-before, .page-database-col-head-wrap.db-prop-drop-after, .page-database-col-head-wrap.is-dragging-property').forEach((node) => {
       node.classList.remove('db-prop-drop-before', 'db-prop-drop-after', 'is-dragging-property');
@@ -11920,6 +12696,7 @@
   window.openDatabaseRowCoverMenu = openDatabaseRowCoverMenu;
   window.getDatabaseCalloutSources = getDatabaseCalloutSources;
   window.getDatabaseCalloutSourceData = getDatabaseCalloutSourceData;
+  window.syncDatabasePageTitleFromPage = syncDatabasePageTitleFromPage;
   window.updateDatabaseSourceRowValues = updateDatabaseSourceRowValues;
   window.updateDatabaseRowScore = updateDatabaseRowScore;
   window.syncDatabaseRowTitleFromPage = syncDatabaseRowTitleFromPage;
@@ -12352,6 +13129,84 @@
       saveDatabaseToSource(source, db);
       rerenderDatabaseSourceIfVisible(source);
     }
+    return row;
+  };
+  window.buttonBlockUpdateTodayRow = function (sourceInput, options = {}) {
+    const { source, context } = getButtonDatabaseContext(sourceInput);
+    if (!source.pageId) return null;
+    const db = getDatabaseFromSource(source);
+    if (!db || isFolderDatabase(db)) return null;
+
+    const requestedDateProperty = getPropertyById(db, String(options.datePropertyId || ""));
+    const dateProperty = requestedDateProperty?.type === "date"
+      ? requestedDateProperty
+      : getDateProperty(db);
+    if (!dateProperty) {
+      window.showAppToast?.("This button needs a Date field to find today's row.", "error");
+      return null;
+    }
+
+    const today = toDayKey();
+    let row = db.rows.slice().reverse().find((candidate) =>
+      !candidate?.archived && getDateStartValue(getRowValue(candidate, dateProperty.id)) === today
+    ) || null;
+
+    if (!row && options.createIfMissing !== false) {
+      row = addRowToDatabase(db, { [dateProperty.id]: today });
+    }
+    if (!row) {
+      window.showAppToast?.("There is no row for today yet.", "info");
+      return null;
+    }
+
+    const presetValues = options.presetValues && typeof options.presetValues === "object"
+      ? options.presetValues
+      : {};
+    const fieldModes = options.fieldModes && typeof options.fieldModes === "object"
+      ? options.fieldModes
+      : {};
+    let updatedCount = 0;
+
+    Object.entries(presetValues).forEach(([propertyId, incomingValue]) => {
+      const property = getPropertyById(db, propertyId);
+      if (
+        !property
+        || property.id === dateProperty.id
+        || ["created_at", "updated_at", "formula", "summary", "rollup"].includes(property.type)
+      ) return;
+      let nextValue = incomingValue;
+      if (fieldModes[propertyId] === "append") {
+        const currentValue = getRowValue(row, propertyId);
+        if (property.type === "tag") {
+          nextValue = joinTagValues([
+            ...parseTagValues(currentValue),
+            ...parseTagValues(incomingValue)
+          ]);
+        } else if (property.type === "notes" || property.type === "text") {
+          const currentText = String(currentValue || "").trim();
+          const incomingText = String(incomingValue || "").trim();
+          if (!incomingText) return;
+          const separator = property.type === "notes" ? "\n" : ", ";
+          nextValue = currentText ? `${currentText}${separator}${incomingText}` : incomingText;
+        }
+      }
+      const before = getRowValue(row, propertyId);
+      updateRowValue(db, row.id, propertyId, nextValue);
+      if (getRowValue(row, propertyId) !== before) updatedCount += 1;
+    });
+
+    syncDatabaseRowPageForRow(context, db, row.id);
+    if (context.kind === "block" && context.blockEl) {
+      saveDatabaseForContext(context, db);
+      renderDatabaseSurface(context.blockEl, db);
+    } else {
+      saveDatabaseToSource(source, db);
+      rerenderDatabaseSourceIfVisible(source);
+    }
+    window.showAppToast?.(
+      updatedCount ? `Updated today's row (${updatedCount} field${updatedCount === 1 ? "" : "s"}).` : "Today's row was already up to date.",
+      "success"
+    );
     return row;
   };
 
