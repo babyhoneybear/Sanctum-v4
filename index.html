@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -13,7 +13,23 @@
   <link rel="stylesheet" href="profile.css">
   <link rel="stylesheet" href="page-props.css">
   <link rel="stylesheet" href="journal-scrapbook.css">
+  <link rel="stylesheet" href="map-page.css">
+  <link rel="stylesheet" href="storage-status.css">
+  <link rel="stylesheet" href="note-connections.css">
+  <link rel="stylesheet" href="relationship-graph.css">
+  <link rel="stylesheet" href="ui-icons.css">
   <title>Sanctum</title>
+<link rel="stylesheet" href="dashboard-widgets.css">
+<link rel="stylesheet" href="canvas-preview.css">
+<link rel="stylesheet" href="appearance.css">
+<link rel="stylesheet" href="icon-picker.css">
+<link rel="stylesheet" href="custom-types.css">
+<link rel="stylesheet" href="context-preview.css">
+<link rel="stylesheet" href="timeline.css">
+<link rel="stylesheet" href="writing-check.css">
+  <link rel="stylesheet" href="relationship-tree.css">
+  <link rel="stylesheet" href="character-sheet.css">
+<link rel="stylesheet" href="theme-chrome.css">
 </head>
 
 <body>
@@ -25,17 +41,17 @@
             <div class="profile-name">Your Name</div>
         </div>
         
-        <button id="closeBtn" aria-label="Close menu">&laquo;</button>
+        <button id="closeBtn" aria-label="Close menu" data-ui-icon="panel-left-close">&laquo;</button>
     </div>
 
     <hr class="divider">
     
   
     <nav class="sidebar-nav">
-        <a href="#" class="nav-item row" id="navSearch">Search</a> 
-        <a href="#" class="nav-item row" id="navInbox">Inbox</a>
-        <a href="#" class="nav-item row" id="navNotes">Notes</a>
-        <a href="#" class="nav-item row" id="navHome">Home</a>
+        <a href="#" class="nav-item row" id="navSearch"><span data-ui-icon="search" aria-hidden="true"></span>Search</a>
+        <a href="#" class="nav-item row" id="navInbox"><span data-ui-icon="inbox" aria-hidden="true"></span>Inbox</a>
+        <a href="#" class="nav-item row" id="navNotes"><span data-ui-icon="sticky-note" aria-hidden="true"></span>Notes</a>
+        <a href="#" class="nav-item row" id="navHome"><span data-ui-icon="house" aria-hidden="true"></span>Home</a>
     </nav>
     
 
@@ -45,8 +61,8 @@
         <div class="section">
             <div class="section-header">
                 <span class="section-title">Favorites</span>
-                <span class="section-arrow">˅</span>
-                <span class="section-menu">⋯</span>
+                <span class="section-arrow" data-ui-icon="chevron-down" aria-hidden="true"></span>
+                <span class="section-menu" data-ui-icon="ellipsis" title="Section options"></span>
             </div>
         <div class="section-items" id="favoritesList">
         </div>
@@ -55,8 +71,8 @@
      <div class="section">
         <div class="section-header">
             <span class="section-title">Pins</span>
-            <span class="section-arrow">˅</span>
-            <span class="section-menu">⋯</span>
+            <span class="section-arrow" data-ui-icon="chevron-down" aria-hidden="true"></span>
+            <span class="section-menu" data-ui-icon="ellipsis" title="Section options"></span>
         </div>
           <div class="section-items" id="pinsList"></div>
         </div>
@@ -64,8 +80,8 @@
     <div class="section section-domains">
         <div class="section-header">
             <span class="section-title">Domains</span>
-            <span class="section-arrow">˅</span>
-            <span class="section-add" id="domainAddBtn" title="New domain">+</span>
+            <span class="section-arrow" data-ui-icon="chevron-down" aria-hidden="true"></span>
+            <span class="section-add" id="domainAddBtn" title="New domain" data-ui-icon="plus">+</span>
         </div>
         <div class="section-items"></div>
     </div>
@@ -74,11 +90,11 @@
 
 <div class="sidebar-bottom">
     <div class="bottom-item" id="settingsBtn">
-        <span class="bottom-icon"></span>
+        <span class="bottom-icon" data-ui-icon="settings-2" aria-hidden="true"></span>
         <span class="bottom-name">Settings</span>
     </div>
     <div class="bottom-item" id="trashBtn">
-        <span class="bottom-icon"></span>
+        <span class="bottom-icon" data-ui-icon="trash-2" aria-hidden="true"></span>
         <span class="bottom-name">Trash</span>
     </div>
 </div>
@@ -91,10 +107,10 @@
 <main class="main" id="main">
     <div class="tab-bar-wrap" id="tabBarWrap">
       <div class="tab-bar-inner" id="tabBarInner">
-        <button class="nav-history-btn" id="navBackBtn" aria-label="Go back" disabled>
+        <button class="nav-history-btn" id="navBackBtn" aria-label="Go back" disabled data-ui-icon="chevron-left">
           <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M6 1L1 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="nav-history-btn" id="navFwdBtn" aria-label="Go forward" disabled>
+        <button class="nav-history-btn" id="navFwdBtn" aria-label="Go forward" disabled data-ui-icon="chevron-right">
           <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="tab-bar" id="tabBar"></div>
@@ -105,8 +121,8 @@
 <div class="main-pane" id="mainPane">
     <div class="topbar">
     <div class="topbar-left">
-        <button class="icon-btn" id="menuBtn" aria-label="Open menu">☰</button>
-        <button class="icon-btn tab-toggle-btn" id="tabToggleBtn" aria-label="Toggle tabs" title="Toggle tabs">
+        <button class="icon-btn" id="menuBtn" aria-label="Open menu" data-ui-icon="panel-left">☰</button>
+        <button class="icon-btn tab-toggle-btn" id="tabToggleBtn" aria-label="Toggle tabs" title="Toggle tabs" data-ui-icon="panels-top-left">
           <svg width="15" height="11" viewBox="0 0 15 11" fill="none"><rect x="0.6" y="3.8" width="13.8" height="6.6" rx="1.4" stroke="currentColor" stroke-width="1.2"/><path d="M0.6 3.8V3.2A1.4 1.4 0 012 1.8h3.2A1.4 1.4 0 016.6 3.2v.6" stroke="currentColor" stroke-width="1.2"/><path d="M7.2 3.8V3.2A1.4 1.4 0 018.6 1.8h3.2A1.4 1.4 0 0113.2 3.2v.6" stroke="currentColor" stroke-width="1.2"/></svg>
         </button>
         <div class="page-title" id="pageTitle">Home</div>
@@ -116,172 +132,181 @@
     <div class="topbar-center" id="topbarCenter"></div>
 
     <div class="topbar-right">
-        <button class="icon-btn" id="bookmarkBtn" aria-label="Bookmark">🔖</button>
+        <button class="icon-btn" id="bookmarkBtn" aria-label="Bookmark" data-ui-icon="bookmark">🔖</button>
         <div class="doc-view-switcher" id="docViewSwitcher" style="display:none;">
           <button class="doc-view-btn active" data-view="edit">Edit</button>
           <button class="doc-view-btn" data-view="view">View</button>
           <button class="doc-view-btn" data-view="annotate">Annotate</button>
         </div>
-        <button class="icon-btn" id="moreBtn" aria-label="More">⋯</button>
+        <button class="icon-btn" id="moreBtn" aria-label="More" data-ui-icon="ellipsis">⋯</button>
 
         <div class="edit-wrap"> 
-            <button class="icon-btn" id="editToggle" aria-label="Toggle edit mode">✎</button>
+            <button class="icon-btn" id="editToggle" aria-label="Toggle edit mode" data-ui-icon="pencil">✎</button>
 
             <aside class="edit-dock" id="editorDock">
               <div class="dock-tools-scroll">
               <div class="dock-mode dock-mode-create">
-                <button class="dock-btn" id="addBlockBtn" aria-label="Add block" data-label="Add">+</button>
-                <button class="dock-btn" id="addUndoBtn" aria-label="Undo" data-label="Undo">↺</button>
-                <button class="dock-btn" id="addRedoBtn" aria-label="Redo" data-label="Redo">↻</button>
+                <button class="dock-btn" id="addBlockBtn" aria-label="Add block" data-label="Add" data-ui-icon="plus">+</button>
+                <button class="dock-btn" id="addUndoBtn" aria-label="Undo" data-label="Undo" data-ui-icon="undo-2">↺</button>
+                <button class="dock-btn" id="addRedoBtn" aria-label="Redo" data-label="Redo" data-ui-icon="redo-2">↻</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="toolText" aria-label="Text preset" data-label="Text">T</button>
-                <button class="dock-btn" id="toolList" aria-label="List preset" data-label="List">•</button>
-                <button class="dock-btn" id="toolImage" aria-label="Image preset" data-label="Image">🖼</button>
+                <button class="dock-btn" id="toolText" aria-label="Text preset" data-label="Text" data-ui-icon="type">T</button>
+                <button class="dock-btn" id="toolList" aria-label="List preset" data-label="List" data-ui-icon="list">•</button>
+                <button class="dock-btn" id="toolImage" aria-label="Image preset" data-label="Image" data-ui-icon="image">🖼</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="toolPage" aria-label="Page card" data-label="Page">⊞</button>
-                <button class="dock-btn" id="toolDomain" aria-label="Domain card" data-label="Domain">⌂</button>
-                <button class="dock-btn" id="toolLine" aria-label="Line" data-label="Line">/</button>
-                <button class="dock-btn" id="toolDivider" aria-label="Divider tools" data-label="Dividers">┆</button>
-                <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame">▤</button>
-                <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table">⊞</button>
-                <button class="dock-btn" id="toolDataCallout" aria-label="Data callout" data-label="Data callout">≈</button>
-                <button class="dock-btn" id="toolLiveDatabaseCard" aria-label="Live database card" data-label="Live data card">▤</button>
-                <button class="dock-btn" id="toolProgress" aria-label="Progress bar" data-label="Progress">▰</button>
-                <button class="dock-btn" id="toolClock" aria-label="Clock widget" data-label="Clock">◴</button>
-                <button class="dock-btn" id="toolStudy" aria-label="Study tools" data-label="Study">S</button>
-                <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker">✦</button>
-                <button class="dock-btn" id="toolButton" aria-label="Button block" data-label="Button">▶</button>
+                <button class="dock-btn" id="toolPage" aria-label="Page card" data-label="Page" data-ui-icon="file-text">⊞</button>
+                <button class="dock-btn" id="toolConnections" aria-label="Connections block" data-label="Connect" data-ui-icon="link">↗</button>
+                <button class="dock-btn" id="toolDomain" aria-label="Domain card" data-label="Domain" data-ui-icon="house">⌂</button>
+                <button class="dock-btn" id="toolLine" aria-label="Line" data-label="Line" data-ui-icon="minus">/</button>
+                <button class="dock-btn" id="toolDivider" aria-label="Divider tools" data-label="Dividers" data-ui-icon="between-horizontal-start">┆</button>
+                <button class="dock-btn" id="toolContainer" aria-label="Container block" data-label="Frame" data-ui-icon="frame">▤</button>
+                <button class="dock-btn" id="toolTable" aria-label="Table" data-label="Table" data-ui-icon="table-2">⊞</button>
+                <button class="dock-btn" id="toolDataCallout" aria-label="Data callout" data-label="Data" data-ui-icon="chart-no-axes-combined">≈</button>
+                <button class="dock-btn" id="toolLiveDatabaseCard" aria-label="Live database card" data-label="Database" data-ui-icon="database">▤</button>
+                <button class="dock-btn" id="toolProgress" aria-label="Progress bar" data-label="Progress" data-ui-icon="chart-pie">▰</button>
+                <button class="dock-btn" id="toolClock" aria-label="Clock widget" data-label="Clock" data-ui-icon="clock">◴</button>
+                <button class="dock-btn" id="toolStudy" aria-label="Study tools" data-label="Study" data-ui-icon="graduation-cap">S</button>
+                <button class="dock-btn" id="toolSticker" aria-label="Sticker" data-label="Sticker" data-ui-icon="sticker">✦</button>
+                <button class="dock-btn" id="toolDashboard" aria-label="Dashboard tools" data-label="Dashboard" data-ui-icon="layout-grid">▦</button>
+                <button class="dock-btn" id="toolButton" aria-label="Button block" data-label="Button" data-ui-icon="rectangle-ellipsis">▶</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="generateLayoutBtn" aria-label="Generate layout with AI" data-label="AI Layout">✦ AI</button>
+                <button class="dock-btn" id="generateLayoutBtn" aria-label="Generate layout with AI" data-label="AI Layout" data-ui-icon="sparkles">✦ AI</button>
               </div>
 
               <div class="dock-mode dock-mode-study">
-                <button class="dock-btn" id="toolStudyBack" aria-label="Back to tools" data-label="Back">‹</button>
+                <button class="dock-btn" id="toolStudyBack" aria-label="Back to tools" data-label="Back" data-ui-icon="arrow-left">‹</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="toolTypingDrill" aria-label="Typing drill" data-label="Typing">⌨</button>
-                <button class="dock-btn" id="toolFillBlank" aria-label="Fill in the blank" data-label="Blank">▤</button>
-                <button class="dock-btn" id="toolMatchPairs" aria-label="Match pairs" data-label="Match">↔</button>
-                <button class="dock-btn" id="toolFlashcards" aria-label="Flashcard deck" data-label="Cards">S</button>
+                <button class="dock-btn" id="toolTypingDrill" aria-label="Typing drill" data-label="Typing" data-ui-icon="keyboard">⌨</button>
+                <button class="dock-btn" id="toolFillBlank" aria-label="Fill in the blank" data-label="Blank" data-ui-icon="text-cursor-input">▤</button>
+                <button class="dock-btn" id="toolMatchPairs" aria-label="Match pairs" data-label="Match" data-ui-icon="columns-2">↔</button>
+                <button class="dock-btn" id="toolFlashcards" aria-label="Flashcard deck" data-label="Cards" data-ui-icon="layers">S</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="toolSessionProgress" aria-label="Session progress" data-label="Session">◔</button>
-                <button class="dock-btn" id="toolDailyStreak" aria-label="Daily streak" data-label="Streak">◍</button>
-                <button class="dock-btn" id="toolRecentAnswers" aria-label="Recent answers" data-label="Recent">⋯</button>
+                <button class="dock-btn" id="toolSessionProgress" aria-label="Session progress" data-label="Session" data-ui-icon="chart-pie">◔</button>
+                <button class="dock-btn" id="toolDailyStreak" aria-label="Daily streak" data-label="Streak" data-ui-icon="flame">◍</button>
+                <button class="dock-btn" id="toolRecentAnswers" aria-label="Recent answers" data-label="Recent" data-ui-icon="history">⋯</button>
               </div>
 
               <div class="dock-mode dock-mode-layer">
-                <button class="dock-btn" id="blockCopyBtn" aria-label="Copy block" data-label="Copy">⧉</button>
-                <button class="dock-btn" id="blockPasteBtn" aria-label="Paste copied block" data-label="Paste">⊞</button>
+                <button class="dock-btn" id="blockAppearanceBtn" aria-label="Block appearance" data-label="Appearance" data-ui-icon="palette">◐</button>
+                <button class="dock-btn" id="blockCopyBtn" aria-label="Copy block" data-label="Copy" data-ui-icon="copy">⧉</button>
+                <button class="dock-btn" id="blockPasteBtn" aria-label="Paste copied block" data-label="Paste" data-ui-icon="clipboard">⊞</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" id="layerSendBackBtn" aria-label="Send to back" data-label="Back">⇣</button>
-                <button class="dock-btn" id="layerBackwardBtn" aria-label="Send backward" data-label="Backward">↓</button>
-                <button class="dock-btn" id="layerForwardBtn" aria-label="Bring forward" data-label="Forward">↑</button>
-                <button class="dock-btn" id="layerBringFrontBtn" aria-label="Bring to front" data-label="Front">⇡</button>
-                <button class="dock-btn" id="layerIntoFrameBtn" aria-label="Move into frame" data-label="Into frame">↳</button>
+                <button class="dock-btn" id="layerSendBackBtn" aria-label="Send to back" data-label="Back" data-ui-icon="arrow-down-to-line">⇣</button>
+                <button class="dock-btn" id="layerBackwardBtn" aria-label="Send backward" data-label="Backward" data-ui-icon="arrow-down">↓</button>
+                <button class="dock-btn" id="layerForwardBtn" aria-label="Bring forward" data-label="Forward" data-ui-icon="arrow-up">↑</button>
+                <button class="dock-btn" id="layerBringFrontBtn" aria-label="Bring to front" data-label="Front" data-ui-icon="arrow-up-to-line">⇡</button>
+                <button class="dock-btn" id="layerIntoFrameBtn" aria-label="Move into frame" data-label="Into frame" data-ui-icon="corner-down-right">↳</button>
               </div>
 
               <div class="dock-mode dock-mode-text">
-                <button class="dock-btn" id="blockBgBtn" aria-label="Color" data-label="Color">▣</button>
-                <button class="dock-btn" id="blockTextColorBtn" aria-label="Text color" data-label="Text">A</button>
-                <button class="dock-btn" id="blockTitleColorBtn" aria-label="Title color" data-label="Title">T</button>
-                <button class="dock-btn" id="blockBorderBtn" aria-label="Block border" data-label="Border">⬚</button>
-                <button class="dock-btn" id="blockPaddingBtn" aria-label="Block padding" data-label="Padding">▥</button>
-                <button class="dock-btn" id="blockRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
-                <button class="dock-btn" id="blockNoteBtn" aria-label="Add note" data-label="Note">✎</button>
-                <button class="dock-btn" id="blockDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+                <select id="canvasHeadingSelect" aria-label="Canvas text style" title="Paragraph or heading" hidden>
+                  <option value="p">Paragraph</option>
+                  <option value="h1">Heading 1</option>
+                  <option value="h2">Heading 2</option>
+                  <option value="h3">Heading 3</option>
+                </select>
+                <button class="dock-btn" id="blockBgBtn" aria-label="Color" data-label="Color" data-ui-icon="paint-bucket">▣</button>
+                <button class="dock-btn" id="blockTextColorBtn" aria-label="Text color" data-label="Text" data-ui-icon="baseline">A</button>
+                <button class="dock-btn" id="blockTitleColorBtn" aria-label="Title color" data-label="Title" data-ui-icon="heading">T</button>
+                <button class="dock-btn" id="blockBorderBtn" aria-label="Block border" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                <button class="dock-btn" id="blockPaddingBtn" aria-label="Block padding" data-label="Padding" data-ui-icon="between-horizontal-start">▥</button>
+                <button class="dock-btn" id="blockRadiusBtn" aria-label="Corners" data-label="Corners" data-ui-icon="radius">◼︎</button>
+                <button class="dock-btn" id="blockNoteBtn" aria-label="Add note" data-label="Note" data-ui-icon="sticky-note">✎</button>
+                <button class="dock-btn" id="blockDeleteBtn" aria-label="Delete block" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
 
               <div class="dock-mode dock-mode-list">
-                <button class="dock-btn" id="listBgBtn" aria-label="List background" data-label="Color">▣</button>
-                <button class="dock-btn" id="listBorderBtn" aria-label="List border" data-label="Border">⬚</button>
-                <button class="dock-btn" id="listRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
-                <button class="dock-btn" id="listNoteBtn" aria-label="Add note" data-label="Note">✎</button>
-                <button class="dock-btn" id="listDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+                <button class="dock-btn" id="listBgBtn" aria-label="List background" data-label="Color" data-ui-icon="paint-bucket">▣</button>
+                <button class="dock-btn" id="listBorderBtn" aria-label="List border" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                <button class="dock-btn" id="listRadiusBtn" aria-label="Corners" data-label="Corners" data-ui-icon="radius">◼︎</button>
+                <button class="dock-btn" id="listNoteBtn" aria-label="Add note" data-label="Note" data-ui-icon="sticky-note">✎</button>
+                <button class="dock-btn" id="listDeleteBtn" aria-label="Delete block" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
 
               <div class="dock-mode dock-mode-image">
-                <button class="dock-btn" id="imageReplaceBtn" aria-label="Replace image" data-label="Replace">🖼</button>
-                <button class="dock-btn" id="imageCropBtn" aria-label="Crop shape" data-label="Shape">◖</button>
-                <button class="dock-btn" id="imageFrameBtn" aria-label="Image frame" data-label="Frame">▧</button>
-                <button class="dock-btn" id="imageDeleteBtn" aria-label="Delete image" data-label="Delete">🗑</button>
+                <button class="dock-btn" id="imageReplaceBtn" aria-label="Replace image" data-label="Replace" data-ui-icon="image">🖼</button>
+                <button class="dock-btn" id="imageCropBtn" aria-label="Crop shape" data-label="Shape" data-ui-icon="crop">◖</button>
+                <button class="dock-btn" id="imageFrameBtn" aria-label="Image frame" data-label="Frame" data-ui-icon="gallery-horizontal-end">▧</button>
+                <button class="dock-btn" id="imageDeleteBtn" aria-label="Delete image" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
               <div class="dock-mode dock-mode-journal">
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-action="skim" aria-label="Return to book" data-label="Book">‹</button>
+                <button class="dock-btn" data-action="skim" aria-label="Return to book" data-label="Book" data-ui-icon="book-open">‹</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-action="paper-panel" aria-label="Change paper or cover color" data-label="Paper">▤</button>
-                <button class="dock-btn" data-action="overview" aria-label="Open page overview" data-label="Pages">▦</button>
-                <button class="dock-btn" data-action="add-page-panel" aria-label="Add journal page" data-label="Add page">+</button>
+                <button class="dock-btn" data-action="paper-panel" aria-label="Change paper or cover color" data-label="Paper" data-ui-icon="palette">▤</button>
+                <button class="dock-btn" data-action="overview" aria-label="Open page overview" data-label="Pages" data-ui-icon="layout-grid">▦</button>
+                <button class="dock-btn" data-action="add-page-panel" aria-label="Add journal page" data-label="Add page" data-ui-icon="file-plus-2">+</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-tool="sticker" aria-label="Journal elements" data-label="Elements">✦</button>
-                <button class="dock-btn" data-tool="shape" aria-label="Journal shapes" data-label="Shapes">◇</button>
-                <button class="dock-btn" data-tool="tape" aria-label="Journal tape" data-label="Tape">▰</button>
+                <button class="dock-btn" data-tool="sticker" aria-label="Journal elements" data-label="Elements" data-ui-icon="sticker">✦</button>
+                <button class="dock-btn" data-tool="shape" aria-label="Journal shapes" data-label="Shapes" data-ui-icon="shapes">◇</button>
+                <button class="dock-btn" data-tool="tape" aria-label="Journal tape" data-label="Tape" data-ui-icon="rectangle-horizontal">▰</button>
               </div>
               <div class="dock-mode dock-mode-journal-selected">
                 <div class="dock-divider"></div>
                 <div class="journal-dock-group journal-dock-text">
-                  <button class="dock-btn" id="journalBgBtn" data-journal-color="bg" aria-label="Box color" data-label="Color">▣</button>
-                  <button class="dock-btn" id="journalTextColorBtn" data-journal-color="text" aria-label="Text color" data-label="Text">A</button>
-                  <button class="dock-btn" id="journalBorderBtn" data-journal-color="border" aria-label="Box border" data-label="Border">⬚</button>
-                  <button class="dock-btn" data-action="toggle-padding" aria-label="Box padding" data-label="Padding">▥</button>
-                  <button class="dock-btn" data-action="toggle-radius" aria-label="Box corners" data-label="Corners">◼︎</button>
+                  <button class="dock-btn" id="journalBgBtn" data-journal-color="bg" aria-label="Box color" data-label="Color" data-ui-icon="paint-bucket">▣</button>
+                  <button class="dock-btn" id="journalTextColorBtn" data-journal-color="text" aria-label="Text color" data-label="Text" data-ui-icon="baseline">A</button>
+                  <button class="dock-btn" id="journalBorderBtn" data-journal-color="border" aria-label="Box border" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                  <button class="dock-btn" data-action="toggle-padding" aria-label="Box padding" data-label="Padding" data-ui-icon="between-horizontal-start">▥</button>
+                  <button class="dock-btn" data-action="toggle-radius" aria-label="Box corners" data-label="Corners" data-ui-icon="radius">◼︎</button>
                   <div class="dock-divider"></div>
-                  <button class="dock-btn" data-action="cycle-font" aria-label="Change typeface" data-label="Font">Aa</button>
-                  <button class="dock-btn" data-action="font-size-down" aria-label="Decrease text size" data-label="Smaller">A−</button>
-                  <button class="dock-btn" data-action="font-size-up" aria-label="Increase text size" data-label="Larger">A+</button>
-                  <button class="dock-btn" data-action="toggle-bold" aria-label="Bold" data-label="Bold"><b>B</b></button>
-                  <button class="dock-btn" data-action="toggle-italic" aria-label="Italic" data-label="Italic"><i>I</i></button>
-                  <button class="dock-btn" data-action="align" aria-label="Text alignment" data-label="Align">≡</button>
+                  <button class="dock-btn" data-action="cycle-font" aria-label="Change typeface" data-label="Font" data-ui-icon="type">Aa</button>
+                  <button class="dock-btn" data-action="font-size-down" aria-label="Decrease text size" data-label="Smaller" data-ui-icon="a-arrow-down">A−</button>
+                  <button class="dock-btn" data-action="font-size-up" aria-label="Increase text size" data-label="Larger" data-ui-icon="a-arrow-up">A+</button>
+                  <button class="dock-btn" data-action="toggle-bold" aria-label="Bold" data-label="Bold" data-ui-icon="bold"><b>B</b></button>
+                  <button class="dock-btn" data-action="toggle-italic" aria-label="Italic" data-label="Italic" data-ui-icon="italic"><i>I</i></button>
+                  <button class="dock-btn" data-action="align" aria-label="Text alignment" data-label="Align" data-ui-icon="align-left">≡</button>
                 </div>
                 <div class="journal-dock-group journal-dock-shape">
-                  <button class="dock-btn" id="journalShapeFillBtn" data-journal-color="bg" aria-label="Shape fill" data-label="Fill">▣</button>
-                  <button class="dock-btn" id="journalShapeBorderBtn" data-journal-color="border" aria-label="Shape border" data-label="Border">⬚</button>
+                  <button class="dock-btn" id="journalShapeFillBtn" data-journal-color="bg" aria-label="Shape fill" data-label="Fill" data-ui-icon="paint-bucket">▣</button>
+                  <button class="dock-btn" id="journalShapeBorderBtn" data-journal-color="border" aria-label="Shape border" data-label="Border" data-ui-icon="square-dashed">⬚</button>
                 </div>
                 <div class="journal-dock-group journal-dock-sticker">
-                  <button class="dock-btn" id="journalStickerColorBtn" data-journal-color="bg" aria-label="Element color" data-label="Color">▣</button>
+                  <button class="dock-btn" id="journalStickerColorBtn" data-journal-color="bg" aria-label="Element color" data-label="Color" data-ui-icon="palette">▣</button>
                 </div>
                 <div class="journal-dock-group journal-dock-tape">
-                  <button class="dock-btn" id="journalTapeColorBtn" data-journal-color="bg" aria-label="Tape color" data-label="Color">▣</button>
-                  <button class="dock-btn" data-action="cycle-tape-pattern" aria-label="Tape pattern" data-label="Pattern">▰</button>
+                  <button class="dock-btn" id="journalTapeColorBtn" data-journal-color="bg" aria-label="Tape color" data-label="Color" data-ui-icon="palette">▣</button>
+                  <button class="dock-btn" data-action="cycle-tape-pattern" aria-label="Tape pattern" data-label="Pattern" data-ui-icon="rectangle-horizontal">▰</button>
                 </div>
                 <div class="journal-dock-group journal-dock-image">
-                  <button class="dock-btn" id="imageReplaceBtnJournal" data-action="replace-photo" aria-label="Replace image" data-label="Replace">🖼</button>
-                  <button class="dock-btn" data-action="open-image-shape" aria-label="Crop shape" data-label="Shape">◖</button>
-                  <button class="dock-btn" data-action="open-image-frame" aria-label="Image frame" data-label="Frame">▧</button>
+                  <button class="dock-btn" id="imageReplaceBtnJournal" data-action="replace-photo" aria-label="Replace image" data-label="Replace" data-ui-icon="image">🖼</button>
+                  <button class="dock-btn" data-action="open-image-shape" aria-label="Crop shape" data-label="Shape" data-ui-icon="crop">◖</button>
+                  <button class="dock-btn" data-action="open-image-frame" aria-label="Image frame" data-label="Frame" data-ui-icon="gallery-horizontal-end">▧</button>
                 </div>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-action="duplicate-element" aria-label="Duplicate item" data-label="Duplicate">⧉</button>
-                <button class="dock-btn" data-action="delete-element" aria-label="Delete item" data-label="Delete">🗑</button>
+                <button class="dock-btn" data-action="duplicate-element" aria-label="Duplicate item" data-label="Duplicate" data-ui-icon="copy">⧉</button>
+                <button class="dock-btn" data-action="delete-element" aria-label="Delete item" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
               <div class="dock-mode dock-mode-table">
-                <button class="dock-btn" id="tableStructureBtn" aria-label="Rows and columns" data-label="Grid">▤</button>
-                <button class="dock-btn" id="tableBordersBtn" aria-label="Table borders" data-label="Border">⬚</button>
-                <button class="dock-btn" id="tableMathBtn" aria-label="Table math" data-label="Math">∑</button>
-                <button class="dock-btn" id="tableSelectBtn" aria-label="Select multiple cells" data-label="Select">▦</button>
-                <button class="dock-btn" id="tableDeleteBtn" aria-label="Delete table" data-label="Delete">🗑</button>
+                <button class="dock-btn" id="tableStructureBtn" aria-label="Rows and columns" data-label="Grid" data-ui-icon="table-2">▤</button>
+                <button class="dock-btn" id="tableBordersBtn" aria-label="Table borders" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                <button class="dock-btn" id="tableMathBtn" aria-label="Table math" data-label="Math" data-ui-icon="sigma">∑</button>
+                <button class="dock-btn" id="tableSelectBtn" aria-label="Select multiple cells" data-label="Select" data-ui-icon="scan">▦</button>
+                <button class="dock-btn" id="tableDeleteBtn" aria-label="Delete table" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
               <div class="dock-mode dock-mode-container">
-                <button class="dock-btn" id="containerBgBtn" aria-label="Container background" data-label="Color">▣</button>
-                <button class="dock-btn" id="containerBorderBtn" aria-label="Container border" data-label="Border">⬚</button>
-                <button class="dock-btn" id="containerRadiusBtn" aria-label="Corners" data-label="Corners">◼︎</button>
-                <button class="dock-btn" id="containerDeleteBtn" aria-label="Delete block" data-label="Delete">🗑</button>
+                <button class="dock-btn" id="containerBgBtn" aria-label="Container background" data-label="Color" data-ui-icon="paint-bucket">▣</button>
+                <button class="dock-btn" id="containerBorderBtn" aria-label="Container border" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                <button class="dock-btn" id="containerRadiusBtn" aria-label="Corners" data-label="Corners" data-ui-icon="radius">◼︎</button>
+                <button class="dock-btn" id="containerDeleteBtn" aria-label="Delete block" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
               <div class="dock-mode dock-mode-button">
-                <button class="dock-btn" id="buttonBgBtn" aria-label="Button color" data-label="Color">▣</button>
-                <button class="dock-btn" id="buttonTextColorBtn" aria-label="Button text color" data-label="Text">A</button>
-                <button class="dock-btn" id="buttonBorderBtn" aria-label="Button border color" data-label="Border">⬚</button>
-                <button class="dock-btn" id="buttonRadiusBtn" aria-label="Button corners" data-label="Corners">◼︎</button>
-                <button class="dock-btn" id="buttonConfigBtn" aria-label="Configure button" data-label="Configure">⚙</button>
-                <button class="dock-btn" id="buttonDeleteBtn" aria-label="Delete button block" data-label="Delete">🗑</button>
+                <button class="dock-btn" id="buttonBgBtn" aria-label="Button color" data-label="Color" data-ui-icon="paint-bucket">▣</button>
+                <button class="dock-btn" id="buttonTextColorBtn" aria-label="Button text color" data-label="Text" data-ui-icon="baseline">A</button>
+                <button class="dock-btn" id="buttonBorderBtn" aria-label="Button border color" data-label="Border" data-ui-icon="square-dashed">⬚</button>
+                <button class="dock-btn" id="buttonRadiusBtn" aria-label="Button corners" data-label="Corners" data-ui-icon="radius">◼︎</button>
+                <button class="dock-btn" id="buttonConfigBtn" aria-label="Configure button" data-label="Configure" data-ui-icon="settings-2">⚙</button>
+                <button class="dock-btn" id="buttonDeleteBtn" aria-label="Delete button block" data-label="Delete" data-ui-icon="trash-2">🗑</button>
               </div>
               </div><!-- /dock-tools-scroll -->
               <div class="dock-zoom-section">
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
-                <button class="dock-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
+                <button class="dock-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in" data-ui-icon="plus">+</button>
+                <button class="dock-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out" data-ui-icon="minus">−</button>
                 <button class="dock-btn dock-zoom-label" id="infiniteCanvasZoomLabel" data-infinite-canvas-action="reset" aria-label="Reset zoom">100%</button>
                 <div class="dock-divider"></div>
-                <button class="dock-btn" data-infinite-canvas-action="fit" aria-label="Fit to screen">⊞</button>
-                <button class="dock-btn" data-infinite-canvas-action="center" aria-label="Center">◎</button>
+                <button class="dock-btn" data-infinite-canvas-action="fit" aria-label="Fit to screen" data-ui-icon="scan">⊞</button>
+                <button class="dock-btn" data-infinite-canvas-action="center" aria-label="Center" data-ui-icon="focus">◎</button>
               </div>
             </aside>
             <div class="canvas-color-popover" id="canvasColorPopover" hidden></div>
@@ -293,7 +318,7 @@
   <div class="doc-sidebar" id="docSidebar">
     <div class="doc-sidebar-header">
       <span class="doc-sidebar-title">Sections</span>
-      <button class="doc-sidebar-add" id="docAddSection" title="Add section">+</button>
+      <button class="doc-sidebar-add" id="docAddSection" title="Add section" data-ui-icon="plus">+</button>
     </div>
     <div class="doc-sections-list" id="docSectionsList"></div>
   </div>
@@ -335,22 +360,22 @@
           <option value="64px">64px</option>
         </select>
 
-        <button class="doc-tool-btn" data-cmd="bold" title="Bold"><b>B</b></button>
-        <button class="doc-tool-btn" data-cmd="italic" title="Italic"><i>I</i></button>
-        <button class="doc-tool-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+        <button class="doc-tool-btn" data-cmd="bold" title="Bold" data-ui-icon="bold"><b>B</b></button>
+        <button class="doc-tool-btn" data-cmd="italic" title="Italic" data-ui-icon="italic"><i>I</i></button>
+        <button class="doc-tool-btn" data-cmd="underline" title="Underline" data-ui-icon="underline"><u>U</u></button>
 
         <div class="doc-toolbar-divider"></div>
 
         <div class="doc-color-wrap" id="docTextColorWrap">
           <button class="doc-tool-btn" id="docTextColorBtn" title="Text color">
             <span class="doc-color-preview" id="docTextColorPreview"></span>
-            A
+            <span data-ui-icon="baseline" aria-hidden="true"></span>
           </button>
         </div>
         <div class="doc-color-wrap" id="docHighlightWrap">
           <button class="doc-tool-btn" id="docHighlightBtn" title="Highlight">
             <span class="doc-color-preview" id="docHighlightPreview"></span>
-            H
+            <span data-ui-icon="highlighter" aria-hidden="true"></span>
           </button>
         </div>
 
@@ -361,7 +386,7 @@
           </div>
 
           <div class="doc-color-section">
-            <button id="docColorMoreBtn" class="doc-color-more">＋ Custom Color</button>
+            <button id="docColorMoreBtn" class="doc-color-more"><span data-ui-icon="palette" aria-hidden="true"></span><span>Custom Color</span></button>
           </div>
 
           <div class="doc-color-section hidden" id="docColorAdvanced">
@@ -373,33 +398,33 @@
         <div class="doc-toolbar-divider"></div>
 
         <div class="doc-list-wrap">
-          <button class="doc-tool-btn" id="docListMenuBtn" title="Lists & alignment">≣</button>
+          <button class="doc-tool-btn" id="docListMenuBtn" title="Lists & alignment" data-ui-icon="list">≣</button>
           <div class="doc-list-menu" id="docListMenu">
-            <button class="doc-list-item" data-cmd="insertUnorderedList">Bullet List</button>
-            <button class="doc-list-item" data-cmd="insertOrderedList">Numbered List</button>
-            <button class="doc-list-item" data-cmd="justifyLeft">Align Left</button>
-            <button class="doc-list-item" data-cmd="justifyCenter">Align Center</button>
-            <button class="doc-list-item" data-cmd="justifyRight">Align Right</button>
+            <button class="doc-list-item" data-cmd="insertUnorderedList"><span data-ui-icon="list" aria-hidden="true"></span><span>Bullet List</span></button>
+            <button class="doc-list-item" data-cmd="insertOrderedList"><span data-ui-icon="list-ordered" aria-hidden="true"></span><span>Numbered List</span></button>
+            <button class="doc-list-item" data-cmd="justifyLeft"><span data-ui-icon="align-left" aria-hidden="true"></span><span>Align Left</span></button>
+            <button class="doc-list-item" data-cmd="justifyCenter"><span data-ui-icon="align-center" aria-hidden="true"></span><span>Align Center</span></button>
+            <button class="doc-list-item" data-cmd="justifyRight"><span data-ui-icon="align-right" aria-hidden="true"></span><span>Align Right</span></button>
           </div>
         </div>
 
         <div class="doc-format-wrap">
-          <button class="doc-tool-btn" id="docFormatMenuBtn" title="Format">⋯</button>
+          <button class="doc-tool-btn" id="docFormatMenuBtn" title="Format" data-ui-icon="ellipsis">⋯</button>
           <div class="doc-format-menu" id="docFormatMenu">
             <div class="doc-format-item doc-has-submenu" id="docStyleKitBtn">
-              <span>🎨 Writing Style</span><span class="doc-submenu-arrow">▸</span>
+              <span class="icon-with-label"><span data-ui-icon="palette" aria-hidden="true"></span>Writing Style</span><span class="doc-submenu-arrow"><span data-ui-icon="chevron-right" aria-hidden="true"></span></span>
             </div>
             <div class="doc-format-item doc-has-submenu" id="docPagePresetBtn">
-              <span>📄 Page Preset</span><span class="doc-submenu-arrow">▸</span>
+              <span class="icon-with-label"><span data-ui-icon="file-text" aria-hidden="true"></span>Page Preset</span><span class="doc-submenu-arrow"><span data-ui-icon="chevron-right" aria-hidden="true"></span></span>
             </div>
             <div class="doc-list-divider"></div>
             <div class="doc-list-section-label">Paragraph Style</div>
-            <button class="doc-format-item" data-format="p">¶ Paragraph</button>
-            <button class="doc-format-item" data-format="h1">H1 Heading 1</button>
-            <button class="doc-format-item" data-format="h2">H2 Heading 2</button>
-            <button class="doc-format-item" data-format="h3">H3 Heading 3</button>
-            <button class="doc-format-item" data-format="h4">H4 Heading 4</button>
-            <button class="doc-format-item" data-format="blockquote">" Quote Block</button>
+            <button class="doc-format-item" data-format="p"><span data-ui-icon="pilcrow" aria-hidden="true"></span><span>Paragraph</span></button>
+            <button class="doc-format-item" data-format="h1"><span data-ui-icon="heading" aria-hidden="true"></span><span>Heading 1</span></button>
+            <button class="doc-format-item" data-format="h2"><span data-ui-icon="heading-2" aria-hidden="true"></span><span>Heading 2</span></button>
+            <button class="doc-format-item" data-format="h3"><span data-ui-icon="heading-3" aria-hidden="true"></span><span>Heading 3</span></button>
+            <button class="doc-format-item" data-format="h4"><span data-ui-icon="heading-4" aria-hidden="true"></span><span>Heading 4</span></button>
+            <button class="doc-format-item" data-format="blockquote"><span data-ui-icon="text-quote" aria-hidden="true"></span><span>Quote Block</span></button>
             <div class="doc-list-divider"></div>
             <div class="doc-list-section-label">Lines & Spacing</div>
             <button class="doc-format-item" data-spacing="1.4">Tight (1.4)</button>
@@ -408,24 +433,24 @@
             <button class="doc-format-item" data-spacing="2.8">Double (2.8)</button>
             <div class="doc-list-divider"></div>
             <div class="doc-list-section-label">Alignment</div>
-            <button class="doc-format-item" data-cmd="justifyLeft">⬤← Left</button>
-            <button class="doc-format-item" data-cmd="justifyCenter">⬤ Center</button>
-            <button class="doc-format-item" data-cmd="justifyRight">→⬤ Right</button>
-            <button class="doc-format-item" data-cmd="justifyFull">⬤⬤ Justify</button>
+            <button class="doc-format-item" data-cmd="justifyLeft"><span data-ui-icon="align-left" aria-hidden="true"></span><span>Left</span></button>
+            <button class="doc-format-item" data-cmd="justifyCenter"><span data-ui-icon="align-center" aria-hidden="true"></span><span>Center</span></button>
+            <button class="doc-format-item" data-cmd="justifyRight"><span data-ui-icon="align-right" aria-hidden="true"></span><span>Right</span></button>
+            <button class="doc-format-item" data-cmd="justifyFull"><span data-ui-icon="align-justify" aria-hidden="true"></span><span>Justify</span></button>
             <div class="doc-list-divider"></div>
             <div class="doc-list-section-label">Insert</div>
-            <button class="doc-format-item" data-action="divider">─ Divider</button>
-            <button class="doc-format-item" data-action="pagenum"># Page Numbers</button>
+            <button class="doc-format-item" data-action="divider"><span data-ui-icon="minus" aria-hidden="true"></span><span>Divider</span></button>
+            <button class="doc-format-item" data-action="pagenum"><span data-ui-icon="hash" aria-hidden="true"></span><span>Page Numbers</span></button>
             <div class="doc-list-divider"></div>
             <div class="doc-list-section-label">Page Setup</div>
-            <button class="doc-format-item" data-action="margins">⊟ Margins</button>
-            <button class="doc-format-item" data-action="header">▤ Header & Footer (coming soon)</button>
+            <button class="doc-format-item" data-action="margins"><span data-ui-icon="between-horizontal-start" aria-hidden="true"></span><span>Margins</span></button>
+            <button class="doc-format-item" data-action="header"><span data-ui-icon="panel-top" aria-hidden="true"></span><span>Header & Footer (coming soon)</span></button>
           </div>
           <!-- Writing Style Kit submenu -->
           <div class="doc-submenu" id="docStyleKitSubmenu">
             <div class="doc-submenu-header">
               <span>Writing Style</span>
-              <button class="doc-submenu-new" id="docNewStyleKit">+ New</button>
+              <button class="doc-submenu-new" id="docNewStyleKit"><span data-ui-icon="plus" aria-hidden="true"></span><span>New</span></button>
             </div>
             <div class="doc-submenu-list" id="docStyleKitList"></div>
           </div>
@@ -434,7 +459,7 @@
           <div class="doc-submenu" id="docPagePresetSubmenu">
             <div class="doc-submenu-header">
               <span>Page Preset</span>
-              <button class="doc-submenu-new" id="docNewPagePreset">+ New</button>
+              <button class="doc-submenu-new" id="docNewPagePreset"><span data-ui-icon="plus" aria-hidden="true"></span><span>New</span></button>
             </div>
             <div class="doc-submenu-list" id="docPagePresetList"></div>
           </div>
@@ -442,17 +467,18 @@
       </div>
 
       <div class="doc-toolbar-group doc-toolbar-group-meta">
-        <button class="doc-tool-btn doc-insert-toggle" id="docInsertToggle" title="Insert">＋ Insert</button>
-        <button class="doc-tool-btn" id="docFindBtn" title="Find / Replace">Find</button>
-        <button class="doc-tool-btn" id="docStatsToggle" title="Writing stats">Stats</button>
-        <button class="doc-tool-btn" id="docLexiconToggle" title="Lexicon">📚</button>
-        <button class="doc-tool-btn" id="docToggleSidebar" title="Sections">☰</button>
-        <button class="doc-tool-btn" id="docToggleInspector" title="Inspector">⊙</button>
+        <button class="doc-tool-btn doc-insert-toggle" id="docInsertToggle" title="Insert"><span data-ui-icon="plus" aria-hidden="true"></span><span>Insert</span></button>
+        <button class="doc-tool-btn" id="docFindBtn" title="Find / Replace"><span data-ui-icon="search" aria-hidden="true"></span><span>Find</span></button>
+        <button class="doc-tool-btn" id="docWritingCheck" title="Check spelling & grammar" aria-label="Check spelling & grammar"><span data-ui-icon="check" aria-hidden="true"></span></button>
+        <button class="doc-tool-btn" id="docStatsToggle" title="Writing stats"><span data-ui-icon="chart-no-axes-combined" aria-hidden="true"></span><span>Stats</span></button>
+        <button class="doc-tool-btn" id="docLexiconToggle" title="Lexicon" data-ui-icon="book-open">📚</button>
+        <button class="doc-tool-btn" id="docToggleSidebar" title="Sections" data-ui-icon="panel-left">☰</button>
+        <button class="doc-tool-btn" id="docToggleInspector" title="Inspector" data-ui-icon="panel-right">⊙</button>
       </div>
       <div class="doc-stats-panel" id="docStatsPanel">
         <div class="doc-stats-header">
           <span class="doc-stats-title">Writing Stats</span>
-          <button class="doc-stats-close" id="docStatsClose">✕</button>
+          <button class="doc-stats-close" id="docStatsClose" aria-label="Close writing stats" title="Close writing stats" data-ui-icon="x">✕</button>
         </div>
 
         <div class="doc-stats-tabs" id="docStatsTabs">
@@ -472,8 +498,8 @@
       <div class="doc-lexicon-header">
         <span>Lexicon</span>
         <div class="doc-lexicon-header-actions">
-          <button id="docLexiconSaveSelection" title="Add selected text as entry">＋ Add Entry</button>
-          <button id="docLexiconClose">✕</button>
+          <button id="docLexiconSaveSelection" title="Add selected text as entry"><span data-ui-icon="plus" aria-hidden="true"></span><span>Add Entry</span></button>
+          <button id="docLexiconClose" aria-label="Close lexicon" title="Close lexicon" data-ui-icon="x">✕</button>
         </div>
       </div>
 
@@ -510,12 +536,12 @@
 
       <div class="doc-lexicon-footer">
         <div class="doc-lexicon-footer-left">
-          <button id="lexBackBtn" class="doc-lexicon-footer-btn" style="display:none;">← Back</button>
-          <button id="lexAddGroupBtn" class="doc-lexicon-footer-btn">+ Group</button>
-          <button id="lexAddSectionBtn" class="doc-lexicon-footer-btn" style="display:none;">+ Section</button>
-          <button id="lexAddEntryBtn" class="doc-lexicon-footer-btn" style="display:none;">+ Entry</button>
+          <button id="lexBackBtn" class="doc-lexicon-footer-btn" style="display:none;"><span data-ui-icon="arrow-left" aria-hidden="true"></span><span>Back</span></button>
+          <button id="lexAddGroupBtn" class="doc-lexicon-footer-btn"><span data-ui-icon="plus" aria-hidden="true"></span><span>Group</span></button>
+          <button id="lexAddSectionBtn" class="doc-lexicon-footer-btn" style="display:none;"><span data-ui-icon="plus" aria-hidden="true"></span><span>Section</span></button>
+          <button id="lexAddEntryBtn" class="doc-lexicon-footer-btn" style="display:none;"><span data-ui-icon="plus" aria-hidden="true"></span><span>Entry</span></button>
         </div>
-        <button id="lexInsertSelectedBtn" class="doc-lexicon-footer-btn primary" style="display:none;">Insert</button>
+        <button id="lexInsertSelectedBtn" class="doc-lexicon-footer-btn primary" style="display:none;"><span data-ui-icon="corner-down-right" aria-hidden="true"></span><span>Insert</span></button>
       </div>
 
       <div class="doc-lexicon-composer" id="docLexiconComposer" style="display:none;">
@@ -601,11 +627,11 @@
         <input id="docReplaceInput" class="doc-find-input" type="text" placeholder="Replace with" />
       </div>
       <div class="doc-find-actions">
-        <button id="docFindPrevBtn" class="doc-find-btn" type="button">Prev</button>
-        <button id="docFindNextBtn" class="doc-find-btn" type="button">Next</button>
-        <button id="docReplaceBtn" class="doc-find-btn" type="button">Replace</button>
-        <button id="docReplaceAllBtn" class="doc-find-btn" type="button">All</button>
-        <button id="docFindCloseBtn" class="doc-find-btn" type="button">✕</button>
+        <button id="docFindPrevBtn" class="doc-find-btn" type="button"><span data-ui-icon="chevron-up" aria-hidden="true"></span><span>Prev</span></button>
+        <button id="docFindNextBtn" class="doc-find-btn" type="button"><span data-ui-icon="chevron-down" aria-hidden="true"></span><span>Next</span></button>
+        <button id="docReplaceBtn" class="doc-find-btn" type="button"><span data-ui-icon="replace" aria-hidden="true"></span><span>Replace</span></button>
+        <button id="docReplaceAllBtn" class="doc-find-btn" type="button"><span data-ui-icon="replace" aria-hidden="true"></span><span>All</span></button>
+        <button id="docFindCloseBtn" class="doc-find-btn" type="button" aria-label="Close find and replace" title="Close find and replace" data-ui-icon="x">✕</button>
       </div>
     </div>
     <div class="doc-body-wrap" id="docBodyWrap">
@@ -622,7 +648,7 @@
   <div class="doc-inspector" id="docInspector">
     <div class="doc-inspector-header">
       <div class="doc-inspector-title">Section Inspector</div>
-      <button class="doc-inspector-close" id="docInspectorCloseBtn">✕</button>
+      <button class="doc-inspector-close" id="docInspectorCloseBtn" aria-label="Close inspector" title="Close inspector" data-ui-icon="x">✕</button>
     </div>
     <div class="doc-inspector-body">
       <div class="doc-inspector-group">
@@ -649,8 +675,8 @@
         <div class="doc-link-row" id="inspectorPOVLinkRow">
           <span class="doc-link-state" id="inspectorPOVLinkState">No linked page</span>
           <div class="doc-link-actions">
-            <button type="button" class="doc-link-btn" id="inspectorPOVOpenBtn">Open</button>
-            <button type="button" class="doc-link-btn" id="inspectorPOVCreateBtn">Create</button>
+            <button type="button" class="doc-link-btn" id="inspectorPOVOpenBtn"><span data-ui-icon="external-link" aria-hidden="true"></span><span>Open</span></button>
+            <button type="button" class="doc-link-btn" id="inspectorPOVCreateBtn"><span data-ui-icon="plus" aria-hidden="true"></span><span>Create</span></button>
           </div>
         </div>
 
@@ -660,8 +686,8 @@
         <div class="doc-link-row" id="inspectorLocationLinkRow">
           <span class="doc-link-state" id="inspectorLocationLinkState">No linked page</span>
           <div class="doc-link-actions">
-            <button type="button" class="doc-link-btn" id="inspectorLocationOpenBtn">Open</button>
-            <button type="button" class="doc-link-btn" id="inspectorLocationCreateBtn">Create</button>
+            <button type="button" class="doc-link-btn" id="inspectorLocationOpenBtn"><span data-ui-icon="external-link" aria-hidden="true"></span><span>Open</span></button>
+            <button type="button" class="doc-link-btn" id="inspectorLocationCreateBtn"><span data-ui-icon="plus" aria-hidden="true"></span><span>Create</span></button>
           </div>
         </div>
 
@@ -696,7 +722,7 @@
               <button class="thread-color-swatch thread-color-custom" title="Custom color">+</button>
               <input id="docThreadColorInput" type="color" style="display:none;" value="#ffb347" />
             </div>
-            <button id="docThreadAddBtn" class="doc-inspector-action-btn">＋ Add</button>
+            <button id="docThreadAddBtn" class="doc-inspector-action-btn"><span data-ui-icon="plus" aria-hidden="true"></span><span>Add</span></button>
           </div>
         </div>
       </div>
@@ -704,7 +730,7 @@
 
     <div class="doc-inspector-footer">
       <div class="doc-export-wrap">
-        <button id="docExportCanvasBtn" class="doc-inspector-action-btn">Export to Canvas</button>
+        <button id="docExportCanvasBtn" class="doc-inspector-action-btn"><span data-ui-icon="external-link" aria-hidden="true"></span><span>Export to Canvas</span></button>
 
         <div class="doc-export-menu" id="docExportMenu">
           <label class="doc-export-label" for="docExportBreakdown">Break down by</label>
@@ -715,8 +741,8 @@
           </select>
 
           <div class="doc-export-row">
-            <button id="docExportNewCanvas" class="doc-export-btn">New Canvas</button>
-            <button id="docExportExistingCanvas" class="doc-export-btn">Existing Canvas</button>
+            <button id="docExportNewCanvas" class="doc-export-btn"><span data-ui-icon="file-plus-2" aria-hidden="true"></span><span>New Canvas</span></button>
+            <button id="docExportExistingCanvas" class="doc-export-btn"><span data-ui-icon="layers" aria-hidden="true"></span><span>Existing Canvas</span></button>
           </div>
         </div>
       </div>
@@ -726,12 +752,12 @@
 
 <div class="page-board-surface" id="pageBoardSurface">
   <div class="infinite-canvas-toolbar" id="infiniteCanvasToolbar" hidden>
-    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out">−</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-out" aria-label="Zoom out" data-ui-icon="minus">−</button>
     <button type="button" class="infinite-canvas-toolbar-zoom" data-infinite-canvas-action="reset" aria-label="Reset zoom to 100%">100%</button>
-    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in">+</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="zoom-in" aria-label="Zoom in" data-ui-icon="plus">+</button>
     <div class="infinite-canvas-toolbar-sep"></div>
-    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="fit" aria-label="Fit board to screen" title="Fit to screen">⊞</button>
-    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="center" aria-label="Center view" title="Center">◎</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="fit" aria-label="Fit board to screen" title="Fit to screen" data-ui-icon="scan">⊞</button>
+    <button type="button" class="infinite-canvas-toolbar-btn" data-infinite-canvas-action="center" aria-label="Center view" title="Center" data-ui-icon="focus">◎</button>
   </div>
   <div class="infinite-canvas-viewport" id="infiniteCanvasViewport">
     <div class="infinite-canvas-stage" id="infiniteCanvasStage">
@@ -741,6 +767,7 @@
             <img class="page-hero-img" id="pageHeroImg" src="" alt="" />
             <button class="page-hero-change-btn" id="pageHeroChangeBtn">+ Add banner</button>
             <div class="page-hero-controls" id="pageHeroControls" aria-label="Banner controls">
+              <button class="page-hero-ctrl-btn" id="bannerAppearanceBtn">Appearance</button>
               <div class="page-hero-controls-row" role="group" aria-label="Banner size">
                 <button class="page-hero-ctrl-btn" data-hero-size="sm" title="Compact header">S</button>
                 <button class="page-hero-ctrl-btn" data-hero-size="md" title="Medium header">M</button>
@@ -778,10 +805,10 @@
 <div class="split-pane" id="splitPane">
   <div class="split-topbar" id="splitTopbar">
     <div class="split-topbar-left">
-      <button class="nav-history-btn split-nav-btn" id="splitBackBtn" aria-label="Back" disabled>
+      <button class="nav-history-btn split-nav-btn" id="splitBackBtn" aria-label="Back" disabled data-ui-icon="chevron-left">
         <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M6 1L1 6l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="nav-history-btn split-nav-btn" id="splitFwdBtn" aria-label="Forward" disabled>
+      <button class="nav-history-btn split-nav-btn" id="splitFwdBtn" aria-label="Forward" disabled data-ui-icon="chevron-right">
         <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <div class="split-page-title" id="splitPageTitle"></div>
@@ -789,10 +816,10 @@
     </div>
     <div class="split-topbar-right">
       <button class="split-action-btn" id="splitSwapBtn" type="button" title="Swap with main">Swap</button>
-      <button class="split-header-btn" id="splitOpenMainBtn" aria-label="Open in main" title="Open in main">
+      <button class="split-header-btn" id="splitOpenMainBtn" aria-label="Open in main" title="Open in main" data-ui-icon="external-link">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M7 1h4v4M11 1L6 6M2 4H1v7h7V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="split-header-btn" id="splitCloseBtn" aria-label="Close split" title="Close split">
+      <button class="split-header-btn" id="splitCloseBtn" aria-label="Close split" title="Close split" data-ui-icon="x">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
@@ -826,7 +853,7 @@
                 <path d="M16.5 16.5L21 21" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <input class="search-input" id="searchInput" placeholder="Search your notes..." autocomplete="off"/>
-            <button class="search-clear" id="searchClear">✕</button>
+            <button class="search-clear" id="searchClear" aria-label="Clear search" title="Clear search" data-ui-icon="x">✕</button>
         </div>
     </div>
 
@@ -847,7 +874,7 @@
 <div class="sticker-panel" id="stickerPanel">
   <div class="sticker-panel-header">
     <span class="sticker-panel-title">Stickers</span>
-    <button class="sticker-panel-close" id="stickerPanelClose">✕</button>
+    <button class="sticker-panel-close" id="stickerPanelClose" aria-label="Close stickers" title="Close stickers" data-ui-icon="x">✕</button>
   </div>
   <div class="sticker-panel-books" id="stickerBooks">
     <button class="sticker-book-tab active" data-book="nature">Nature</button>
@@ -874,13 +901,13 @@
       </div>
     </div>
     <div class="soundbar-controls">
-      <button class="soundbar-btn" id="soundPrevBtn" title="Previous" aria-label="Previous track">⏮</button>
-      <button class="soundbar-btn soundbar-play-btn" id="soundPlayBtn" title="Play/Pause" aria-label="Play">▶</button>
-      <button class="soundbar-btn" id="soundNextBtn" title="Next" aria-label="Next track">⏭</button>
+      <button class="soundbar-btn" id="soundPrevBtn" title="Previous" aria-label="Previous track" data-ui-icon="skip-back">⏮</button>
+      <button class="soundbar-btn soundbar-play-btn" id="soundPlayBtn" title="Play/Pause" aria-label="Play" data-ui-icon="play">▶</button>
+      <button class="soundbar-btn" id="soundNextBtn" title="Next" aria-label="Next track" data-ui-icon="skip-forward">⏭</button>
     </div>
     <div class="soundbar-bar-right">
       <div class="soundbar-ambient-dots" id="soundbarAmbientDots"></div>
-      <button class="soundbar-btn" id="soundLoopBtn" title="Loop" aria-label="Loop track" aria-pressed="false">↺</button>
+      <button class="soundbar-btn" id="soundLoopBtn" title="Loop" aria-label="Loop track" aria-pressed="false" data-ui-icon="repeat">↺</button>
       <span class="soundbar-volume-icon" aria-hidden="true">
         <svg viewBox="0 0 14 12" focusable="false">
           <path d="M1.25 4.25h2.2L7 1.45v9.1l-3.55-2.8h-2.2z"></path>
@@ -889,18 +916,19 @@
         </svg>
       </span>
       <input type="range" class="soundbar-volume" id="soundbarVolume" min="0" max="1" step="0.02" value="0.8" title="Volume" />
-      <button class="soundbar-btn soundbar-expand-btn" id="soundbarToggleBtn" title="Expand" aria-label="Open music controls" aria-expanded="false">⌃</button>
+      <button class="soundbar-btn soundbar-expand-btn" id="soundbarToggleBtn" title="Expand" aria-label="Open music controls" aria-expanded="false" data-ui-icon="chevron-up">⌃</button>
     </div>
     <div class="soundbar-progress-wrap" id="soundbarProgressWrap">
       <div class="soundbar-progress-bar" id="soundbarProgressBar"></div>
     </div>
   </div>
-  <div class="soundbar-panel" id="soundbarPanel">
+  <div class="soundbar-panel" id="soundbarPanel" aria-hidden="true" inert>
     <div class="soundbar-tabs">
       <button class="soundbar-tab active" data-tab="music">Music</button>
       <button class="soundbar-tab" data-tab="ambience">Ambience</button>
     </div>
     <div class="soundbar-content" id="soundbarMusicTab">
+      <div class="soundbar-library-controls" id="soundbarLibraryControls"></div>
       <div class="soundbar-upload-row">
         <button class="soundbar-upload-btn" id="soundUploadBtn">+ Add Music</button>
       </div>
@@ -913,6 +941,10 @@
 </div>
 
 <div class="app-toast" id="appToast" aria-live="polite"></div>
+<div id="storageSaveWarning" class="storage-save-warning" role="alert" hidden>
+  <span>Your latest changes aren't saved yet. Keep this tab open; Sanctum is retrying.</span>
+  <button id="storageRetrySave" type="button">Retry now</button>
+</div>
 
 </main>
 
@@ -924,7 +956,7 @@
         <div class="trash-title">Trash</div>
         <div class="trash-subtitle">Deleted pages and domains can be restored from here.</div>
       </div>
-      <button class="trash-close" id="trashCloseBtn">✕</button>
+      <button class="trash-close" id="trashCloseBtn" aria-label="Close trash" title="Close trash" data-ui-icon="x">✕</button>
     </div>
     <div class="trash-empty" id="trashEmpty">Trash is empty.</div>
     <div class="trash-list" id="trashList"></div>
@@ -954,7 +986,7 @@
       <!-- content loads here -->
     </div>
 
-    <button class="settings-close" id="settingsClose">✕</button>
+    <button class="settings-close" id="settingsClose" aria-label="Close settings" title="Close settings" data-ui-icon="x">✕</button>
   </div>
 </div>
 
@@ -983,11 +1015,12 @@
       <button class="page-type-btn" data-layout="document">Document</button>
       <button class="page-type-btn" data-layout="profile">Profile</button>
       <button class="page-type-btn" data-layout="sheet">Database</button>
+      <button class="page-type-btn" data-layout="timeline">Timeline</button>
+      <button class="page-type-btn" data-layout="tree">Relationship tree</button>
       <button class="page-type-btn" data-layout="journal">Journal</button>
-      <button class="page-type-btn page-type-future" data-layout="map" disabled>Map</button>
     </div>
 
-    <div class="page-create-section-label">Category</div>
+    <div class="page-create-section-label">Category / custom type <button type="button" class="custom-types-manage" id="manageCustomTypesCreate">Manage types</button><div id="customTypeCreateSummary" class="custom-types-summary"></div></div>
     <select class="page-create-select" id="pageCreateCategory">
       <option value="none">None</option>
       <option value="character">Character</option>
@@ -1015,6 +1048,7 @@
     <div class="page-details-row">
       <label>Icon</label>
       <input class="page-details-input" id="pageDetailsIcon" placeholder="Emoji, /remove, or image/GIF URL" />
+      <button type="button" class="page-icon-btn" data-choose-icon-for="#pageDetailsIcon">Choose icon…</button>
     </div>
     <div class="page-details-row">
       <label>Title</label>
@@ -1029,11 +1063,11 @@
         <option value="profile">Profile</option>
         <option value="sheet">Database</option>
         <option value="journal">Journal</option>
-        <option value="map">Map</option>
+        <option value="map" disabled>Saved map (read-only)</option>
       </select>
     </div>
     <div class="page-details-row">
-      <label>Category</label>
+      <label>Category / custom type <button type="button" class="custom-types-manage" id="manageCustomTypesDetails">Manage types</button></label>
       <select class="page-details-select" id="pageDetailsCategory">
         <option value="none">None</option>
         <option value="character">Character</option>
@@ -1067,26 +1101,29 @@
   </div>
 </div>
 
-<div class="page-details-overlay" id="pageIconOverlay">
+<dialog class="page-details-overlay" id="pageIconOverlay" aria-label="Choose page icon">
   <div class="page-icon-modal">
     <div class="page-icon-head">
       <div>
         <div class="page-icon-title">Page Icon</div>
       </div>
-      <button class="page-icon-close" id="pageIconClose" aria-label="Close icon picker">✕</button>
+      <button class="page-icon-close" id="pageIconClose" aria-label="Close icon picker" data-ui-icon="x">✕</button>
     </div>
 
     <div class="page-icon-preview-wrap">
       <div class="page-icon-preview" id="pageIconPreview">📄</div>
+      <div id="pageIconSelectionName" aria-live="polite"></div>
     </div>
 
+    <div id="pageIconLibrary"></div>
+    <div id="pageIconCustom" role="tabpanel" aria-labelledby="iconCustomTab" hidden>
     <div class="page-details-row">
-      <label>Icon or image URL</label>
+      <label for="pageIconInput">Icon or image URL</label>
       <input class="page-details-input" id="pageIconInput" placeholder="Emoji or image/GIF URL" autocomplete="off" />
     </div>
 
     <div class="page-icon-helper">
-      Tip: paste an emoji like `🧙`, a web image URL, or upload a local PNG/GIF.
+      Paste your own icon or image URL, or upload an image below.
     </div>
 
     <div class="page-icon-scale-control" id="pageIconScaleControl">
@@ -1099,24 +1136,37 @@
 
     <div class="page-icon-row">
       <button class="page-icon-btn" id="pageIconUploadBtn">Upload image/GIF</button>
-      <button class="page-icon-btn" id="pageIconClearBtn">Remove icon</button>
+    </div>
     </div>
 
     <div class="page-icon-actions">
+      <button class="page-icon-btn" id="pageIconClearBtn">Remove icon</button>
       <button class="page-icon-btn" id="pageIconCancel">Cancel</button>
       <button class="page-icon-btn primary" id="pageIconSave">Save</button>
     </div>
   </div>
-</div>
+</dialog>
 
 <script src="storage.js"></script>
 <script>
   (function () {
+    const profileStartup = /(?:\?|&)startupProfile=1(?:&|$)/.test(window.location?.search || "");
+    const startupTimings = [];
     const scriptQueue = [
+      "assets/ui-icon-paths.js",
+      "ui-icons.js",
+      "assets/page-symbol-paths.js",
+      "icon-catalog.js",
+      "appearance.js",
+      "project-data.js",
+      "soundbar-data.js",
       "soundbar.js",
       "stickers.js",
       "document.js",
       "ui-core.js",
+      "writing-check-data.js",
+      "writing-check-ui.js",
+      "custom-types.js",
       "backup-data.js",
       "page-lifecycle.js",
       "sidebar.js",
@@ -1125,9 +1175,17 @@
       "history-state.js",
       "journal-data.js",
       "journal.js",
+      "map-page.js",
       "app-core.js",
+      "icon-picker.js",
+      "world-systems.js",
+      "page-relations.js",
       "relationship-graph.js",
       "page-database.js",
+      "timeline-data.js",
+      "timeline-ui.js",
+      "relationship-tree-data.js",
+      "relationship-tree-ui.js",
       "context-engine.js",
       "assistant-operations.js",
       "assistant-transactions.js",
@@ -1138,17 +1196,58 @@
       "assistant-database-structure-adapter.js",
       "profile.js",
       "page-props.js",
+      "custom-types-ui.js",
+      "project-ui.js",
+      "context-preview.js",
+      "context-preview-ui.js",
+      "world-systems-ui.js",
+      "character-sheet-data.js",
+      "character-sheet-ui.js",
       "button-block.js",
-      "canvas-lines.js"
+      "canvas-lines.js",
+      "canvas-preview.js",
+      "dashboard-widgets.js",
+      "dashboard-layout.js",
+      "chatgpt-database.js",
+      "chatgpt-pages.js",
+      "assets/html-to-image.js",
+      "chatgpt-visual.js",
+      "chatgpt-connection.js"
     ];
+
+    // Stable URLs let the server's ETag/Last-Modified checks reuse unchanged
+    // scripts. Explicit release versions are still supported when supplied.
+    function scriptURL(src) {
+      const version = window.SANCTUM_ASSET_VERSION;
+      return version ? `${src}?v=${encodeURIComponent(version)}` : src;
+    }
+
+    // Fetch in parallel with vault initialization, but execute only after the
+    // vault is readable and in the existing dependency order below.
+    scriptQueue.forEach((src) => {
+      const preload = document.createElement("link");
+      preload.rel = "preload";
+      preload.as = "script";
+      preload.href = scriptURL(src);
+      document.head.appendChild(preload);
+    });
 
     function loadScript(src) {
       return new Promise((resolve, reject) => {
+        const startedAt = profileStartup ? performance.now() : 0;
         const script = document.createElement("script");
-        const version = window.SANCTUM_ASSET_VERSION || String(Date.now());
-        script.src = `${src}?v=${encodeURIComponent(version)}`;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        script.src = scriptURL(src);
+        script.onload = () => {
+          if (profileStartup) {
+            const timing = { script: src, ms: Math.round(performance.now() - startedAt) };
+            startupTimings.push(timing);
+            console.info("Sanctum startup", JSON.stringify(timing));
+          }
+          resolve();
+        };
+        script.onerror = () => reject(Object.assign(new Error(`Failed to load ${src}`), {
+          code: "SANCTUM_SCRIPT_LOAD_FAILED"
+        }));
         document.body.appendChild(script);
       });
     }
@@ -1157,9 +1256,16 @@
       .then(() => scriptQueue.reduce((p, src) => p.then(() => loadScript(src)), Promise.resolve()))
       .then(() => {
         window.dispatchEvent(new CustomEvent("sanctum:scripts-ready"));
+        if (profileStartup) console.info("Sanctum startup total", JSON.stringify({
+          readyMs: Math.round(performance.now()), scripts: startupTimings
+        }));
       })
       .catch((err) => {
         console.error("Sanctum failed to boot", err);
+        if (err?.code === "SANCTUM_SCRIPT_LOAD_FAILED") {
+          alert("Sanctum could not load an application file. Reload to try again. Your vault has not been reset.");
+          return;
+        }
         if (err?.code === "SANCTUM_STORAGE_BLOCKED") {
           alert("Sanctum could not open your vault because another Sanctum tab or window is holding storage open. Close other Sanctum tabs, then reload. Your vault has not been replaced with an empty one.");
           return;

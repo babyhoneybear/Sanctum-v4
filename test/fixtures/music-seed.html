@@ -1,0 +1,34 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Scoped music test vault</title>
+<style>body{max-width:680px;margin:70px auto;background:#eee9dd;color:#302d26;font:16px/1.6 system-ui}button{padding:12px 18px}a{display:block;margin-top:20px}</style>
+<h1>Music test vault</h1><p>Seeds a domain, two projects, child pages, and three local sample tracks on the isolated localhost:3025 origin.</p>
+<button id="seed" disabled>Load music test data</button><p id="status" role="status">Opening storage…</p><a href="/">Open Sanctum</a>
+<script src="/storage.js"></script><script>
+SanctumStorageReady.then(()=>{
+  if(location.origin!=='http://localhost:3025'){status.textContent='Use localhost:3025.';return;}
+  const seed=document.getElementById('seed'), status=document.getElementById('status');seed.disabled=false;status.textContent='Ready.';
+  seed.onclick=async()=>{
+    const pages=[{id:'music-hub',title:'Stories',parent:'music-domain',containerType:'hub'},
+      {id:'music-writing',title:'Writing',parent:'music-hub',containerType:'page',layout:'sheet'},
+      {id:'music-novel',title:'Beneath the Veins',parent:'music-writing',containerType:'database-row',isScopeBoundary:true,
+        databaseRowRef:{sourceKind:'page',sourcePageId:'music-writing',sourceBlockId:'',rowId:'novel-row'}},
+      {id:'music-chapter',title:'Chapter One',parent:'music-novel',containerType:'page'},
+      {id:'music-study',title:'Japanese Learning',parent:'music-domain',containerType:'project'},
+      {id:'music-practice',title:'Daily Practice',parent:'music-study',containerType:'page'}].map(p=>({layout:'board-canvas',category:'none',...p}));
+    const domains=[{id:'music-domain',title:'The North Coast',layout:'board-canvas'}];
+    const links=[domains[0],...['music-novel','music-chapter','music-study','music-practice','music-writing'].map(id=>pages.find(page=>page.id===id))];
+    const cards=()=>links.map((p,i)=>({id:'music-card-'+i,type:'page',x:32+i*210,y:80,w:190,h:130,z:1,linkedPageId:p.id,linkedPageType:p===domains[0]?'domain':'page',pageCardTitle:p.title,pageCardLayout:'board-canvas'}));
+    const blocks=Object.fromEntries(['home',...domains.map(p=>p.id),...pages.map(p=>p.id)].map(id=>[id,cards()]));
+    const tracks=[];
+    for(const [id,name,path] of [['music-a','Coastal rain','/sounds/rain.mp3'],['music-b','Forest at night','/sounds/forest.mp3'],['music-c','Ocean calm','/sounds/ocean-waves.mp3']]){
+      const response=await fetch(path);if(!response.ok)throw Error('Missing sample audio: '+path);
+      const blob=await response.blob(),blobKey='soundbar-track:'+id;
+      if(!await SanctumStorage.putBlob(blobKey,blob))throw Error('Could not seed sample audio');
+      tracks.push({id,name,blobKey,fileName:id+'.mp3',mimeType:'audio/mpeg',size:blob.size});
+    }
+    for(const [key,value] of Object.entries({sanctum_pages_registry:pages,sanctum_domains:domains,sanctum_page_blocks:blocks,
+      sanctum_page_databases:{'music-writing':{view:'gallery',rowPageKind:'database-row',rowPageLayout:'board-canvas',properties:[{id:'name',name:'Project',type:'title'}],rows:[{id:'novel-row',pageId:'music-novel',values:{name:'Beneath the Veins'}}]}},
+      sanctum_soundbar_library_v1:{tracks,currentTrackId:'music-b',volume:0,loopTrack:false}}))SanctumStorage.writeJSON(key,value);
+    await SanctumStorage.flush();status.textContent='Saved. Open Sanctum.';
+  };
+});
+</script></html>

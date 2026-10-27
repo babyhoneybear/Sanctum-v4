@@ -1,0 +1,37 @@
+.block[data-character-section] { color:var(--text-main); }
+#grid:has(> .block[data-character-section]) { box-sizing:border-box; }
+.block[data-character-section] .character-sheet-heading { font-family:inherit; font-size:20px; font-weight:600; margin:0 0 20px; letter-spacing:-.02em; color:inherit; padding-bottom:12px; border-bottom:1px solid var(--surface-border); }
+.block[data-character-section]:not([data-character-section="essentials"]) .connections-block-heading .block-title { font-family:inherit; font-size:20px; font-weight:600; padding-bottom:12px; border-bottom:1px solid var(--surface-border); }
+.block[data-character-section] .block-body p { font-size:13px; line-height:1.75; margin:0 0 18px; }
+.block[data-character-section] .block-body p strong { font-size:12px; font-weight:600; }
+.character-essentials { display:grid; grid-template-columns:minmax(180px,23%) 1fr; gap:32px; }
+.character-essentials > .character-fields-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; }
+.character-fields-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 24px; align-content:start; }
+.character-sheet-fields > .character-fields-grid { display:block; }
+.character-sheet-fields .pps-row { display:block; padding:0; margin:0; border:0; }
+.character-sheet-fields .pps-label { display:block; width:auto; margin:0 0 5px; color:var(--text-main); font-size:10px; letter-spacing:.07em; text-transform:uppercase; opacity:.7; }
+.character-sheet-fields .pps-text-value { min-height:24px; border-bottom:1px solid var(--surface-border); width:100%; font-size:13px; }
+.character-sheet-fields .pps-chips { display:flex; width:100%; }
+.character-sheet-help { font-size:11px; color:var(--muted2); line-height:1.65; margin:14px 0 4px; }
+.character-add-relation { background:var(--field-bg); color:var(--text-main); border:1px solid var(--surface-border); border-radius:5px; padding:5px 8px; font:inherit; margin-top:8px; }
+.character-portrait { display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center; background:var(--surface-bg); border:1px solid var(--surface-border); border-radius:6px; min-height:244px; position:relative; overflow:hidden; }
+.character-portrait > span { color:var(--muted2); font:inherit; }
+.character-portrait img { width:100%; height:190px; object-fit:cover; }
+.character-portrait-upload { position:relative; overflow:hidden; font-size:11px; cursor:pointer; padding:6px 10px; }
+.character-portrait-upload input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; }
+.character-portrait-url { font-size:10px; color:var(--muted2); padding:0 8px 8px; max-width:100%; }
+.character-portrait-url input { width:100%; box-sizing:border-box; background:var(--field-bg); color:var(--text-main); border:1px solid var(--surface-border); padding:6px; }
+.character-reference-placeholder { box-sizing:border-box; height:100%; width:100%; border:1px dashed var(--surface-border); display:flex; flex-direction:column; justify-content:center; align-items:center; gap:14px; padding:24px; text-align:center; color:var(--muted2); font-size:12px; }
+.character-reference-placeholder strong { font:600 18px var(--font-ui,system-ui); color:var(--text-main); }
+.character-reference-placeholder small { font-size:10px; }
+.character-sections-dialog { background:var(--panel-bg); color:var(--text-main); border:1px solid var(--panel-border-strong); border-radius:12px; padding:24px; width:min(480px,90vw); max-height:85vh; overflow:auto; font:13px/1.6 var(--font-ui,system-ui); }
+.character-sections-dialog::backdrop { background:#0008; }
+.character-sections-dialog h2 { margin:0; }
+.character-sections-dialog p { color:var(--muted2); }
+.character-section-choices { display:grid; gap:10px; }
+.character-section-choices label { display:flex; gap:10px; }
+.character-section-choices input { accent-color:var(--accent); }
+.character-sections-dialog footer { display:flex; justify-content:flex-end; gap:12px; margin-top:20px; }
+.character-sections-dialog button { background:var(--surface-bg); color:var(--text-main); border:1px solid var(--surface-border); border-radius:5px; padding:8px 14px; cursor:pointer; }
+@media(max-width:700px){.character-essentials { grid-template-columns:150px 1fr; gap:18px; }}
+@media(max-width:1100px){.character-essentials > .character-fields-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }}

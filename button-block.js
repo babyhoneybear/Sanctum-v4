@@ -57,7 +57,7 @@
     if (borderColor) visualStyles.push(`border-color:${escHtml(borderColor)}`);
     if (radius) visualStyles.push(`border-radius:${escHtml(radius)}`);
 
-    shell.innerHTML = `<button type="button" class="button-block-btn button-block-btn--${size} button-block-btn--${btnStyle}"${visualStyles.length ? ` style="${visualStyles.join(";")}"` : ""} data-no-select>${icon ? `<span class="button-block-icon">${escHtml(icon)}</span>` : ""}<span class="button-block-label">${escHtml(displayLabel)}</span></button>`;
+    shell.innerHTML = `<button type="button" class="button-block-btn button-block-btn--${size} button-block-btn--${btnStyle}"${visualStyles.length ? ` style="${visualStyles.join(";")}"` : ""} data-no-select>${icon ? `<span class="button-block-icon">${window.getIconMarkup?.(icon, "") || escHtml(icon)}</span>` : ""}<span class="button-block-label">${escHtml(displayLabel)}</span></button>`;
   }
 
   function mountButtonBlock(blockEl, options = {}) {
@@ -483,7 +483,7 @@
       : "nothing";
     return {
       label: String(rawDraft.label || "").slice(0, 120),
-      icon: String(rawDraft.icon || "").slice(0, 4),
+      icon: String(rawDraft.icon || ""),
       inputPrompt: String(rawDraft.inputPrompt || "").slice(0, 300),
       confirmMessage: String(rawDraft.confirmMessage || "").slice(0, 300),
       actions,
@@ -537,7 +537,8 @@
             </label>
             <label class="bb-picker-field bb-picker-field--icon">
               <span>Icon</span>
-              <input id="bbIcon" placeholder="✦" value="${escHtml(cfg.icon || "")}" maxlength="4">
+              <input id="bbIcon" placeholder="✦" value="${escHtml(cfg.icon || "")}">
+              <button type="button" data-choose-icon-for="#bbIcon">Choose icon…</button>
             </label>
           </div>
           <div class="bb-row-2">

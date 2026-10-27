@@ -118,7 +118,7 @@ function serializeBlocks() {
 
 function saveState(recordHistory = true) {
   const activePage = typeof userPages !== "undefined" ? userPages.find((page) => page.id === currentPageId) : null;
-  if (activePage?.layout === "journal") return true;
+  if (activePage?.layout === "journal" || activePage?.layout === "map") return true;
   const blocks = serializeBlocks();
   const state = {
     page: document.getElementById("pageTitle")?.textContent || "Home",
@@ -146,6 +146,9 @@ function buildBlockFromData(data) {
   const b = document.createElement("div");
   b.className = "block";
   b.dataset.type = data.type || "text";
+  if (data.dashboardRole) b.dataset.dashboardRole = data.dashboardRole;
+  if (data.characterSection) b.dataset.characterSection = data.characterSection;
+  if (data.characterLayout) b.dataset.characterLayout = JSON.stringify(data.characterLayout);
   b.id = data.id;
 
   b.style.left = `${data.x}px`;
@@ -248,6 +251,8 @@ function buildBlockFromData(data) {
     if ("dataCalloutShowIcon" in data) b.dataset.dataCalloutShowIcon = data.dataCalloutShowIcon;
     if ("dataCalloutIcon" in data) b.dataset.dataCalloutIcon = data.dataCalloutIcon;
     if ("dataCalloutShowProjectImage" in data) b.dataset.dataCalloutShowProjectImage = data.dataCalloutShowProjectImage;
+    if ("dataCalloutShowDateTime" in data) b.dataset.dataCalloutShowDateTime = data.dataCalloutShowDateTime;
+    if (data.dataCalloutDateStyle) b.dataset.dataCalloutDateStyle = data.dataCalloutDateStyle;
     if ("dataCalloutProjectImageLayout" in data) b.dataset.dataCalloutProjectImageLayout = data.dataCalloutProjectImageLayout;
     if ("dataCalloutProjectImageSize" in data) b.dataset.dataCalloutProjectImageSize = data.dataCalloutProjectImageSize;
 
@@ -259,6 +264,12 @@ function buildBlockFromData(data) {
   if (data.type === "live-database-card") {
     if (data.liveDatabaseCard) b.dataset.liveDatabaseCard = data.liveDatabaseCard;
     requestAnimationFrame(() => window.mountLiveDatabaseCardBlock?.(b));
+  }
+
+  if (data.type === "connections") {
+    b.dataset.connectionPropertyId = data.connectionPropertyId || "";
+    b.dataset.connectionSourcePageId = data.connectionSourcePageId || "";
+    requestAnimationFrame(() => window.mountConnectionsBlock?.(b));
   }
 
   if (data.type === "progress") {
@@ -346,6 +357,16 @@ function buildBlockFromData(data) {
     syncWebLinkCardTarget(b, { url: data.externalUrl || "" });
   }
 
+  if (["page-tags", "mood-board"].includes(data.type)) {
+    b.dataset.dashboardWidget = data.dashboardWidget || "{}";
+    requestAnimationFrame(() => window.mountDashboardWidget?.(b));
+  }
+
+  if (data.type === "canvas-preview") {
+    b.dataset.canvasPreview = data.canvasPreview || "{}";
+    requestAnimationFrame(() => window.mountCanvasPreview?.(b));
+  }
+
   if (data.type === "button") {
     if (data.buttonConfig) b.dataset.buttonConfig = data.buttonConfig;
     requestAnimationFrame(() => {
@@ -364,7 +385,7 @@ function buildBlockFromData(data) {
   if (data.borderColor) applyBlockBorderTone(b, data.borderColor);
   if (data.textColor) applyBlockTextTone(b, data.textColor);
   if (data.titleColor) applyBlockTitleTone(b, data.titleColor);
-  if (data.padding) applyBlockPaddingTone(b, data.padding);
+  if (data.padding) applyBlockPaddingTone(b, data.padding, { resize: false });
   if (data.radius) b.style.borderRadius = data.radius;
   if (data.hasNote)    b.classList.add("has-note");
 
@@ -380,6 +401,7 @@ function buildBlockFromData(data) {
   if (data.linkedPageId) b.dataset.linkedPageId = data.linkedPageId;
   if (data.pageCardIconScale) b.dataset.pageCardIconScale = String(normalizeIconImageScale(data.pageCardIconScale, 1));
   if (getPageCardView(data) === "gallery") b.dataset.pageCardView = "gallery";
+  if (data.pageCardGalleryStyle === "compact") b.dataset.pageCardGalleryStyle = "compact";
   b.dataset.pageCardImageMode = getPageCardImageMode(data);
   b.dataset.pageCardImagePos = String(getPageCardImagePosition(data));
   if (data.pageCardImageSrc) b.dataset.pageCardImageSrc = data.pageCardImageSrc;
@@ -440,15 +462,27 @@ function buildBlockFromData(data) {
     fitLinkedPageBlock(b);
   }
 
+  window.applyBlockAppearance?.(b, window.getSavedBlockAppearance?.(data) || {});
   return b;
 }
 
+// Appearance settings belong to the block and travel with saves, copies and Undo.
 function getMinHeightForBlock(block) {
-  if (block?.dataset?.type === "text") {
+  // Images fit inside a user-sized box. Measuring their 100%-height body
+  // here feeds the current box height back into its own minimum on every drag.
+  if (block?.dataset?.type === "image") return GRID_SIZE * 4;
+  if (block?.dataset?.dataCalloutCompact === "true") {
+    const content = block.querySelector(".data-callout-content");
+    const style = window.getComputedStyle(block);
+    const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    return Math.max(GRID_SIZE, Math.ceil(((content?.scrollHeight || 0) + padding + 2) / GRID_SIZE) * GRID_SIZE);
+  }
+  if (["text", "list"].includes(block?.dataset?.type)) {
     const body = block.querySelector(".block-body");
     const paddingTop = parseFloat(window.getComputedStyle(block).paddingTop) || 0;
     const paddingBottom = parseFloat(window.getComputedStyle(block).paddingBottom) || 0;
-    const bodyHeight = body ? Math.max(body.scrollHeight, body.getBoundingClientRect().height) : 0;
+    // Canvas zoom changes screen rectangles, not the block's logical minimum.
+    const bodyHeight = body ? Math.max(body.scrollHeight, body.offsetHeight) : 0;
     return Math.max(GRID_SIZE, Math.ceil(paddingTop + bodyHeight + paddingBottom + 2));
   }
 
@@ -525,7 +559,8 @@ function getMinHeightForBlock(block) {
 
 function enforceMinHeight(block) {
   const minH = getMinResizeDimensionsForBlock(block).height;
-  const currentH = block.getBoundingClientRect().height;
+  // offsetHeight is in canvas CSS pixels, even when the board is zoomed.
+  const currentH = block.offsetHeight;
 
   if (currentH < minH) {
     block.style.height = `${minH}px`;

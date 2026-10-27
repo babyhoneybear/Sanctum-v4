@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Context preview checks</title>
+<link rel="stylesheet" href="../../context-preview.css">
+<style>
+  :root { color-scheme: dark; --panel-bg:#242424; --panel-border-strong:#484848; --text-main:#eee; --muted2:#b1afa9; --accent:#a3c7b2; }
+  body { margin:40px; background:#191919; color:#eee; font:16px/1.7 system-ui; }
+  main { max-width:720px; margin:auto; } button { padding:8px 12px; margin:4px; }
+  #editor { padding:24px; border:1px solid #444; border-radius:8px; min-height:130px; }
+  .inline-link { color:#a3c7b2; text-decoration:underline; cursor:pointer; }
+  #checks { color:#aaa; font-size:13px; } .block-page-card { border:1px solid #555; padding:20px; max-width:200px; }
+</style></head><body><main>
+<h1>Reference previews</h1><p>Isolated sample data for preview behavior. Nothing here writes to the vault.</p>
+<div id="editor" contenteditable="true" role="textbox" aria-label="Draft">Before <span class="inline-link" data-page-id="elias-a" contenteditable="false">Elias</span> arrives, check <span class="inline-link" data-page-id="recipe" contenteditable="false">Tomato soup</span>. Continue writing here.</div>
+<p>Another project: <span class="inline-link" data-page-id="elias-b" contenteditable="false">Elias in Story B</span>.</p>
+<p><span class="inline-link" data-page-id="missing" contenteditable="false">Deleted reference</span></p>
+<button class="pps-chip" data-linked-page-id="elias-a">Connected character</button>
+<div data-linked-page-id="recipe"><div class="block-page-card" tabindex="0">Recipe page card</div></div>
+<p><button id="caret">Place writing caret</button><button id="update">Update referenced age</button><button id="remove">Remove character</button></p>
+<div id="checks" role="status">No navigation. No writes.</div>
+</main>
+<script>
+  window.userPages = [
+    {id:'story-a',title:'Story A',parent:'home'}, {id:'story-b',title:'Story B',parent:'home'},
+    {id:'elias-a',title:'Elias',parent:'story-a',category:'character',summary:'A cautious traveller who keeps a journal.'},
+    {id:'elias-b',title:'Elias',parent:'story-b',category:'character',summary:'An astronomer in another story.'},
+    {id:'recipe',title:'Tomato soup',parent:'home',category:'custom-type-recipe'}
+  ];
+  window.userDomains=[]; window.getCurrentPageId=()=> 'draft';
+  const stores = {
+    sanctum_page_props_v1:{'elias-a':{properties:[{label:'Age',type:'text',value:'24'},{label:'Favourite meal',type:'relation',linkedPageIds:['recipe']}]},recipe:{properties:[{label:'Servings',type:'text',value:'4'}]}},
+    sanctum_documents:{'elias-a':{sections:[{title:'Background',content:'<p>Born near the northern coast. Always carries a notebook.</p>'}]}},
+    sanctum_page_blocks:{recipe:[{containerTitle:'Method',containerBody:'<p>Roast the tomatoes, then simmer with stock for twenty minutes.</p>'}]},
+    sanctum_custom_types_v1:[{id:'custom-type-recipe',name:'Recipe'}]
+  };
+  let writes=0, destination='none';
+  window.readStorageJSON=(key,fallback)=>stores[key]??fallback;
+  window.writeStorageJSON=()=>{ writes++; };
+  window.openPage=id=>{ destination=id; report(); };
+  const editor=document.getElementById('editor');
+  function report(){ const s=getSelection(); document.getElementById('checks').textContent=`Navigation: ${destination}. Writes: ${writes}. Focus: ${document.activeElement.id || document.activeElement.textContent.slice(0,25)}. Caret: ${s.anchorOffset}.`; }
+  document.getElementById('caret').onclick=()=>{editor.focus();const r=document.createRange();r.setStart(editor.firstChild,3);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r);report();};
+  document.getElementById('update').onclick=()=>{stores.sanctum_page_props_v1['elias-a'].properties[0].value='25';report();};
+  document.getElementById('remove').onclick=()=>{window.userPages=window.userPages.filter(page=>page.id!=='elias-a');report();};
+  document.addEventListener('selectionchange',report);
+</script>
+<script src="../../context-preview.js"></script><script src="../../context-preview-ui.js"></script>
+</body></html>

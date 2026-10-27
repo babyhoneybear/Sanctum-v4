@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Timeline resizing preview</title>
+<link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/timeline.css">
+<style>body{padding:48px;background:#191919;color:#eee}main{max-width:1100px;margin:auto}h1{font-size:28px}nav{display:flex;gap:12px;margin-bottom:24px}nav button{padding:8px 12px;background:#242424;color:#eee;border:1px solid #444;border-radius:4px}</style>
+<main><h1>Master timeline</h1><nav><button id="illustrated">Illustrated</button><button id="spans">Stacked spans</button><button id="embed">Embedded view</button></nav><div id="timeline"></div></main>
+<script src="/timeline-data.js"></script><script>
+const source={kind:'page',pageId:'resize-preview'}, fixtureKey='sanctum_timeline_resize_preview';
+const initial={sources:{'page:resize-preview':{calendar:{kind:'fiction',yearZero:true,eras:[{name:'AF',offset:0,fullName:'After the Fall'}]}}},views:{}};
+window.readStorageJSON=(_,fallback)=>JSON.parse(localStorage.getItem(fixtureKey)||'null')||structuredClone(initial);
+window.writeStorageJSON=(_,value)=>{localStorage.setItem(fixtureKey,JSON.stringify(value));return true;};
+const description='Kovaeth falls after years of great history after a relic disaster. An experiment involving an unstable ancient relic triggers a catastrophic mana storm.\n\nThe heartland is ruptured, drowning settlements and transforming what was once one of the greatest countries into what will later become the Mirelands. Its survivors scatter across the continent, carrying the knowledge of a once prosperous land.\n\nSome rebuild along the northern coast, while others preserve the old stories in scattered villages. Generations later, those stories remain a reminder of the world before the Fall.';
+const db={properties:[{id:'name',name:'Event',type:'title'},{id:'when',name:'When',type:'text'},{id:'details',name:'Details',type:'text'}],rows:[{id:'fall',values:{name:'After the Fall',when:'0 AF',details:description}},{id:'rebuild',values:{name:'Rebuilding',when:'0 AF',details:'The survivors begin again along the coast.'}}]};
+let options={source,database:db,viewKey:'page:resize-preview',fullPage:true};
+window.SanctumTimelineDatabase={get:()=>db,visibleRows:db=>db.rows,refresh:()=>render()};
+function render(){SanctumTimelineUI.mount(document.getElementById('timeline'),options);}
+</script><script src="/timeline-ui.js"></script><script>
+illustrated.onclick=()=>{options.fullPage=true;const all=readStorageJSON();all.views[options.viewKey]={...all.views[options.viewKey],style:'illustrated'};writeStorageJSON('',all);render();};
+spans.onclick=()=>{options.fullPage=true;const all=readStorageJSON();all.views[options.viewKey]={...all.views[options.viewKey],style:'spans'};writeStorageJSON('',all);render();};
+embed.onclick=()=>{options={...options,viewKey:'block:resize-preview:embed',fullPage:false};render();};
+render();
+</script></html>

@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Contextual writing preview · Sanctum</title>
+<link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/timeline.css"><link rel="stylesheet" href="/writing-check.css">
+<style>body{padding:48px}main{max-width:900px;margin:auto}h1{font-size:24px}p{color:var(--muted2)}.doc-content{padding:20px;border:1px solid var(--surface-border);margin-top:28px;font-size:16px}#openEvent{padding:8px 14px;color:var(--text-main);background:var(--surface-bg);border:1px solid var(--surface-border);border-radius:4px}</style>
+<main><h1>Timeline writing preview</h1><p>Isolated sample text. Uses Sanctum’s actual event editor and local writing tools.</p><button id="openEvent">Edit event</button>
+<div id="docPagesHost"><div class="doc-content" contenteditable="true"><p>The <strong>bright</strong> student sat beneath a bright lamp.</p><p>She placed the books on the shelf.</p></div></div></main>
+<script src="/timeline-data.js"></script><script>
+const sample='Leaving its survivors to scatter across the continent carrying the knowledge of a once prosperous land.';
+const source={kind:'page',pageId:'context-preview'};
+const memory={sanctum_timelines_v1:{sources:{'page:context-preview':{calendar:{kind:'custom',name:'Fictional chronology',months:[{name:'Month',days:30}],yearZero:true,eras:[{name:'AF',offset:0,fullName:'After the Fall'}]}}}},sanctum_writing_dictionary_v1:['Kovaeth','AF']};
+window.STORAGE_KEYS={writingDictionary:'sanctum_writing_dictionary_v1',writingSettings:'sanctum_writing_settings_v1'};
+window.readStorageJSON=(key,fallback)=>memory[key]??fallback;
+window.writeStorageJSON=(key,value)=>{memory[key]=structuredClone(value);return true;};
+const db={properties:[{id:'title',name:'Event',type:'title'},{id:'when',name:'When',type:'text'},{id:'description',name:'Details',type:'text'}],rows:[{id:'fall',values:{title:'After the Fall',when:'0 AF',description:sample}}]};
+window.userPages=[];
+window.SanctumTimelineDatabase={get:()=>db,addFields:(_,fields)=>db.properties.push(...fields),saveEvent:(_,id,patch)=>{const row=db.rows.find(row=>row.id===id);Object.assign(row.values,patch);return row;},refresh:()=>{}};
+</script><script src="/timeline-ui.js"></script><script src="/writing-check-data.js"></script><script src="/writing-check-ui.js"></script>
+<script>document.getElementById('openEvent').onclick=()=>SanctumTimelineUI.editEvent({source},{source,rowId:'fall'});</script></html>

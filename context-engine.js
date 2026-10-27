@@ -156,6 +156,7 @@
       kind: safeString(input.kind || "record").trim() || "record",
       type: safeString(input.type || input.kind || "record").trim() || "record",
       title,
+      aliases: normalizeAliases(input.aliases),
       text,
       scopeId: safeString(input.scopeId).trim(),
       scopeTitle: stripHTML(input.scopeTitle || ""),
@@ -181,6 +182,7 @@
       .join(" ");
     record.searchText = normalizeSearchText([
       record.title,
+      ...record.aliases,
       record.text,
       record.type,
       record.kind,
@@ -205,10 +207,11 @@
   }
 
   function isScopeBoundary(page = {}) {
-    return page.type === "domain"
-      || page.isScopeBoundary === true
-      || page.definesScope === true
-      || page.containerType === "project";
+    if (page.type === "domain") return true;
+    if (["page", "project", "hub", "detail"].includes(page.organizationRole)) return page.organizationRole === "project";
+    if (page.isScopeBoundary === true || page.definesScope === true) return true;
+    if (page.isScopeBoundary === false || page.definesScope === false) return false;
+    return page.containerType === "project";
   }
 
   function createPageResolver(snapshot = {}) {
@@ -248,7 +251,7 @@
     };
   }
 
-  function normalizePageProperties(raw = {}) {
+  function normalizePageProperties(raw = {}, pageTitles = new Map()) {
     return asArray(raw?.properties).map((property) => {
       const linkedIds = dedupeStrings(property?.linkedPageIds);
       return {
@@ -256,7 +259,11 @@
         name: safeString(property?.label || property?.name || "Property"),
         type: safeString(property?.type || "text"),
         value: property?.type === "relation" ? linkedIds : (property?.value ?? ""),
-        displayValue: property?.type === "relation" ? linkedIds.join(", ") : (property?.value ?? ""),
+        displayValue: property?.type === "relation" ? linkedIds.map(id => [pageTitles.get(id) || id, pageTitles.get(property.linkLevels?.[id]), property.linkDetails?.[id]].filter(Boolean).join(" · ")).join(", ") : (property?.value ?? ""),
+        linkDetails: property?.type === "relation" ? asObject(property.linkDetails) : {},
+        linkLevels: property?.type === "relation" && (property.relationKind === "proficiency" || property.id === "magic") ? asObject(property.linkLevels) : {},
+        relationKind: safeString(property?.relationKind),
+        cumulative: property?.cumulative,
         linkedPageIds: linkedIds
       };
     });
@@ -324,17 +331,20 @@
       return record;
     }
 
+    const pageTitles = new Map(resolver.all.map(item => [item.id, item.title]));
+    const customTypeNames = new Map(asArray(snapshot.customTypes).map(type => [type.id, type.name]));
     resolver.all.forEach((page) => {
       if (!page?.id || SYSTEM_PAGE_IDS.has(page.id)) return;
       const scopeInfo = getScopeInfo(resolver, page.id);
       const rawProps = asObject(snapshot.pageProps)[page.id] || {};
-      const properties = normalizePageProperties(rawProps);
+      const properties = normalizePageProperties(rawProps, pageTitles);
       const record = register({
         ref: pageRef(page.id),
         id: page.id,
         kind: isScopeBoundary(page) ? "scope" : "page",
-        type: page.category || page.containerType || page.layout || page.type || "page",
+        type: customTypeNames.get(page.category) || page.category || page.containerType || page.layout || page.type || "page",
         title: page.title || "Untitled page",
+        aliases: page.aliases || page.alias || [],
         text: [page.summary, page.description].filter(Boolean).join("\n"),
         scopeId: scopeInfo.scopeId,
         scopeTitle: scopeInfo.scopeTitle,
@@ -354,8 +364,10 @@
           addRelation(record, {
             kind: property.name || "related",
             targetRef: pageRef(linkedPageId),
-            label: property.name || "Related page"
+            label: [property.name || "Related page", pageTitles.get(property.linkLevels[linkedPageId]), property.linkDetails[linkedPageId]].filter(Boolean).join(" · ")
           });
+          const levelId = property.linkLevels[linkedPageId];
+          if (levelId && pageTitles.has(levelId)) addRelation(record, { kind: "proficiency", targetRef: pageRef(levelId), label: pageTitles.get(levelId) });
         });
       });
     });
@@ -504,7 +516,7 @@
         scopeId: scopeInfo.scopeId,
         scopeTitle: scopeInfo.scopeTitle,
         pageTitle: hostPage.title || "",
-        pageType: hostPage.category || hostPage.containerType || hostPage.layout || hostPage.type || "page",
+        pageType: customTypeNames.get(hostPage.category) || hostPage.category || hostPage.containerType || hostPage.layout || hostPage.type || "page",
         breadcrumb: scopeInfo.breadcrumb,
         rowCount: asArray(database.rows).filter((row) => row?.archived !== true).length,
         view: safeString(database.view || "table").trim() || "table",
@@ -626,6 +638,7 @@
 
   function scoreRecord(record, query, tokens, options = {}) {
     const title = normalizeSearchText(record.title);
+    const aliases = normalizeAliases(record.aliases).map(normalizeSearchText);
     const text = normalizeSearchText(record.text);
     const breadcrumb = normalizeSearchText(record.breadcrumb.join(" "));
     const properties = normalizeSearchText(record.properties
@@ -636,11 +649,14 @@
 
     if (phrase && title === phrase) score += 40;
     else if (phrase && title.includes(phrase)) score += 22;
+    if (phrase && aliases.includes(phrase)) score += 35;
+    else if (phrase && aliases.some((alias) => alias.includes(phrase))) score += 18;
     if (phrase && properties.includes(phrase)) score += 12;
     if (phrase && text.includes(phrase)) score += 8;
 
     tokens.forEach((token) => {
       if (title.includes(token)) score += 9;
+      if (aliases.some((alias) => alias.includes(token))) score += 7;
       if (properties.includes(token)) score += 5;
       if (breadcrumb.includes(token)) score += 4;
       if (text.includes(token)) score += 2;
@@ -669,13 +685,18 @@
       .map((entry) => ({ ...entry.record, score: entry.score }));
   }
 
+  function normalizeAliases(value) {
+    return dedupeStrings((Array.isArray(value) ? value : safeString(value).split(/[,;\n]/))
+      .map((alias) => stripHTML(alias).trim()).filter(Boolean));
+  }
+
   function getRecordAliases(record = {}) {
-    const aliases = [safeString(record.title).trim()];
+    const aliases = [safeString(record.title).trim(), ...normalizeAliases(record.aliases)];
     asArray(record.properties).forEach((property) => {
       const name = normalizeSearchText(property?.name || "");
-      if (!/\b(alias|aka|nickname|name|title)\b/.test(name)) return;
+      if (!/\b(alias|aliases|aka|nicknames?|names?|titles?)\b/.test(name)) return;
       const value = stripHTML(property?.displayValue ?? property?.value ?? "");
-      if (value && value.length <= 160) aliases.push(value);
+      if (value && value.length <= 160) aliases.push(...normalizeAliases(value));
     });
     return dedupeStrings(aliases);
   }

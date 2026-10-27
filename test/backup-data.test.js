@@ -73,6 +73,19 @@ test("export falls back to legacy database storage", () => {
   assert.deepEqual(buildBackupData(adapter).pageDatabases, { legacy: { rows: 2 } });
 });
 
+test("Azgaar documents and preserved legacy atlases survive backup and restore", () => {
+  const source = memoryAdapter();
+  const record = { version: 2, engine: "azgaar", engineVersion: "1.153.1", updatedAt: 123,
+    document: '1.153.1|World\r\n{"name":"Nólara"}\r\n<svg id="map"><text>North</text></svg>',
+    previousAtlas: { version: 1, rootId: "old", activeMapId: "old", maps: { old: { name: "Original", features: [{ childMapId: "city" }] } } }
+  };
+  source.values.set(source.keys.maps, { world: record });
+  const backup = buildBackupData(source);
+  const destination = memoryAdapter();
+  importBackupData(backup, destination);
+  assert.deepEqual(destination.values.get(destination.keys.maps), { world: record });
+});
+
 test("export and import preserve scrapbook journal photos", () => {
   const source = memoryAdapter();
   const journal = {
@@ -136,6 +149,22 @@ test("export then import preserves Sanctum data", () => {
     target.values.get(`${target.keys.helperMemoryProfile}:keeper`),
     source.values.get(`${source.keys.helperMemoryProfile}:keeper`)
   );
+});
+
+test("backup round trip keeps connection facts, details and independent canvas placement", () => {
+  const source = memoryAdapter();
+  const facts = {
+    elias: { properties: [{ id: "magic", label: "Magic", type: "relation", linkedPageIds: ["wards"], linkDetails: { wards: "Level 2" }, linkLevels: { wards: "wards-2" } }] },
+    wards: { properties: [{ id: "proficiency-levels", type: "relation", relationKind: "proficiency-levels", cumulative: true, linkedPageIds: ["wards-1", "wards-2"] }] },
+    shield: { properties: [{ id: "requirements", type: "relation", relationKind: "spell-requirements", linkedPageIds: ["wards-2"] }] }
+  };
+  const blocks = { elias: [{ id: "magic-block", type: "connections", connectionPropertyId: "magic", connectionSourcePageId: "elias", titleHTML: "My magic", x: 200, y: 400, w: 360, h: 168, bg: "#223344" }] };
+  source.values.set(source.keys.pageProps, facts);
+  source.values.set(source.keys.pageBlocks, blocks);
+  const target = memoryAdapter();
+  importBackupData(buildBackupData(source), target);
+  assert.deepEqual(target.values.get(target.keys.pageProps), facts);
+  assert.deepEqual(target.values.get(target.keys.pageBlocks), blocks);
 });
 
 test("import accepts older calendarDatabases backups", () => {

@@ -1,0 +1,58 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Canvas preview · sample vault</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px 14px;display:flex;align-items:center;gap:10px}button{padding:5px 10px}details{padding:0 14px}pre{white-space:pre-wrap}iframe{display:block;width:100%;height:calc(100vh - 70px);border:0}</style>
+<nav><span>Isolated sample · Canvas preview</span><button id="seed" disabled>Load magic sample</button><button id="run" disabled>Check preview</button><button id="reopen" disabled>Reopen saved board</button><span id="status">Loading…</span></nav><details><summary>Verification results</summary><pre id="results"></pre></details><iframe id="app" title="Sample Sanctum board"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('app'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';const tick=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(resolve=>w.addEventListener('sanctum:scripts-ready',resolve,{once:true}));
+ const style=w.document.createElement('style');style.textContent='#sidebar,#tabBar,.soundbar,.assistant-panel{display:none!important}#mainPane{margin-left:0!important}';w.document.head.appendChild(style);
+ for(const id of ['seed','run','reopen'])document.getElementById(id).disabled=false;status.textContent='Ready';results.textContent='Saved: '+JSON.stringify(w.getPageBlocks('preview-host').map(b=>({type:b.type,id:b.id,canvasPreview:b.canvasPreview})))+'\nRendered: '+JSON.stringify(w.serializeBlocks().map(b=>({type:b.type,id:b.id})));};
+function page(id,title,layout){if(!w.userPages.some(p=>p.id===id))w.SanctumAssistantPageRegistryStore.create({pageId:id,title,parentId:'home',layout});}
+async function seed(){
+ w.stopPlacing(true);w.openPage('home');
+ page('preview-magic','The Weave · Magic System','infinite-canvas');page('preview-host','Magic · Research board','board-canvas');
+ const node=(id,title,body,x,y,w=280,h=150,color='#192922')=>({id,type:'text',titleHTML:'',bodyHTML:`<h2 style="font-size:21px;margin:0 0 12px">${title}</h2><div>${body}</div>`,x,y,w,h,z:2,bg:color,textColor:'#e5dfcf',appearance:JSON.stringify({titleSize:21,fontSize:16,lineHeight:1.5})});
+ const source=[node('origin','THE WEAVE','Every living thing carries a thread.<br>Magic is the art of hearing it.',800,700,290,160),node('attunement','01 · Attunement','Still the mind. Find the current.<br><i>Attention opens the channel.</i>',1220,590,300,150),node('shape','02 · Shaping','Give the current a pattern.<br>Intention becomes a spell.',1640,700,300,160),node('cost','THE COST','The body pays for what the will asks.<br>Overreach frays the thread.',1220,960,300,150,'#30221d'),node('effect','03 · Manifestation','A ward. A flame. A healing touch.<br>The pattern meets the world.',2060,700,300,160)];
+ w.setPageBlocks('preview-magic',source);
+ const line=(id,start,end,s1='right',s2='left')=>({id,startBlockId:start,endBlockId:end,startSide:s1,endSide:s2,x1:0,y1:0,x2:0,y2:0,color:'#b8a171',width:3,arrowEnd:true});
+ const lines=[line('a','origin','attunement'),line('b','attunement','shape'),line('c','shape','effect'),line('d','shape','cost','bottom','right')];
+ const all=JSON.parse(w.localStorage.getItem('sanctum_canvas_lines')||'{}');all['preview-magic']=lines;w.localStorage.setItem('sanctum_canvas_lines',JSON.stringify(all));
+ w.setPageBlocks('preview-host',[{id:'magic-intro',type:'text',titleHTML:'Anatomy of a spell',bodyHTML:'Explore the system below. Follow its branches, or open the full canvas to develop it.',x:48,y:24,w:1080,h:100,z:1,appearance:JSON.stringify({titleSize:28,fontSize:17})},{id:'magic-preview',type:'canvas-preview',x:48,y:150,w:1120,h:500,z:1,canvasPreview:JSON.stringify({targetPageId:'preview-magic',view:null})}]);
+ w.openPage('preview-host');await tick();status.textContent='Sample ready · drag or scroll inside the preview';
+}
+const check=(ok,message)=>{if(!ok)throw Error(message);results.textContent+='PASS '+message+'\n';};
+document.getElementById('seed').onclick=()=>seed();
+document.getElementById('reopen').onclick=()=>w.location.reload();
+document.getElementById('run').onclick=async()=>{
+ results.textContent='';status.textContent='Checking…';
+ try{
+ if(!w.document.getElementById('magic-preview'))await seed();
+ let block=w.document.getElementById('magic-preview'),surface=block.querySelector('.canvas-preview-surface'),root=surface.shadowRoot;
+ const original=JSON.stringify(w.getPageBlocks('preview-magic')),originalLines=w.localStorage.getItem('sanctum_canvas_lines');
+ check(root.querySelectorAll('.preview-scene>.block').length===5,'All five source blocks appear');
+ check(root.querySelectorAll('.canvas-preview-lines>path').length===4,'All four connector lines appear');
+ check(w.serializeBlocks().length===2,'Preview children never leak into the normal board save');
+ const before=JSON.parse(block.dataset.canvasPreview);
+ block.querySelector('[data-action="in"]').click();await new Promise(r=>setTimeout(r,220));
+ const zoomed=JSON.parse(block.dataset.canvasPreview);check(zoomed.view.zoom>0,'Zoom records an independent camera');
+ const r=surface.getBoundingClientRect();surface.dispatchEvent(new w.WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100,clientX:r.left+100,clientY:r.top+100}));await new Promise(r=>setTimeout(r,220));
+ check(JSON.parse(block.dataset.canvasPreview).view.zoom>zoomed.view.zoom,'Wheel zoom works inside the preview');
+ const pointer=(type,x,y)=>surface.dispatchEvent(new w.PointerEvent(type,{bubbles:true,cancelable:true,pointerId:9,pointerType:'mouse',button:0,clientX:x,clientY:y}));
+ // Keyboard navigation exercises the same saved camera without artificial pointer capture.
+ const viewBefore=JSON.parse(block.dataset.canvasPreview).view;surface.dispatchEvent(new w.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'ArrowRight'}));
+ check(JSON.parse(block.dataset.canvasPreview).view.x>viewBefore.x,'Arrow keys pan the independent camera');
+ check(JSON.stringify(w.getPageBlocks('preview-magic'))===original&&w.localStorage.getItem('sanctum_canvas_lines')===originalLines,'Exploring never changes source items or connections');
+ const updated=w.getPageBlocks('preview-magic');updated[0].bodyHTML='<h2 style="font-size:21px;margin:0 0 12px">THE WEAVE</h2>Every living thing carries a thread.<br><b>The source has been updated.</b>';w.setPageBlocks('preview-magic',updated);
+ check(root.textContent.includes('The source has been updated.'),'Source edits refresh the preview automatically');
+ block.querySelector('[data-action="fit"]').click();
+ const saved=w.serializeBlockElement(block);w.undo();w.redo();await tick();
+ block=w.document.getElementById('magic-preview');check(!!block.querySelector('.canvas-preview-surface').shadowRoot,'Undo and Redo rebuild a working preview');
+ check(w.getPageBlocks('preview-host').some(b=>b.type==='canvas-preview'&&JSON.parse(b.canvasPreview).targetPageId==='preview-magic'),'Saved board retains the source canvas');
+ block.querySelector('[data-action="open"]').click();await tick();check(w.document.body.classList.contains('infinite-canvas-page'),'Open canvas navigates to the full Infinite Canvas');
+ w.openPage('preview-host');await tick();check(!!w.document.querySelector('.canvas-preview-surface')?.shadowRoot,'Returning to the normal board restores the preview');
+ check(!w.document.querySelector('#grid>.canvas-lines-layer'),'Source connector lines do not leak onto the normal board');
+ results.textContent+='ALL CHECKS PASSED';status.textContent='All preview checks passed';
+ }catch(error){results.textContent+='FAIL '+error.stack;status.textContent='Check failed';document.querySelector('details').open=true;}
+};
+</script></html>

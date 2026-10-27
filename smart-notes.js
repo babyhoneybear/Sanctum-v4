@@ -1515,8 +1515,9 @@
     const menuId = `note-menu-${Date.now()}`;
     return `
       <div class="notes-editor-menu-wrapper">
-        <button class="notes-editor-menu-btn" data-notes-menu-toggle="${menuId}" aria-label="Options">⋯</button>
+        <button class="notes-editor-menu-btn" data-notes-menu-toggle="${menuId}" aria-label="Options" title="Options">${getUIIcon("ellipsis")}</button>
         <div class="notes-editor-menu" id="${menuId}" style="display:none;">
+          <button class="notes-menu-item" data-note-connect="1">Connect to a page</button>
           ${note.archived ? '<button class="notes-menu-item" data-note-restore="1">Restore</button>' : '<button class="notes-menu-item" data-note-archive="1">Move to Trash</button>'}
           <button class="notes-menu-item" data-note-reprocess="1">Re-check</button>
         </div>
@@ -1527,12 +1528,12 @@
   function noteToolsHTML() {
     return `
       <div class="notes-editor-tools">
-        <button class="notes-editor-tool-btn" data-note-cmd="bold" title="Bold"><b>B</b></button>
-        <button class="notes-editor-tool-btn" data-note-cmd="italic" title="Italic"><i>I</i></button>
-        <button class="notes-editor-tool-btn" data-note-cmd="insertUnorderedList" title="List">•</button>
-        <button class="notes-editor-tool-btn" data-note-cmd="insertOrderedList" title="Numbered">1</button>
-        <button class="notes-editor-tool-btn" data-note-cmd="formatBlock" data-note-value="h3" title="Heading">H</button>
-        <button class="notes-editor-tool-btn" data-note-link="1" title="Link">🔗</button>
+        <button class="notes-editor-tool-btn" data-note-cmd="bold" title="Bold">${getUIIcon('bold')}</button>
+        <button class="notes-editor-tool-btn" data-note-cmd="italic" title="Italic">${getUIIcon('italic')}</button>
+        <button class="notes-editor-tool-btn" data-note-cmd="insertUnorderedList" title="List">${getUIIcon('list')}</button>
+        <button class="notes-editor-tool-btn" data-note-cmd="insertOrderedList" title="Numbered">${getUIIcon('list-ordered')}</button>
+        <button class="notes-editor-tool-btn" data-note-cmd="formatBlock" data-note-value="h3" title="Heading">${getUIIcon('heading')}</button>
+        <button class="notes-editor-tool-btn" data-note-link="1" title="Link">${getUIIcon('link')}</button>
       </div>
     `;
   }
@@ -1841,10 +1842,10 @@
 
   function editorHTML(note, layoutState = {}) {
     const relatedPages = (note.directPageIds || []).map((pageId) => getPageById(pageId)).filter(Boolean);
-    const primaryLinkedPage = relatedPages[0] || null;
-    const linkedPageContextHTML = primaryLinkedPage
-      ? `<div class="note-linked-context-row"><button class="note-chip buttonish" data-open-linked-page="${primaryLinkedPage.id}">${escapeHTML(primaryLinkedPage.title)}</button></div>`
-      : '';
+    const linkedPageContextHTML = `<div class="note-linked-context-row">
+      ${relatedPages.map((page) => `<button class="note-chip buttonish" data-open-linked-page="${escapeHTML(page.id)}" title="${escapeHTML(getBreadcrumb(page.id).map((item) => item.title).join(' / '))}">${escapeHTML(page.title)}</button>`).join('')}
+      <button class="note-chip buttonish" data-note-connect="1">+ Connect to a page</button>
+    </div>`;
 
     return `
       <div class="note-editor-wrap note-editor-wrap-full" data-note-editor="${note.id}">
@@ -1875,6 +1876,68 @@
         </div>
       </div>
     `;
+  }
+
+  function openNoteConnectionPicker() {
+    flushPendingNoteSave();
+    const noteId = document.querySelector('[data-note-editor]')?.dataset.noteEditor || activeNoteId;
+    const note = getNoteById(noteId);
+    if (!note || document.getElementById('noteConnectionDialog')) return;
+    document.querySelectorAll('.notes-editor-menu').forEach((menu) => { menu.style.display = 'none'; });
+    const dialog = document.createElement('dialog');
+    dialog.id = 'noteConnectionDialog';
+    dialog.className = 'note-connection-dialog';
+    dialog.setAttribute('aria-labelledby', 'noteConnectionTitle');
+    dialog.innerHTML = `
+      <h2 id="noteConnectionTitle">Connect to a page</h2>
+      <p>Keep this note here and find it from the page you choose.</p>
+      <input type="search" aria-label="Find a page" placeholder="Search page names or locations…" autofocus />
+      <div class="note-connection-results" aria-label="Matching pages"></div>
+      <form method="dialog"><button type="submit">Cancel</button></form>`;
+    const input = dialog.querySelector('input');
+    const results = dialog.querySelector('.note-connection-results');
+    const pages = Object.values(getPagesMap())
+      .filter((page) => !['home', 'search', 'inbox', 'notes', 'settings'].includes(page.id));
+    function renderResults() {
+      const query = input.value.trim().toLocaleLowerCase();
+      const matches = pages.map((page) => ({
+        page,
+        path: getBreadcrumb(page.id).map((item) => item.title || 'Untitled').join(' / ')
+      })).filter(({ page, path }) => `${page.title} ${path} ${(page.aliases || [])}`.toLocaleLowerCase().includes(query))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      results.replaceChildren();
+      matches.slice(0, 60).forEach(({ page, path }) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        const connected = (getNoteById(noteId)?.directPageIds || []).includes(page.id);
+        button.disabled = connected;
+        const title = document.createElement('strong');
+        title.textContent = `${page.title || 'Untitled'}${connected ? ' — Connected' : ''}`;
+        const location = document.createElement('span');
+        location.textContent = path;
+        button.append(title, location);
+        button.addEventListener('click', () => {
+          if (!getNoteById(noteId) || !getPageById(page.id)) return;
+          linkNoteToPage(noteId, page.id);
+          dialog.close();
+          renderEverything();
+          document.querySelector('[data-note-connect]')?.focus();
+        });
+        results.append(button);
+      });
+      if (!matches.length || matches.length > 60) {
+        const message = document.createElement('p');
+        message.textContent = !matches.length
+          ? (pages.length ? 'No matching pages. Try a different name.' : 'Create a workspace page first, then connect this note to it.')
+          : 'Showing the first 60 pages. Type more to narrow the results.';
+        results.append(message);
+      }
+    }
+    input.addEventListener('input', renderResults);
+    dialog.addEventListener('close', () => dialog.remove());
+    document.body.append(dialog);
+    renderResults();
+    dialog.showModal();
   }
 
   function buildShelfChecklist(note) {
@@ -2060,6 +2123,10 @@
       closeNotesFilterMenu();
     }
 
+    // Notes may initialize after a dedicated editor has mounted. That editor
+    // owns this surface; clearing it here blanks the restored journal or map.
+    if (['journal', 'map'].includes(pageContent.dataset.surfaceType) || ['journal', 'map'].includes(getPagesMap()[pageId]?.layout)) return;
+
     if (pageId === 'notes') return renderNotesSurface();
     if (pageId === 'inbox') return renderInboxSurface();
     if (['search', 'home', 'settings'].includes(pageId)) {
@@ -2102,7 +2169,7 @@
             <div class="quick-note-title">Quick Note</div>
             <div class="quick-note-context" id="quickNoteContext"></div>
           </div>
-          <button class="quick-note-close" id="quickNoteClose">✕</button>
+          <button class="quick-note-close" id="quickNoteClose" aria-label="Close">${getUIIcon("x")}</button>
         </div>
         <input id="quickNoteTitle" class="quick-note-title-input" placeholder="Title (optional)" />
         <textarea id="quickNoteBody" class="quick-note-body" placeholder="Write anything…"></textarea>
@@ -2195,7 +2262,7 @@
               <div class="assistant-profile-memory-text">${escapeHTML(memory.text)}</div>
               <div class="assistant-profile-memory-meta">${memory.source === 'user' ? 'Added by you' : 'Remembered from chat'}${memory.pinned ? ' · Always available' : ''}</div>
             </div>
-            <button type="button" data-assistant-memory-delete="${escapeHTML(memory.id)}" aria-label="Forget this memory">&times;</button>
+            <button type="button" data-assistant-memory-delete="${escapeHTML(memory.id)}" aria-label="Forget this memory">${getUIIcon("x")}</button>
           </div>
         `).join('')
       : '<div class="assistant-profile-memory-empty">Nothing saved yet. Useful preferences and recurring habits will appear here.</div>';
@@ -2226,7 +2293,7 @@
             <div class="assistant-profile-kicker">Sanctum assistant</div>
             <h2 id="assistantProfileTitle">Identity & memory</h2>
           </div>
-          <button type="button" class="assistant-profile-close" data-assistant-profile-close aria-label="Close">&times;</button>
+          <button type="button" class="assistant-profile-close" data-assistant-profile-close aria-label="Close">${getUIIcon("x")}</button>
         </header>
         <div class="assistant-profile-tabs" role="tablist">
           <button type="button" class="active" data-assistant-profile-tab="identity" role="tab" aria-selected="true">Identity</button>
@@ -2449,7 +2516,7 @@
         button.id = 'assistantProfileOpen';
         button.setAttribute('aria-label', 'Assistant identity and memory');
         button.title = 'Identity and memory';
-        button.textContent = '•••';
+        button.innerHTML = getUIIcon('circle-user-round');
         controls?.prepend(button);
       }
       return;
@@ -2472,9 +2539,9 @@
           </div>
         </div>
         <div class="assistant-drawer-controls">
-          <button type="button" class="assistant-drawer-profile" id="assistantProfileOpen" aria-label="Assistant identity and memory" title="Identity and memory">•••</button>
+          <button type="button" class="assistant-drawer-profile" id="assistantProfileOpen" aria-label="Assistant identity and memory" title="Identity and memory">${getUIIcon('circle-user-round')}</button>
           <span class="assistant-drawer-spark" aria-hidden="true">&#10022;</span>
-          <button class="assistant-drawer-close" id="assistantDrawerClose" aria-label="Close assistant">&minus;</button>
+          <button class="assistant-drawer-close" id="assistantDrawerClose" aria-label="Close assistant" title="Close assistant">${getUIIcon('x')}</button>
         </div>
       </div>
       <div class="assistant-mode-switcher" role="group" aria-label="Assistant response mode">
@@ -2493,7 +2560,7 @@
         <div class="assistant-composer-row">
           <textarea class="assistant-composer-input" id="assistantComposerInput" rows="1" placeholder="Message ${escapeHTML(assistantName)}..."></textarea>
           <span class="assistant-composer-spark" aria-hidden="true">&#10022;</span>
-          <button class="assistant-composer-send" id="assistantComposerSend" aria-label="Send">&#10148;</button>
+          <button class="assistant-composer-send" id="assistantComposerSend" aria-label="Send" title="Send message">${getUIIcon('send')}</button>
         </div>
       </div>
     `;
@@ -2690,7 +2757,7 @@
     return `<input class="assistant-db-proposal-input" type="text" value="${escapeHTML(inputValue)}" ${commonAttributes}>`;
   }
 
-  function renderAssistantDatabaseProposal(message = {}) {
+  function renderAssistantDatabaseProposal(message = {}, getCatalog = buildSanctumContextCatalog) {
     const proposal = message.databaseProposal;
     const operationsApi = window.SanctumAssistantOperations;
     if (!proposal || !operationsApi) return '';
@@ -2723,7 +2790,13 @@
     const selectedIds = new Set(Array.isArray(proposal.review?.selectedOperationIds)
       ? proposal.review.selectedOperationIds
       : []);
-    const catalog = buildSanctumContextCatalog();
+    // Only relation pickers need current vault records. Ordinary saved
+    // proposals can render entirely from their stored review data.
+    const needsCatalog = operations.some((operation) => (
+      operation.type === 'relate-database-rows'
+      || (Array.isArray(operation.changes) && operation.changes.some((change) => change.propertyType === 'relation'))
+    ));
+    const catalog = needsCatalog ? getCatalog() : null;
     const operationHTML = operations.map((operation) => {
       const selected = selectedIds.has(operation.id);
       const changes = Array.isArray(operation.changes) ? operation.changes : [];
@@ -3119,6 +3192,9 @@
   }
 
   function renderAssistantMessages() {
+    // The closed drawer must not rebuild conversation UI during startup or
+    // page navigation. Opening it renders the latest in-memory history.
+    if (!activeAssistantOpen) return;
     const host = document.getElementById('assistantMessages');
     if (!host) return;
     const renderSignature = [
@@ -3160,6 +3236,18 @@
       branchHasAppliedTransaction[index] = hasAppliedTransaction;
     }
 
+    // Reuse one fresh catalog across every relation picker in this render.
+    // Keep it local so later edits and reopens cannot reuse stale vault data.
+    let catalog;
+    let catalogBuilt = false;
+    const getCatalog = () => {
+      if (!catalogBuilt) {
+        catalog = buildSanctumContextCatalog();
+        catalogBuilt = true;
+      }
+      return catalog;
+    };
+
     const messagesHTML = chatMessages.map((message, messageIndex) => {
       const branchHasApplied = branchHasAppliedTransaction[messageIndex];
       const editing = message.role === 'user' && message.id === activeAssistantEditMessageId && !branchHasApplied;
@@ -3191,7 +3279,7 @@
         ${message.role === 'user'
           ? userMessageBody
           : (message.text ? `<div class="assistant-message-text">${formatAssistantMessageText(message.text)}</div>` : '')}
-        ${message.role === 'assistant' ? renderAssistantDatabaseProposal(message) : ''}
+        ${message.role === 'assistant' ? renderAssistantDatabaseProposal(message, getCatalog) : ''}
         ${message.role === 'assistant' ? renderAssistantActions(message) : ''}
         <div class="assistant-message-time">${escapeHTML(formatAssistantTime(message.createdAt))}</div>
       </div>
@@ -3365,6 +3453,7 @@
         blocksByPage: typeof window.readAllPageBlocks === "function" ? window.readAllPageBlocks() : {},
         documentsByPage: typeof window.readAllDocuments === "function" ? window.readAllDocuments() : {},
         pageProps: readJSON((window.STORAGE_KEYS && window.STORAGE_KEYS.pageProps) || "sanctum_page_props_v1", {}),
+        customTypes: readJSON(window.STORAGE_KEYS?.customTypes || "sanctum_custom_types_v1", []),
         notes: getContextCatalogNotes(),
         databases: collectContextDatabases(),
       });
@@ -3980,7 +4069,9 @@
   }
 
   function setAssistantOpen(open) {
+    const wasOpen = activeAssistantOpen;
     activeAssistantOpen = !!open;
+    if (activeAssistantOpen && !wasOpen) assistantRenderRevision += 1;
     document.getElementById('assistantDrawer')?.classList.toggle('open', activeAssistantOpen);
     document.getElementById('assistantTopBtn')?.classList.toggle('active', activeAssistantOpen);
     document.body.classList.toggle('assistant-open', activeAssistantOpen);
@@ -4387,6 +4478,11 @@
         document.querySelectorAll('.notes-editor-menu').forEach(m => m.style.display = 'none');
         menu.style.display = isVisible ? 'none' : 'block';
       }
+      return;
+    }
+
+    if (target.closest('[data-note-connect]')) {
+      openNoteConnectionPicker();
       return;
     }
 

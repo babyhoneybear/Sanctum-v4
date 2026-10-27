@@ -106,12 +106,6 @@
     GRAPH_EDGE_FILTER_TYPES.forEach((type) => {
       if (typeof raw[type] === "boolean") filters[type] = raw[type];
     });
-    if (raw.contains === false) {
-      const otherTypesOff = GRAPH_EDGE_FILTER_TYPES
-        .filter((type) => type !== "contains")
-        .some((type) => raw[type] === false);
-      if (!otherTypesOff) filters.contains = true;
-    }
     return filters;
   }
 
@@ -228,9 +222,9 @@
               : record.containerType === "detail"
                 ? "detail"
                 : (record.type || "page"),
-        title: clampText(record.title, "Untitled", 30),
+        title: String(record.title || '').trim() || 'Untitled',
         icon: getSafeIcon(record.icon, record.type),
-        category: clampText(record.category || record.containerType || record.layout || "", "", 18),
+        category: clampText(window.SanctumCustomTypes?.label(record.category) || record.containerType || record.layout || "", "", 80),
         layout: record.layout || "",
         containerType: record.containerType || "",
         parent: "",
@@ -255,7 +249,7 @@
     nodes.set(node.id, {
       id: node.id,
       type: node.type || "page",
-      title: clampText(node.title, "Untitled", node.type === "database-row" ? 24 : 30),
+      title: String(node.title || '').trim() || 'Untitled',
       icon: getSafeIcon(node.icon, node.type),
       category: clampText(node.category || "", "", 18),
       layout: node.layout || "",
@@ -271,6 +265,7 @@
     const existing = edges.get(key);
     if (existing) {
       existing.count += 1;
+      if (edge.label && !existing.label.split("; ").includes(edge.label)) existing.label += `; ${edge.label}`;
       return;
     }
     edges.set(key, {
@@ -580,7 +575,6 @@
       seen.add(pairKey);
     }
     addEdge(edges, { from: host, to: target, type: "page-card", label: "canvas link", source: source || "canvas" });
-    addEdge(edges, { from: host, to: target, type: "contains", label: "canvas host", source: "canvas-host" });
   }
 
   function extractCanvasLinksFromValue(value, hostPageId = "", records, edges, source = "canvas", seen = new Set(), depth = 0) {
@@ -660,7 +654,7 @@
       if (parentId) map.set(node.id, parentId);
     });
     edges.forEach((edge) => {
-      if (edge.type === "contains") map.set(edge.to, edge.from);
+      if (edge.type === "contains" && !map.has(edge.to)) map.set(edge.to, edge.from);
     });
     edges.forEach((edge) => {
       if (edge.type === "page-card" && !map.has(edge.to)) map.set(edge.to, edge.from);
@@ -826,13 +820,18 @@
       blockCount,
       Object.keys(documents).sort().join(","),
       Object.keys(databases).sort().join(","),
-      getGraphDatabaseRowSignature()
+      getGraphDatabaseRowSignature(),
+      JSON.stringify(readRelationProperties())
     ].join("|");
   }
 
   function invalidateRelationshipGraphCache() {
     graphModelCache = null;
     graphModelRevision = "";
+  }
+
+  function readRelationProperties() {
+    return window.readStorageJSON?.(window.STORAGE_KEYS?.pageProps || "sanctum_page_props_v1", {}) || {};
   }
 
   function isSyntheticDatabaseRowNodeId(nodeId = "") {
@@ -865,13 +864,7 @@
   }
 
   function filterEdgesForExpansion(edges = [], settings = getGraphSettings()) {
-    const filters = settings.edgeFilters || DEFAULT_EDGE_FILTERS;
-    return safeArray(edges).filter((edge) => {
-      if (!isRenderableGraphEdge(edge)) return false;
-      if (!passesDatabaseEdgeRules(edge, settings)) return false;
-      if (edge.type === "contains" || edge.type === "page-card") return true;
-      return filters[edge.type] !== false;
-    });
+    return filterEdgesForDisplay(edges, settings);
   }
 
   function filterGraphNodes(nodes = [], settings = getGraphSettings()) {
@@ -946,7 +939,6 @@
 
     ensureVaultParentEdges(records, edges, canvasHosts);
     ensureCanvasHostedEdges(records, edges);
-    ensureProjectDescendantEdges(records, edges);
 
     records.forEach((record) => {
       safeArray(record.knowledgeProperties).forEach((property) => {
@@ -958,6 +950,13 @@
           label: property.name || "field link",
           source: property.id || "page-field"
         });
+      });
+    });
+
+    (window.SanctumPageRelations?.collect(Array.from(records.values()), readRelationProperties()) || []).forEach(relation => {
+      addEdge(edges, {
+        ...relation, type: "relation", source: `page-property:${relation.propertyId}`,
+        label: [relation.label, relation.detail].filter(Boolean).join(" · ")
       });
     });
 
@@ -1057,18 +1056,6 @@
       next.forEach((id) => selected.add(id));
     }
 
-    Array.from(selected).forEach((id) => {
-      let cursor = nodesById.get(id);
-      const seen = new Set();
-      while (cursor?.id && !seen.has(cursor.id)) {
-        seen.add(cursor.id);
-        const parentId = resolveRecordParent(cursor, nodesById);
-        if (!parentId || !nodesById.has(parentId)) break;
-        selected.add(parentId);
-        cursor = nodesById.get(parentId);
-      }
-    });
-
     const visibleNodes = filterGraphNodes(
       Array.from(selected).map((id) => nodesById.get(id)).filter(Boolean),
       settings
@@ -1112,7 +1099,9 @@
   }
 
   function removeGraphModal() {
-    document.querySelector(".relationship-graph-overlay")?.remove();
+    const overlay = document.querySelector(".relationship-graph-overlay");
+    overlay?.__cleanup?.();
+    overlay?.remove();
   }
 
   function getNodeClass(type = "") {
@@ -1135,11 +1124,30 @@
 
   function getNodeDegrees(nodes = [], edges = []) {
     const degrees = new Map(nodes.map((node) => [node.id, 0]));
-    edges.forEach((edge) => {
+    bundleGraphEdges(edges).forEach((edge) => {
       if (degrees.has(edge.from)) degrees.set(edge.from, degrees.get(edge.from) + 1);
       if (degrees.has(edge.to)) degrees.set(edge.to, degrees.get(edge.to) + 1);
     });
     return degrees;
+  }
+
+  // A pair has one spring and one visible line, regardless of how many sources link it.
+  // Keep the original directed relationships for the inspector.
+  function bundleGraphEdges(edges = []) {
+    const pairs = new Map();
+    edges.flatMap((edge) => edge.relationships || [edge]).forEach((edge) => {
+      if (edge.from === edge.to) return;
+      const id = JSON.stringify([edge.from, edge.to].sort());
+      let pair = pairs.get(id);
+      if (!pair) {
+        pair = { ...edge, id, types: [], relationships: [] };
+        pairs.set(id, pair);
+      }
+      if (!pair.types.includes(edge.type)) pair.types.push(edge.type);
+      pair.relationships.push(edge);
+      if (edge.type === "contains") pair.type = "contains";
+    });
+    return Array.from(pairs.values());
   }
 
   function getNodeRadius(node = {}, degree = 0, mode = "local", settings = getGraphSettings()) {
@@ -1215,6 +1223,12 @@
     const recordById = getRecordMap();
     const laidOutNodes = applyEffectiveParents(nodes, edges, recordById);
     const degrees = getNodeDegrees(laidOutNodes, edges);
+    if (mode === 'global') {
+      return layoutGlobalBranches(laidOutNodes.map((node) => ({
+        ...node, degree: degrees.get(node.id) || 0,
+        radius: getNodeRadius(node, degrees.get(node.id) || 0, mode, settings)
+      })), width, height, settings);
+    }
     const positions = new Map();
     const nodeIds = new Set(laidOutNodes.map((node) => node.id));
     const parentHints = buildEffectiveParentMap(laidOutNodes, edges, recordById);
@@ -1257,106 +1271,176 @@
       focusPosition.y = cy;
     }
 
-    const usableEdges = edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
-    const layoutNodes = laidOutNodes;
-    const iterations = mode === "global" ? 220 : 180;
-    const repulsion = (mode === "global" ? 220 : 360) * ((settings.repelForce || 42) / 42);
-    const springLength = (settings.linkDistance || 78) * 0.70;
-    const springStrength = (mode === "global" ? 0.022 : 0.026) * ((settings.linkForce || 62) / 62);
-
-    for (let i = 0; i < iterations; i += 1) {
-      const cooling = 1 - i / iterations;
-      for (let a = 0; a < layoutNodes.length; a += 1) {
-        for (let b = a + 1; b < layoutNodes.length; b += 1) {
-          const left = positions.get(layoutNodes[a].id);
-          const right = positions.get(layoutNodes[b].id);
-          if (!left || !right) continue;
-          const dx = right.x - left.x || 0.01;
-          const dy = right.y - left.y || 0.01;
-          const distanceSq = Math.max(80, dx * dx + dy * dy);
-          const force = repulsion / distanceSq;
-          const fx = dx * force;
-          const fy = dy * force;
-          left.vx -= fx;
-          left.vy -= fy;
-          right.vx += fx;
-          right.vy += fy;
-        }
-      }
-
-      usableEdges.forEach((edge) => {
-        const from = positions.get(edge.from);
-        const to = positions.get(edge.to);
-        if (!from || !to) return;
-        const dx = to.x - from.x || 0.01;
-        const dy = to.y - from.y || 0.01;
-        const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-        const edgeScale = edge.type === "contains" ? 0.85 : edge.type === "mention" ? 1.15 : 1;
-        const targetLength = springLength * (edge.type === "contains" ? 0.82 : 1);
-        const force = (distance - targetLength) * springStrength * edgeScale;
-        const fx = (dx / distance) * force;
-        const fy = (dy / distance) * force;
-        from.vx += fx;
-        from.vy += fy;
-        to.vx -= fx;
-        to.vy -= fy;
-      });
-
-      layoutNodes.forEach((node) => {
-        const point = positions.get(node.id);
-        if (!point) return;
-        const centerPull = (node.id === focusId ? 0.024 : mode === "global" ? 0.008 : 0.01) * ((settings.centerForce || 58) / 58);
-        point.vx += (cx - point.x) * centerPull;
-        point.vy += (cy - point.y) * centerPull;
-        const layoutParentId = parentHints.get(node.id) || node.parent || "";
-        const parent = layoutParentId ? positions.get(layoutParentId) : null;
-        if (parent) {
-          point.vx += (parent.x - point.x) * 0.046;
-          point.vy += (parent.y - point.y) * 0.046;
-        }
-        point.vx *= 0.58;
-        point.vy *= 0.58;
-        point.x += point.vx * cooling;
-        point.y += point.vy * cooling;
-      });
+    const laidOut = laidOutNodes.map((node) => ({
+      ...node, ...positions.get(node.id),
+      degree: degrees.get(node.id) || 0,
+      radius: getNodeRadius(node, degrees.get(node.id) || 0, mode, settings)
+    }));
+    const nodeById = new Map(laidOut.map((node) => [node.id, node]));
+    const links = bundleGraphEdges(edges);
+    for (let i = 0; i < 200; i += 1) {
+      stepGraphPhysics(laidOut, links, nodeById, width, height, settings, 1 - i / 240);
     }
-
-    const laidOut = layoutNodes.map((node) => {
-      const point = positions.get(node.id) || { x: cx, y: cy };
-      const degree = degrees.get(node.id) || 0;
-      return {
-        ...node,
-        x: point.x,
-        y: point.y,
-        degree,
-        radius: getNodeRadius(node, degree, mode, settings),
-        labelVisible: true
-      };
-    });
-
-    // Label collision detection — hide overlapping labels, prioritise by importance
-    const sorted = [...laidOut].sort((a, b) => {
-      if (a.id === focusId) return -1; if (b.id === focusId) return 1;
-      if (a.type === "home") return -1; if (b.type === "home") return 1;
-      if (a.type === "domain" && b.type !== "domain") return -1;
-      if (b.type === "domain" && a.type !== "domain") return 1;
-      return b.degree - a.degree;
-    });
-    const accepted = [];
-    const CH = 6.0; const LH = 13; const PAD = 3;
-    sorted.forEach((node) => {
-      const forced = node.id === focusId || node.type === "home" || node.type === "domain";
-      const text = clampText(node.title, "Untitled", 24);
-      const w = text.length * CH;
-      const box = { x: node.x - w / 2 - PAD, y: node.y + (node.radius || 5) + 10, w: w + PAD * 2, h: LH };
-      const overlaps = !forced && accepted.some((b) =>
-        box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + b.h > b.y
-      );
-      node.labelVisible = !overlaps;
-      if (!overlaps) accepted.push(box);
-    });
-
     return laidOut;
+  }
+
+  // Pack page groups, not individual dots. A database with many rows needs its
+  // own footprint; cross-links must not pull unrelated branches into that space.
+  function layoutGlobalBranches(nodes, width, height, settings) {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const parents = new Set(nodes.map(node => node.parent).filter(id => byId.has(id)));
+    const groups = new Map(), owner = new Map();
+    const ordered = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
+    // A hub owns its immediate leaf pages. Nested hubs get separate footprints,
+    // rather than recursively inflating the radius of every ancestor.
+    ordered.forEach(node => {
+      const id = !parents.has(node.id) && byId.has(node.parent) ? node.parent : node.id;
+      owner.set(node.id, id);
+      if (!groups.has(id)) groups.set(id, { id, nodes: [], neighbors: new Set() });
+      groups.get(id).nodes.push(node);
+    });
+    const gap = 24 + (settings.linkDistance ?? 78) * 0.22;
+    groups.forEach(group => {
+      const hub = byId.get(group.id);
+      const placed = [{ x: 0, y: 0, radius: hub.radius + 16 }];
+      group.radius = hub.radius + 16;
+      group.nodes.sort((a,b) => a.id.localeCompare(b.id));
+      group.nodes = group.nodes.map(node => {
+        const position = node.id === group.id ? { x: 0, y: 0 } : placeGraphBranch(placed, node.radius + 10, gap);
+        if (node.id !== group.id) placed.push({ ...position, radius: node.radius + 10 });
+        group.radius = Math.max(group.radius, Math.hypot(position.x, position.y) + node.radius + 18);
+        return { ...node, ...position };
+      });
+    });
+    nodes.forEach(node => {
+      const a = owner.get(node.id), b = owner.get(node.parent);
+      if (a && b && a !== b) { groups.get(a).neighbors.add(b); groups.get(b).neighbors.add(a); }
+    });
+    const pending = [...groups.values()], placed = [], positioned = new Map(), result = [];
+    while (pending.length) {
+      const connections = g => [...g.neighbors].filter(id => positioned.has(id)).length;
+      pending.sort((a,b) => connections(b) - connections(a) ||
+        (positioned.size === 0 ? Number(b.id === 'home') - Number(a.id === 'home') : 0) || b.radius - a.radius || a.id.localeCompare(b.id));
+      const group = pending.shift();
+      const neighbors = [...group.neighbors].map(id => positioned.get(id)).filter(Boolean);
+      const target = neighbors.length ? {
+        x: neighbors.reduce((sum, p) => sum + p.x, 0) / neighbors.length,
+        y: neighbors.reduce((sum, p) => sum + p.y, 0) / neighbors.length
+      } : { x: 0, y: 0 };
+      const position = placed.length ? placeGraphBranch(placed, group.radius, gap * 2, target) : { x: 0, y: 0 };
+      placed.push({ ...position, radius: group.radius });
+      positioned.set(group.id, position);
+      group.nodes.forEach(node => result.push({ ...node, x: node.x + position.x, y: node.y + position.y }));
+    }
+    if (!result.length) return [];
+    const cx = (Math.min(...result.map(n => n.x)) + Math.max(...result.map(n => n.x))) / 2;
+    const cy = (Math.min(...result.map(n => n.y)) + Math.max(...result.map(n => n.y))) / 2;
+    return result.map(node => {
+      const x = node.x - cx + width / 2, y = node.y - cy + height / 2;
+      return { ...node, x, y, vx: 0, vy: 0, anchorX: x, anchorY: y };
+    });
+  }
+
+  function placeGraphBranch(placed, radius, gap, target = { x: 0, y: 0 }) {
+    let best = null, bestScore = Infinity;
+    const consider = (x, y) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (placed.some((circle) => Math.hypot(x - circle.x, y - circle.y) < radius + circle.radius + gap - 0.01)) return;
+      const score = Math.hypot(x - target.x, y - target.y) + Math.hypot(x, y) * 0.25;
+      if (score < bestScore - 0.01) { best = { x, y }; bestScore = score; }
+    };
+    placed.forEach((a, index) => {
+      const ra = a.radius + radius + gap;
+      for (let step = 0; step < 12; step += 1) {
+        const angle = step * Math.PI / 6 - Math.PI / 2;
+        consider(a.x + Math.cos(angle) * ra, a.y + Math.sin(angle) * ra);
+      }
+      placed.slice(0, index).forEach((b) => {
+        const rb = b.radius + radius + gap;
+        const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy);
+        if (!distance || distance > ra + rb || distance < Math.abs(ra - rb)) return;
+        const along = (ra * ra - rb * rb + distance * distance) / (2 * distance);
+        const across = Math.sqrt(Math.max(0, ra * ra - along * along));
+        const x = a.x + along * dx / distance, y = a.y + along * dy / distance;
+        consider(x - across * dy / distance, y + across * dx / distance);
+        consider(x + across * dy / distance, y - across * dx / distance);
+      });
+    });
+    // Deterministic safe fallback for floating-point degeneracies.
+    return best || { x: Math.max(...placed.map(c => c.x + c.radius)) + radius + gap, y: 0 };
+  }
+
+  function stepGraphPhysics(nodes, edges, byId, width, height, settings, energy) {
+    const repel = 8000 * (settings.repelForce ?? 42) / 42;
+    const spring = 0.025 * (settings.linkForce ?? 62) / 62;
+    const center = 0.0012 * (settings.centerForce ?? 58) / 58;
+    for (let a = 0; a < nodes.length; a += 1) {
+      for (let b = a + 1; b < nodes.length; b += 1) {
+        const left = nodes[a], right = nodes[b];
+        const dx = right.x - left.x || 0.1, dy = right.y - left.y || 0.1;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        // Collision spacing remains active even when repulsion is switched off.
+        const gap = (left.radius || 5) + (right.radius || 5) + 24;
+        const force = (repel / Math.max(100, distance * distance) + Math.max(0, gap - distance) * 0.35) * energy;
+        const fx = dx / distance * force, fy = dy / distance * force;
+        if (!left.fixed) { left.vx -= fx; left.vy -= fy; }
+        if (!right.fixed) { right.vx += fx; right.vy += fy; }
+      }
+    }
+    edges.forEach((edge) => {
+      const from = byId.get(edge.from), to = byId.get(edge.to);
+      if (!from || !to) return;
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const anchored = Number.isFinite(from.anchorX) && Number.isFinite(to.anchorX);
+      const length = anchored
+        ? Math.hypot(to.anchorX - from.anchorX, to.anchorY - from.anchorY)
+        : (settings.linkDistance ?? 78) + from.radius + to.radius;
+      const force = (distance - length) * spring * energy;
+      const fx = dx / distance * force, fy = dy / distance * force;
+      if (!from.fixed) { from.vx += fx; from.vy += fy; }
+      if (!to.fixed) { to.vx -= fx; to.vy -= fy; }
+    });
+    nodes.forEach((node) => {
+      if (node.fixed) return;
+      const anchored = Number.isFinite(node.anchorX);
+      const pull = anchored ? 0.08 + center : center;
+      node.vx = (node.vx + ((anchored ? node.anchorX : width / 2) - node.x) * pull * energy) * 0.65;
+      node.vy = (node.vy + ((anchored ? node.anchorY : height / 2) - node.y) * pull * energy) * 0.65;
+      const speed = Math.hypot(node.vx, node.vy);
+      if (speed > 8) { node.vx *= 8 / speed; node.vy *= 8 / speed; }
+      node.x += node.vx;
+      node.y += node.vy;
+    });
+  }
+
+  function updateGraphLabels(surface) {
+    const sim = surface.__relationshipGraphSimulation;
+    if (!sim) return;
+    const scale = getGraphViewportState(surface).scale;
+    const accepted = [];
+    [...sim.nodes].sort((a, b) => {
+      const priority = (n) => (sim.nodeEls.get(n.id)?.matches('.is-selected, .is-search-match, :hover') ? 10000 : 0)
+        + (n.id === sim.focusId ? 1000 : 0) + (n.type === 'domain' ? 100 : 0) + n.degree;
+      return priority(b) - priority(a);
+    }).forEach((node) => {
+      const el = sim.nodeEls.get(node.id);
+      if (!el || el.classList.contains('is-search-hidden')) return;
+      const label = el.querySelector('text');
+      const minRadius = node.type === 'home' ? 6 : node.type === 'domain' ? 5 : node.type === 'hub' ? 4 : 2.8;
+      const radius = Math.max(node.radius, minRadius / scale);
+      el.querySelector('.relationship-graph-node-dot').setAttribute('r', String(radius));
+      el.querySelector('.rg-node-hit').setAttribute('r', String(Math.max(radius + 3, 9 / scale)));
+      const w = Math.min(28, (node.title || 'Untitled').length) * 6.4 + 10;
+      const box = { x: node.x * scale - w / 2, y: node.y * scale + radius * scale + 7, w, h: 17 };
+      const forced = el.matches('.is-selected, .is-search-match, :hover');
+      const overview = sim.mode === 'global' && scale < 0.6;
+      const important = node.degree > 1 || node.type === 'domain' || node.type === 'home';
+      const visible = forced || ((!overview || important) && !accepted.some((b) => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y));
+      el.classList.toggle('is-labelled', visible);
+      label.setAttribute('y', String(radius + 17 / scale));
+      if (visible) accepted.push(box);
+    });
   }
 
   function fitGraphToViewport(nodes = [], width = 900, height = 560) {
@@ -1396,11 +1480,25 @@
   }
 
   function applyGraphViewport(surface) {
-    const viewport = surface?.querySelector(".relationship-graph-viewport");
-    if (!viewport) return;
+    const svg = surface?.querySelector(".relationship-graph-svg");
+    if (!svg) return;
     const state = getGraphViewportState(surface);
-    viewport.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+    const rect = surface.getBoundingClientRect();
+    // Zoom the vector coordinate system, not a composited HTML bitmap. This keeps
+    // text and circle edges sharp even at 300% and on high-density displays.
+    const x = -state.x / state.scale;
+    const y = -state.y / state.scale;
+    const width = Math.max(1, rect.width) / state.scale;
+    const height = Math.max(1, rect.height) / state.scale;
+    svg.setAttribute('viewBox', `${x} ${y} ${width} ${height}`);
+    const grid = svg.querySelector('.rg-grid');
+    if (grid) {
+      Object.entries({ x, y, width, height }).forEach(([key, value]) => grid.setAttribute(key, String(value)));
+    }
     surface.style.setProperty("--relationship-graph-zoom", String(state.scale));
+    const zoom = surface.closest('.relationship-graph-modal')?.querySelector('.rg-zoom-value');
+    if (zoom) zoom.textContent = `${Math.round(state.scale * 100)}%`;
+    updateGraphLabels(surface);
   }
 
   function animateGraphViewport(surface, target = {}, duration = 900) {
@@ -1412,6 +1510,12 @@
     const targetX = Number.isFinite(Number(target.x)) ? Number(target.x) : startX;
     const targetY = Number.isFinite(Number(target.y)) ? Number(target.y) : startY;
     const targetScale = Number.isFinite(Number(target.scale)) ? Number(target.scale) : startScale;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      cancelAnimationFrame(surface.__relationshipGraphPanRaf);
+      Object.assign(state, { x: targetX, y: targetY, scale: targetScale });
+      applyGraphViewport(surface);
+      return;
+    }
     const startTime = performance.now();
     if (surface.__relationshipGraphPanRaf) cancelAnimationFrame(surface.__relationshipGraphPanRaf);
     const animate = (now) => {
@@ -1433,10 +1537,12 @@
   }
 
   function resetGraphViewport(surface) {
+    cancelAnimationFrame(surface?.__relationshipGraphPanRaf);
     const simulation = surface?.__relationshipGraphSimulation;
     if (simulation?.nodes?.length) {
       const rect = surface.getBoundingClientRect();
-      fitViewportToNodes(surface, simulation.nodes, Math.max(620, Math.floor(rect.width || 900)), Math.max(420, Math.floor(rect.height || 560)));
+      const visible = simulation.nodes.filter((n) => !simulation.nodeEls.get(n.id)?.classList.contains('is-search-hidden'));
+      fitViewportToNodes(surface, visible, rect.width || 900, rect.height || 560);
       return;
     }
     const state = getGraphViewportState(surface);
@@ -1456,8 +1562,9 @@
     const maxY = Math.max(...ys);
     const graphW = Math.max(1, maxX - minX);
     const graphH = Math.max(1, maxY - minY);
-    const pad = 130;
-    const scale = Math.max(0.62, Math.min(1.5, Math.min((width - pad * 2) / graphW, (height - pad * 2) / graphH)));
+    const padX = Math.min(105, width * 0.22);
+    const padY = Math.min(70, height * 0.20);
+    const scale = Math.max(0.02, Math.min(1.5, (width - padX * 2) / (graphW + 40), (height - padY * 2) / (graphH + 40)));
     const state = getGraphViewportState(surface);
     const target = {
       scale,
@@ -1478,18 +1585,10 @@
     if (!surface || !node) return;
     const rect = surface.getBoundingClientRect();
     const state = getGraphViewportState(surface);
-    const typeScale = node.type === "home" || node.type === "domain"
-      ? 0.78
-      : node.type === "database-row"
-        ? 1.35
-        : node.layout === "database"
-          ? 1.02
-          : 1.16;
-    const targetScale = Math.max(0.58, Math.min(1.65, typeScale));
+    const targetScale = state.scale;
     const targetX = (rect.width || 900) / 2 - node.x * targetScale;
     const targetY = (rect.height || 560) / 2 - node.y * targetScale;
-    const distance = Math.hypot(targetX - state.x, targetY - state.y);
-    animateGraphViewport(surface, { x: targetX, y: targetY, scale: targetScale }, Math.max(1200, Math.min(2400, distance * 1.05)));
+    animateGraphViewport(surface, { x: targetX, y: targetY, scale: targetScale }, 280);
   }
 
   function getPointerGraphPoint(surface, event) {
@@ -1519,6 +1618,7 @@
       line.setAttribute("x2", String(Math.round(to.x)));
       line.setAttribute("y2", String(Math.round(to.y)));
     });
+    updateGraphLabels(surface);
   }
 
   function applyGraphColors(surface) {
@@ -1572,85 +1672,15 @@
       mode,
       settings,
       energy: 1,
+      paused: surface.__paused === true,
       raf: 0
     };
     surface.__relationshipGraphSimulation = simulation;
 
-    const maxSpeed = 0.95;
-
     const tick = () => {
       simulation.raf = 0;
-      const s = simulation.settings;
-      const repulsion = (mode === "global" ? 170 : 260) * ((s.repelForce || 42) / 42);
-      const springLength = (s.linkDistance || 78) * 0.68;
-      const springStrength = (mode === "global" ? 0.020 : 0.024) * ((s.linkForce || 62) / 62);
-      const centerPull = (mode === "global" ? 0.005 : 0.007) * ((s.centerForce || 58) / 58);
-      const clusterPull = mode === "global" ? 0.030 : 0.038;
-
-      for (let a = 0; a < liveNodes.length; a += 1) {
-        for (let b = a + 1; b < liveNodes.length; b += 1) {
-          const left = liveNodes[a];
-          const right = liveNodes[b];
-          const dx = right.x - left.x || 0.01;
-          const dy = right.y - left.y || 0.01;
-          const distanceSq = Math.max(90, dx * dx + dy * dy);
-          const force = (repulsion / distanceSq) * simulation.energy;
-          const fx = dx * force;
-          const fy = dy * force;
-          if (!left.fixed) {
-            left.vx -= fx;
-            left.vy -= fy;
-          }
-          if (!right.fixed) {
-            right.vx += fx;
-            right.vy += fy;
-          }
-        }
-      }
-
-      liveEdges.forEach((edge) => {
-        const from = nodeById.get(edge.from);
-        const to = nodeById.get(edge.to);
-        if (!from || !to) return;
-        const dx = to.x - from.x || 0.01;
-        const dy = to.y - from.y || 0.01;
-        const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-        const edgeScale = edge.type === "contains" ? 0.85 : edge.type === "mention" ? 1.15 : 1;
-        const linkLength = (springLength * (edge.type === "contains" ? 0.82 : 1)) + ((from.radius || 4) + (to.radius || 4)) * 2.2;
-        const force = (distance - linkLength) * springStrength * edgeScale * simulation.energy;
-        const fx = (dx / distance) * force;
-        const fy = (dy / distance) * force;
-        if (!from.fixed) {
-          from.vx += fx;
-          from.vy += fy;
-        }
-        if (!to.fixed) {
-          to.vx -= fx;
-          to.vy -= fy;
-        }
-      });
-
-      liveNodes.forEach((node) => {
-        if (node.fixed) return;
-        const pull = (node.id === focusId ? centerPull * 2.4 : centerPull) * simulation.energy;
-        node.vx += (width / 2 - node.x) * pull;
-        node.vy += (height / 2 - node.y) * pull;
-        const parent = node.parent ? nodeById.get(node.parent) : null;
-        if (parent) {
-          node.vx += (parent.x - node.x) * clusterPull * simulation.energy;
-          node.vy += (parent.y - node.y) * clusterPull * simulation.energy;
-        }
-        node.vx *= 0.54;
-        node.vy *= 0.54;
-        const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
-        if (speed > maxSpeed) {
-          node.vx = (node.vx / speed) * maxSpeed;
-          node.vy = (node.vy / speed) * maxSpeed;
-        }
-        node.x += node.vx;
-        node.y += node.vy;
-      });
-
+      if (!surface.isConnected || simulation.paused) return;
+      stepGraphPhysics(liveNodes, liveEdges, nodeById, width, height, simulation.settings, simulation.energy);
       syncGraphElements(surface);
       simulation.energy *= simulation.drag ? 0.988 : 0.96;
       const hasDrag = !!simulation.drag;
@@ -1672,7 +1702,7 @@
 
   function wakeGraphSimulation(surface, amount = 1) {
     const simulation = surface?.__relationshipGraphSimulation;
-    if (!simulation) return;
+    if (!simulation || simulation.paused) return;
     simulation.energy = Math.max(simulation.energy || 0, amount);
     if (!simulation.raf && typeof simulation.tick === "function") simulation.raf = requestAnimationFrame(simulation.tick);
   }
@@ -1693,7 +1723,7 @@
       const oldScale = state.scale;
       const delta = Math.max(-120, Math.min(120, Number(event.deltaY) || 0));
       const zoomFactor = Math.exp(-delta * 0.0018);
-      const nextScale = Math.max(0.45, Math.min(2.4, oldScale * zoomFactor));
+      const nextScale = Math.max(0.02, Math.min(3, oldScale * zoomFactor));
       const pointerX = event.clientX - rect.left;
       const pointerY = event.clientY - rect.top;
       const graphX = (pointerX - state.x) / oldScale;
@@ -1706,6 +1736,7 @@
 
     surface.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 || event.target.closest(".relationship-graph-node")) return;
+      cancelAnimationFrame(surface.__relationshipGraphPanRaf);
       const state = getGraphViewportState(surface);
       pan = {
         id: event.pointerId,
@@ -1726,7 +1757,11 @@
       applyGraphViewport(surface);
     });
 
-    const stopPan = () => {
+    const stopPan = (event) => {
+      if (pan && Math.hypot(event.clientX - pan.startX, event.clientY - pan.startY) > 5) {
+        surface.__relationshipGraphDraggingRecently = true;
+        setTimeout(() => { surface.__relationshipGraphDraggingRecently = false; }, 140);
+      }
       pan = null;
       surface.classList.remove("is-panning");
     };
@@ -1813,14 +1848,26 @@
     if (!graph || !simulation) return;
 
     clearGraphSearchState(surface);
+    const results = surface.closest('.relationship-graph-modal')?.querySelector('.rg-search-results');
+    if (results) { results.innerHTML = ''; results.hidden = true; }
     const needle = String(query || "").trim().toLowerCase();
-    if (!needle) return;
+    if (!needle) { updateGraphLabels(surface); return; }
 
     const matchIds = new Set();
     simulation.nodes.forEach((node) => {
       const title = String(node.title || "").toLowerCase();
       if (title.includes(needle)) matchIds.add(node.id);
     });
+    if (results) {
+      results.hidden = false;
+      const matches = simulation.nodes.filter((node) => matchIds.has(node.id));
+      results.innerHTML = `<div class="rg-search-summary" role="status">${matches.length ? `${matches.length} matching page${matches.length === 1 ? '' : 's'}${matches.length > 30 ? ' · showing first 30' : ''}` : 'No matches in this view. Try Global or another search.'}</div>`
+        + matches.slice(0, 30).map((node) => `<button type="button" data-result-id="${escapeHTML(node.id)}">${escapeHTML(node.title)}<small>${escapeHTML(node.type)}</small></button>`).join('');
+      results.querySelectorAll('[data-result-id]').forEach((button) => button.addEventListener('click', () => {
+        simulation.nodeEls.get(button.dataset.resultId)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        results.hidden = true;
+      }));
+    }
     if (!matchIds.size) {
       surface.classList.add("has-graph-search");
       surface.querySelectorAll(".relationship-graph-node").forEach((el) => el.classList.add("is-search-dim"));
@@ -1854,14 +1901,18 @@
         line.classList.toggle("is-search-hidden", !show);
       }
     });
+    updateGraphLabels(surface);
   }
 
   function renderGraphSurface(surface, graph, mode) {
-    if (!surface) return;
+    if (!surface || !surface.isConnected) return;
+    stopGraphSimulation(surface);
+    cancelAnimationFrame(surface.__relationshipGraphPanRaf);
+    graph = { ...graph, edges: bundleGraphEdges(graph.edges) };
     const settings = getGraphSettings();
     const rect = surface.getBoundingClientRect();
-    const viewportWidth = Math.max(620, Math.floor(rect.width || 900));
-    const viewportHeight = Math.max(420, Math.floor(rect.height || 560));
+    const viewportWidth = Math.max(1, Math.floor(rect.width || 900));
+    const viewportHeight = Math.max(1, Math.floor(rect.height || 560));
     const width = Math.max(1400, Math.floor(viewportWidth * 1.9));
     const height = Math.max(920, Math.floor(viewportHeight * 1.9));
     const nodes = layoutGraph(graph.nodes, graph.edges, graph.focusId || getCurrentId(), width, height, mode, settings);
@@ -1878,10 +1929,11 @@
       })
       .join("");
     const nodeGroups = nodes.map((node, index) => `
-      <g class="relationship-graph-node node-${getNodeClass(node.type)}${node.containerType === "project" ? " node-project" : ""}${node.layout === "database" ? " node-database" : ""}${node.id === graph.focusId ? " is-focus" : ""}${node.labelVisible ? " is-labelled" : ""}" data-node-id="${escapeHTML(node.id)}" transform="translate(${Math.round(node.x)} ${Math.round(node.y)})" style="--node-size:${node.radius || 5}px;--node-color:${escapeHTML(resolveGraphNodeColor(node, nodeById, settings))};">
+      <g role="button" tabindex="0" aria-label="${escapeHTML(node.title || 'Untitled')}" class="relationship-graph-node node-${getNodeClass(node.type)}${node.containerType === "project" ? " node-project" : ""}${node.layout === "database" ? " node-database" : ""}${node.id === graph.focusId ? " is-focus" : ""}${node.labelVisible ? " is-labelled" : ""}" data-node-id="${escapeHTML(node.id)}" transform="translate(${Math.round(node.x)} ${Math.round(node.y)})" style="--node-size:${node.radius || 5}px;--node-color:${escapeHTML(resolveGraphNodeColor(node, nodeById, settings))};">
+        <circle class="rg-node-hit" r="${Math.max(14, node.radius + 5)}" fill="transparent"></circle>
         <g class="rg-node-inner" style="animation-delay:${Math.min(index * 14, 480)}ms">
           <circle class="relationship-graph-node-dot" r="${node.radius || 5}"></circle>
-          <text class="relationship-graph-node-title" x="0" y="${(node.radius || 5) + 15}" text-anchor="middle">${escapeHTML(clampText(node.title, "Untitled", 24))}</text>
+          <text class="relationship-graph-node-title" x="0" y="${(node.radius || 5) + 15}" text-anchor="middle">${escapeHTML(clampText(node.title, "Untitled", 28))}</text>
         </g>
         <title>${escapeHTML(node.title || "Untitled")}</title>
       </g>
@@ -1889,18 +1941,18 @@
 
     surface.innerHTML = `
       <div class="relationship-graph-viewport">
-        <svg class="relationship-graph-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="width:${width}px;height:${height}px;" aria-label="Relationship graph">
+        <svg class="relationship-graph-svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%" aria-label="Relationship graph">
           <defs>
             <pattern id="graph-dot-grid" x="0" y="0" width="44" height="44" patternUnits="userSpaceOnUse">
               <circle cx="22" cy="22" r="1" fill="rgba(255,255,255,0.10)"/>
             </pattern>
           </defs>
-          <rect width="${width}" height="${height}" fill="url(#graph-dot-grid)" pointer-events="none"/>
+          <rect class="rg-grid" width="${width}" height="${height}" fill="url(#graph-dot-grid)" pointer-events="none"/>
           <g class="relationship-graph-edge-layer">${edgeLines}</g>
           <g class="relationship-graph-node-layer">${nodeGroups}</g>
         </svg>
       </div>
-      <div class="relationship-graph-hint">Drag to pan - scroll to zoom - double-click background to reset</div>
+      <div class="relationship-graph-hint">Drag to explore · Scroll to zoom · Click to inspect · Double-click to open</div>
       ${!nodes.length ? `<div class="relationship-graph-empty">No relationships found yet.</div>` : ""}
     `;
     applyGraphViewport(surface);
@@ -1911,7 +1963,11 @@
     };
 
     surface.__relationshipGraphData = { graph, mode };
+    renderGraphEmptyDetail(surface.closest('.relationship-graph-modal')?.querySelector('.relationship-graph-detail'));
     surface.querySelectorAll(".relationship-graph-node").forEach((nodeEl) => {
+      nodeEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nodeEl.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+      });
       nodeEl.addEventListener("dblclick", () => openNode(nodeEl.dataset.nodeId));
       nodeEl.addEventListener("mouseenter", () => setGraphHoverHighlight(surface, nodeEl.dataset.nodeId, true));
       nodeEl.addEventListener("mouseleave", () => setGraphHoverHighlight(surface, nodeEl.dataset.nodeId, false));
@@ -1923,6 +1979,7 @@
         nodeEl.classList.add("is-selected");
         const node = surface.__relationshipGraphSimulation?.nodeById.get(nodeEl.dataset.nodeId)
           || nodeById.get(nodeEl.dataset.nodeId);
+        surface.__showPanel?.();
         centerViewportOnNode(surface, node);
         const relatedIds = getGraphNeighborIds(nodeEl.dataset.nodeId, graph.edges);
         surface.querySelectorAll(".relationship-graph-node").forEach((el) => {
@@ -1954,8 +2011,19 @@
             </label>
             ${colorHint}
             <button type="button" class="rg-node-color-clear">Use mode color</button>
-            ${!node.id.startsWith("dbrow:") ? `<button type="button" class="relationship-graph-open-node">Open page</button>` : ""}
+            ${!node.id.startsWith("dbrow:") ? `<button type="button" class="relationship-graph-open-node icon-with-label">${getUIIcon("external-link")}Open page</button>` : ""}
+            <button type="button" class="rg-explore-node icon-with-label">${getUIIcon("network")}Explore connections</button>
+            <div class="rg-connections-heading">Connected pages</div>
+            <div class="rg-connections">${connected.map((edge) => {
+              const other = nodeById.get(edge.from === node.id ? edge.to : edge.from);
+              const descriptions = [...new Set((edge.relationships || [edge]).map((link) => `${link.from === node.id ? '→' : '←'} ${GRAPH_EDGE_LABELS[link.type] || link.type}`))];
+              return `<button type="button" data-neighbor-id="${escapeHTML(other.id)}"><span>${escapeHTML(other.title)}</span><small>${escapeHTML(descriptions.join(' · '))}</small></button>`;
+            }).join('') || '<span class="rg-detail-empty">No visible connections. Try enabling more link types.</span>'}</div>
           `;
+          detail.querySelector('.rg-explore-node')?.addEventListener('click', () => surface.__focusNode?.(node.id));
+          detail.querySelectorAll('[data-neighbor-id]').forEach((button) => button.addEventListener('click', () => {
+            surface.__relationshipGraphSimulation?.nodeEls.get(button.dataset.neighborId)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }));
           detail.querySelector("[data-rg-node-color]")?.addEventListener("input", (event) => {
             updateGraphNodeColor(node.id, event.target.value);
             applyGraphColors(surface);
@@ -1968,6 +2036,7 @@
           });
           detail.querySelector(".relationship-graph-open-node")?.addEventListener("click", () => openNode(node.id));
         }
+        updateGraphLabels(surface);
       });
     });
 
@@ -1979,7 +2048,7 @@
     if (countEl) {
       const hidden = graph.hiddenCount ? ` - ${graph.hiddenCount} hidden items` : "";
       const depthLabel = mode === "local" ? ` - depth ${settings.localDepth}` : "";
-      countEl.textContent = `${graph.nodes.length} nodes - ${graph.edges.length} edges - ${mode}${depthLabel}${hidden}`;
+      countEl.textContent = `${graph.nodes.length} pages · ${graph.edges.length} connections${depthLabel}${hidden}`;
     }
 
     const modal = surface.closest(".relationship-graph-modal");
@@ -1997,6 +2066,7 @@
       const nodeEl = event.target.closest(".relationship-graph-node");
       if (!nodeEl || event.button !== 0) return;
       event.stopPropagation();
+      cancelAnimationFrame(surface.__relationshipGraphPanRaf);
       const simulation = surface.__relationshipGraphSimulation;
       const node = simulation?.nodeById.get(nodeEl.dataset.nodeId);
       if (!simulation || !node) return;
@@ -2039,6 +2109,7 @@
       const dy = nextY - node.y;
       node.x = nextX;
       node.y = nextY;
+      if (Number.isFinite(node.anchorX)) { node.anchorX = nextX; node.anchorY = nextY; }
       simulation.edges.forEach((edge) => {
         const otherId = edge.from === node.id ? edge.to : edge.to === node.id ? edge.from : "";
         if (!otherId) return;
@@ -2092,15 +2163,9 @@
   }
 
   function openRelationshipGraph(options = {}) {
-    const focusId = options.focusId || getCurrentId();
+    let focusId = options.focusId || getCurrentId();
     let mode = options.mode || "local";
     invalidateRelationshipGraphCache();
-    const provisionalRecords = new Map(
-      getPageRecords().filter((record) => record?.id).map((record) => [record.id, record])
-    );
-    if (repairOrphanedCanvasPageParents(buildCanvasHostMap(provisionalRecords))) {
-      invalidateRelationshipGraphCache();
-    }
     removeGraphModal();
     const initialSettings = getGraphSettings();
 
@@ -2110,7 +2175,7 @@
       <div class="relationship-graph-modal" role="dialog" aria-modal="true" aria-label="Relationship graph">
         <div class="relationship-graph-head">
           <div class="relationship-graph-head-main">
-            <div class="relationship-graph-title">Relationship Graph</div>
+            <div class="relationship-graph-title">Relationship graph</div>
             <div class="relationship-graph-count"></div>
           </div>
           <div class="rg-search-wrap">
@@ -2119,21 +2184,23 @@
               <input type="checkbox" data-graph-setting="searchIsolate" ${initialSettings.searchIsolate ? "checked" : ""}>
               <span>Isolate</span>
             </label>
+            <div class="rg-search-results" hidden></div>
           </div>
           <div class="relationship-graph-actions">
             <div class="relationship-graph-segment">
-              <button type="button" data-graph-mode="local">Local</button>
-              <button type="button" data-graph-mode="global">Global</button>
+              <button type="button" data-graph-mode="local">${getUIIcon("focus")}Local</button>
+              <button type="button" data-graph-mode="global">${getUIIcon("globe")}Global</button>
             </div>
-            <button type="button" class="rg-fit-button" title="Fit graph">Fit</button>
-            <button type="button" class="rg-panel-toggle" title="Hide panel">⊟</button>
-            <button type="button" class="relationship-graph-close" aria-label="Close">&times;</button>
+            <button type="button" class="rg-fit-button" title="Fit graph (F)">${getUIIcon("scan")}Fit</button>
+            <button type="button" class="rg-panel-toggle" title="Hide panel" aria-label="Toggle graph panel" aria-expanded="true">${getUIIcon("panel-right")}Panel</button>
+            <button type="button" class="relationship-graph-close" aria-label="Close" title="Close graph">${getUIIcon("x")}</button>
           </div>
         </div>
         <div class="relationship-graph-body">
           <div class="relationship-graph-surface"></div>
+          <div class="rg-map-controls"><button type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out">${getUIIcon("minus")}</button><span class="rg-zoom-value">100%</span><button type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in">${getUIIcon("plus")}</button><button type="button" class="rg-pause" aria-pressed="false">${getUIIcon("pause")}Pause</button></div>
           <aside class="relationship-graph-side">
-            <button class="rg-panel-x" type="button" title="Close panel">×</button>
+            <button class="rg-panel-x" type="button" title="Close panel" aria-label="Close panel">${getUIIcon("x")}</button>
             <div class="rg-panel-section">
               <div class="rg-panel-heading">Node</div>
               <div class="relationship-graph-detail">
@@ -2149,11 +2216,11 @@
               </label>
               <label class="relationship-graph-toggle">
                 <input type="checkbox" data-graph-setting="showOrphans" ${initialSettings.showOrphans ? "checked" : ""}>
-                <span>Show orphans</span>
+                <span>Unconnected pages</span>
               </label>
               <label class="relationship-graph-toggle">
                 <input type="checkbox" data-graph-setting="showDatabaseRows" ${initialSettings.showDatabaseRows ? "checked" : ""}>
-                <span>Show row chip nodes</span>
+                <span>Database rows</span>
               </label>
               <label class="relationship-graph-field">
                 <span>Theme</span>
@@ -2198,6 +2265,7 @@
             </div>
             <div class="rg-panel-section">
               <div class="rg-panel-heading">Physics <span class="rg-hint-label">— hover for info</span></div>
+              <button type="button" class="rg-reset-layout icon-with-label">${getUIIcon("rotate-ccw")}Reset layout settings</button>
               <div class="relationship-graph-controls">
                 <label title="Pulls all nodes toward the center. Higher = tighter cluster.">Center <input type="range" min="0" max="100" value="${initialSettings.centerForce}" data-graph-setting="centerForce"><span class="rg-val">${initialSettings.centerForce}</span></label>
                 <label title="Repulsion between all nodes. Higher = more spread out.">Repel <input type="range" min="0" max="100" value="${initialSettings.repelForce}" data-graph-setting="repelForce"><span class="rg-val">${initialSettings.repelForce}</span></label>
@@ -2238,13 +2306,65 @@
       modal.style.setProperty("--relationship-graph-accent", activeGraphSettings.accent);
       overlay.querySelectorAll("[data-graph-mode]").forEach((button) => {
         button.classList.toggle("active", button.dataset.graphMode === mode);
+        button.setAttribute('aria-pressed', String(button.dataset.graphMode === mode));
       });
       syncLocalDepthVisibility();
+      const centerControl = overlay.querySelector('[data-graph-setting="centerForce"]')?.closest('label');
+      const distanceControl = overlay.querySelector('[data-graph-setting="linkDistance"]')?.closest('label');
+      if (centerControl) centerControl.title = mode === 'global'
+        ? 'Keeps nodes near their branch positions. Higher = firmer grouping.'
+        : 'Pulls nodes toward the center. Higher = tighter cluster.';
+      if (distanceControl) {
+        distanceControl.title = mode === 'global'
+          ? 'Room between pages and groups in the global graph. Higher = more spread out.'
+          : 'Natural resting distance between connected nodes.';
+        distanceControl.firstChild.textContent = mode === 'global' ? 'Spacing ' : 'Distance ';
+      }
       window.requestAnimationFrame(() => renderGraphSurface(surface, getGraphForMode(mode, focusId), mode));
     };
 
     const resizeAc = new AbortController();
     const closeGraph = () => { resizeAc.abort(); removeGraphModal(); };
+    const previousFocus = document.activeElement;
+    overlay.__cleanup = () => {
+      resizeAc.abort();
+      clearTimeout(searchTimer);
+      clearTimeout(resizeTimer);
+      cancelAnimationFrame(surface.__relationshipGraphPanRaf);
+      stopGraphSimulation(surface);
+      previousFocus?.focus?.();
+    };
+    surface.__focusNode = (id) => { focusId = id; mode = 'local'; render(); };
+    overlay.querySelector('.rg-reset-layout')?.addEventListener('click', () => {
+      const defaults = { centerForce: 58, repelForce: 42, linkForce: 62, linkDistance: 78, nodeSize: 82, linkThickness: 90 };
+      Object.entries(defaults).forEach(([key, value]) => {
+        updateGraphSetting(key, value);
+        const input = overlay.querySelector(`[data-graph-setting="${key}"]`);
+        input.value = value;
+        input.parentElement.querySelector('.rg-val').textContent = value;
+        syncGraphRangeFill(input);
+      });
+      render();
+    });
+    overlay.querySelectorAll('[data-zoom]').forEach((button) => button.addEventListener('click', () => {
+      cancelAnimationFrame(surface.__relationshipGraphPanRaf);
+      const state = getGraphViewportState(surface), rect = surface.getBoundingClientRect();
+      const scale = Math.max(0.02, Math.min(3, state.scale * (button.dataset.zoom === 'in' ? 1.25 : 0.8)));
+      state.x = rect.width / 2 - (rect.width / 2 - state.x) * scale / state.scale;
+      state.y = rect.height / 2 - (rect.height / 2 - state.y) * scale / state.scale;
+      state.scale = scale;
+      applyGraphViewport(surface);
+    }));
+    overlay.querySelector('.rg-pause')?.addEventListener('click', (event) => {
+      const sim = surface.__relationshipGraphSimulation;
+      if (!sim) return;
+      sim.paused = !sim.paused;
+      surface.__paused = sim.paused;
+      event.currentTarget.innerHTML = getUIIcon(sim.paused ? 'play' : 'pause') + (sim.paused ? 'Resume' : 'Pause');
+      event.currentTarget.setAttribute('aria-pressed', String(sim.paused));
+      if (sim.paused) { cancelAnimationFrame(sim.raf); sim.raf = 0; }
+      else wakeGraphSimulation(surface);
+    });
 
     overlay.querySelector(".relationship-graph-close")?.addEventListener("click", closeGraph);
     overlay.querySelector(".rg-fit-button")?.addEventListener("click", () => resetGraphViewport(surface));
@@ -2255,18 +2375,32 @@
 
     const side = overlay.querySelector(".relationship-graph-side");
     const panelToggle = overlay.querySelector(".rg-panel-toggle");
-    const togglePanel = () => {
-      const hiding = side.style.display !== "none";
+    const setPanelVisible = (visible) => {
+      const hiding = !visible;
       side.style.display = hiding ? "none" : "";
+      modal.classList.toggle('is-panel-hidden', hiding);
       if (panelToggle) {
-        panelToggle.textContent = hiding ? "⊞" : "⊟";
+        panelToggle.innerHTML = getUIIcon('panel-right') + 'Panel';
         panelToggle.title = hiding ? "Show panel" : "Hide panel";
+        panelToggle.setAttribute('aria-expanded', String(visible));
       }
+      resetGraphViewport(surface);
     };
+    const togglePanel = () => setPanelVisible(side.style.display === 'none');
+    surface.__showPanel = () => { if (side.style.display === 'none') setPanelVisible(true); };
     panelToggle?.addEventListener("click", togglePanel);
     overlay.querySelector(".rg-panel-x")?.addEventListener("click", togglePanel);
 
     let searchTimer = 0;
+    overlay.querySelector('[data-graph-search]')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === 'ArrowDown') {
+        const result = overlay.querySelector('[data-result-id]');
+        if (result) { event.preventDefault(); event.key === 'Enter' ? result.click() : result.focus(); }
+      }
+    });
+    overlay.addEventListener('pointerdown', (event) => {
+      if (!event.target.closest('.rg-search-wrap')) overlay.querySelector('.rg-search-results').hidden = true;
+    });
     overlay.querySelector("[data-graph-search]")?.addEventListener("input", (event) => {
       clearTimeout(searchTimer);
       searchTimer = window.setTimeout(() => {
@@ -2301,6 +2435,10 @@
         if (key === "searchIsolate") {
           const searchInput = overlay.querySelector("[data-graph-search]");
           applyGraphSearch(surface, searchInput?.value || "", value === true);
+        } else if (['theme', 'colorMode'].includes(key)) {
+          applyGraphColors(surface);
+        } else if (key === 'linkDistance' && mode === 'global') {
+          render();
         } else if (physicsLiveKeys.has(key)) {
           const sim = surface.__relationshipGraphSimulation;
           if (sim) { sim.settings = getGraphSettings(); wakeGraphSimulation(surface, 1); }
@@ -2335,8 +2473,21 @@
       });
     });
     let resizeTimer = 0;
-    window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 180); }, { signal: resizeAc.signal });
+    window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => resetGraphViewport(surface), 180); }, { signal: resizeAc.signal });
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeGraph(); return; }
+      const editing = event.target.matches('input, select, textarea');
+      if (!editing && event.key.toLowerCase() === 'f') { event.preventDefault(); resetGraphViewport(surface); }
+      if (!editing && event.key === '/') { event.preventDefault(); overlay.querySelector('[data-graph-search]').focus(); }
+      if (event.key === 'Tab') {
+        const items = [...overlay.querySelectorAll('button, input, select, [tabindex="0"]')].filter((el) => !el.disabled && el.getClientRects().length && !el.closest('.is-search-hidden'));
+        const first = items[0], last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    });
     render();
+    overlay.querySelector('[data-graph-search]').focus();
   }
 
   window.buildRelationshipGraphModel = getGraphModel;

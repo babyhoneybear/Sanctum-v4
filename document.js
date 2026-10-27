@@ -172,6 +172,7 @@ function closeDocTransientUI(except = null) {
 }
 
 function setActiveDocTransient(name = null) {
+  if (name && typeof closeDocInsertPanel === "function") closeDocInsertPanel();
   closeDocTransientUI(name);
   setDocUIState({ activeTransient: name || null });
 }
@@ -2394,8 +2395,8 @@ function renderSuggestionTray() {
         buttons.className = "doc-suggestion-hover-buttons";
         buttons.contentEditable = "false";
         buttons.innerHTML = `
-          <button class="doc-suggest-btn accept" title="Accept">✓</button>
-          <button class="doc-suggest-btn decline" title="Decline">✕</button>
+          <button class="doc-suggest-btn accept" title="Accept" aria-label="Accept">${getUIIcon("check")}</button>
+          <button class="doc-suggest-btn decline" title="Decline" aria-label="Decline">${getUIIcon("x")}</button>
         `;
         buttons.querySelector(".accept")?.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -2869,19 +2870,19 @@ function loadDocSection(index) {
 function getSectionStatusMeta(status = "draft") {
   const map = {
     brainstorming: {
-      icon: "✦",
+      icon: getUIIcon("sparkles"),
       label: "Brainstorming"
     },
     draft: {
-      icon: "✎",
+      icon: getUIIcon("pencil"),
       label: "Draft"
     },
     editing: {
-      icon: "◎",
+      icon: getUIIcon("target"),
       label: "Editing"
     },
     final: {
-      icon: "🔒",
+      icon: getUIIcon("lock"),
       label: "Final"
     }
   };
@@ -2917,13 +2918,13 @@ function renderDocSections() {
 
     item.innerHTML = `
       <span class="doc-section-status-bar" aria-hidden="true"></span>
-      <span class="doc-section-indicator" data-level="${level}">▸</span>
+      <span class="doc-section-indicator" data-level="${level}">${getUIIcon("chevron-right")}</span>
       <span class="doc-section-name-wrap">
         <span class="doc-section-name" contenteditable="true" spellcheck="false" style="font-size:${fontSize};font-weight:${fontWeight};">${section.title}</span>
       </span>
       <span class="doc-section-status-icon" title="${statusMeta.label}">${statusMeta.icon}</span>
       ${hasNote ? `<span class="doc-section-note-dot" title="Has notes"></span>` : ""}
-      <button class="doc-section-delete" data-idx="${i}" title="Delete section">✕</button>
+      <button class="doc-section-delete" data-idx="${i}" title="Delete section" aria-label="Delete section">${getUIIcon("x")}</button>
     `;
 
     item.querySelector(".doc-section-name").addEventListener("blur", (e) => {
@@ -3154,12 +3155,12 @@ function insertDocImage(src) {
   const controls = document.createElement("div");
   controls.className = "doc-img-controls";
   controls.innerHTML = `
-    <button class="doc-img-ctrl doc-img-move" title="Move">⠿</button>
-    <button class="doc-img-ctrl" data-float="left" title="Float left">⬱</button>
-    <button class="doc-img-ctrl" data-float="none" title="No float">▣</button>
-    <button class="doc-img-ctrl" data-float="right" title="Float right">⬰</button>
-    <button class="doc-img-ctrl" data-action="caption" title="Add caption">T</button>
-    <button class="doc-img-ctrl" data-action="delete" title="Delete">✕</button>
+    <button class="doc-img-ctrl doc-img-move" title="Move" aria-label="Move">${getUIIcon("move")}</button>
+    <button class="doc-img-ctrl" data-float="left" title="Float left" aria-label="Float left">${getUIIcon("align-left")}</button>
+    <button class="doc-img-ctrl" data-float="none" title="No float" aria-label="No float">${getUIIcon("wrap-text")}</button>
+    <button class="doc-img-ctrl" data-float="right" title="Float right" aria-label="Float right">${getUIIcon("align-right")}</button>
+    <button class="doc-img-ctrl" data-action="caption" title="Add caption" aria-label="Add caption">${getUIIcon("type")}</button>
+    <button class="doc-img-ctrl" data-action="delete" title="Delete" aria-label="Delete">${getUIIcon("x")}</button>
   `;
 
   // caption (hidden by default)
@@ -3472,6 +3473,7 @@ document.getElementById("docFormatMenuBtn")?.addEventListener("click", (e) => {
 
   if (isOpen) {
     menu?.classList.remove("open");
+    closeAllSubmenus();
     setDocUIState({ activeTransient: null });
   } else {
     setActiveDocTransient("formatMenu");
@@ -3482,6 +3484,7 @@ document.getElementById("docFormatMenuBtn")?.addEventListener("click", (e) => {
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".doc-format-wrap")) {
     document.getElementById("docFormatMenu")?.classList.remove("open");
+    closeAllSubmenus();
   }
 });
 
@@ -4142,7 +4145,8 @@ function buildColorDropdown(dropdownEl, onColorSelect, options = {}) {
   const moreBtn = document.createElement("button");
   moreBtn.className = "doc-color-more-btn";
   moreBtn.type = "button";
-  moreBtn.textContent = "+";
+  moreBtn.innerHTML = getUIIcon("plus");
+  moreBtn.setAttribute("aria-label", "More colors");
   moreBtn.title = "More colors";
   compactRow.appendChild(moreBtn);
 
@@ -4159,7 +4163,8 @@ function buildColorDropdown(dropdownEl, onColorSelect, options = {}) {
   const backBtn = document.createElement("button");
   backBtn.className = "doc-color-back-btn";
   backBtn.type = "button";
-  backBtn.textContent = "<";
+  backBtn.innerHTML = getUIIcon("chevron-left");
+  backBtn.setAttribute("aria-label", "Back to colors");
 
   const title = document.createElement("div");
   title.className = "doc-color-advanced-title";
@@ -5496,15 +5501,15 @@ docPagesHostEl?.addEventListener("paste", (e) => {
 
 // slash commands
 const SLASH_COMMANDS = [
-  { label: "Heading 1",  icon: "H1", action: () => document.execCommand("formatBlock", false, "h1") },
-  { label: "Heading 2",  icon: "H2", action: () => document.execCommand("formatBlock", false, "h2") },
-  { label: "Heading 3",  icon: "H3", action: () => document.execCommand("formatBlock", false, "h3") },
-  { label: "Paragraph",  icon: "¶",  action: () => document.execCommand("formatBlock", false, "p") },
-  { label: "Divider",    icon: "─",  action: () => document.execCommand("insertHTML", false, "<hr/><p><br></p>") },
-  { label: "Bullet List",icon: "•",  action: () => document.execCommand("insertUnorderedList") },
-  { label: "Numbered List", icon: "1.", action: () => document.execCommand("insertOrderedList") },
-  { label: "Bold",       icon: "B",  action: () => document.execCommand("bold") },
-  { label: "Italic",     icon: "I",  action: () => document.execCommand("italic") },
+  { label: "Heading 1",  icon: "heading", action: () => document.execCommand("formatBlock", false, "h1") },
+  { label: "Heading 2",  icon: "heading-2", action: () => document.execCommand("formatBlock", false, "h2") },
+  { label: "Heading 3",  icon: "heading-3", action: () => document.execCommand("formatBlock", false, "h3") },
+  { label: "Paragraph",  icon: "pilcrow",  action: () => document.execCommand("formatBlock", false, "p") },
+  { label: "Divider",    icon: "minus",  action: () => document.execCommand("insertHTML", false, "<hr/><p><br></p>") },
+  { label: "Bullet List",icon: "list",  action: () => document.execCommand("insertUnorderedList") },
+  { label: "Numbered List", icon: "list-ordered", action: () => document.execCommand("insertOrderedList") },
+  { label: "Bold",       icon: "bold",  action: () => document.execCommand("bold") },
+  { label: "Italic",     icon: "italic",  action: () => document.execCommand("italic") },
 ];
 
 function checkSlashCommand() {
@@ -5545,7 +5550,7 @@ function showSlashMenu(query, range) {
   matches.forEach((cmd, i) => {
     const item = document.createElement("div");
     item.className = "slash-menu-item" + (i === 0 ? " active" : "");
-    item.innerHTML = `<span class="slash-icon">${cmd.icon}</span><span class="slash-label">${cmd.label}</span>`;
+    item.innerHTML = `<span class="slash-icon">${getUIIcon(cmd.icon)}</span><span class="slash-label">${cmd.label}</span>`;
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -6654,8 +6659,8 @@ function renderSectionAnnotations() {
       note.style.top = `${item.top}px`;
       note.innerHTML = `
         <div class="ann-sticky-header">
-          <span class="ann-sticky-drag">⠿</span>
-          <button class="ann-sticky-close">✕</button>
+          <span class="ann-sticky-drag">${getUIIcon("grip-vertical")}</span>
+          <button class="ann-sticky-close" aria-label="Close">${getUIIcon("x")}</button>
         </div>
         <textarea class="ann-sticky-body" placeholder="Note..."></textarea>
       `;
@@ -6681,12 +6686,12 @@ function showAnnotationToolbar() {
   toolbar.id = "annotationToolbar";
   toolbar.className = "annotation-toolbar";
   toolbar.innerHTML = `
-    <button class="ann-tool-btn" data-tool="highlight" title="Highlight">H</button>
-    <button class="ann-tool-btn" data-tool="underline" title="Underline">U</button>
-    <button class="ann-tool-btn" data-tool="squiggle" title="Squiggly underline">〰</button>
-    <button class="ann-tool-btn" data-tool="circle" title="Circle">◯</button>
-    <button class="ann-tool-btn" data-tool="bracket" title="Bracket">}</button>
-    <button class="ann-tool-btn" data-tool="note" title="Sticky note">🗒</button>
+    <button class="ann-tool-btn" data-tool="highlight" title="Highlight" aria-label="Highlight">${getUIIcon("highlighter")}</button>
+    <button class="ann-tool-btn" data-tool="underline" title="Underline" aria-label="Underline">${getUIIcon("underline")}</button>
+    <button class="ann-tool-btn" data-tool="squiggle" title="Squiggly underline" aria-label="Squiggly underline">${getUIIcon("waves")}</button>
+    <button class="ann-tool-btn" data-tool="circle" title="Circle" aria-label="Circle">${getUIIcon("circle")}</button>
+    <button class="ann-tool-btn" data-tool="bracket" title="Bracket" aria-label="Bracket">${getUIIcon("brackets")}</button>
+    <button class="ann-tool-btn" data-tool="note" title="Sticky note" aria-label="Sticky note">${getUIIcon("sticky-note")}</button>
 
     <div class="ann-color-row">
       <button class="ann-color-swatch active" data-color="#ffff00" style="background:#ffff00;"></button>
@@ -7035,8 +7040,8 @@ function renderThreadsList() {
     item.innerHTML = `
       <span class="doc-thread-color-dot" style="background:${thread.color}"></span>
       <span class="doc-thread-name">${thread.name}</span>
-      <button class="doc-thread-toggle ${thread.visible ? 'active' : ''}" data-idx="${i}" title="Toggle visibility">👁</button>
-      <button class="doc-thread-delete" data-idx="${i}" title="Delete thread">✕</button>
+      <button class="doc-thread-toggle ${thread.visible ? 'active' : ''}" data-idx="${i}" title="Toggle visibility" aria-label="Toggle visibility" aria-pressed="${!!thread.visible}">${getUIIcon(thread.visible ? "eye" : "eye-off")}</button>
+      <button class="doc-thread-delete" data-idx="${i}" title="Delete thread" aria-label="Delete thread">${getUIIcon("x")}</button>
     `;
 
     item.querySelector(".doc-thread-toggle").addEventListener("click", (e) => {
@@ -7414,10 +7419,14 @@ document.getElementById("docPagesHost")?.addEventListener("contextmenu", (e) => 
   // build a unified context menu
   const menuItems = [];
 
+  const writingActions = window.SanctumWritingCheck?.contextActions(e.target.closest(".doc-content"), e.clientX, e.clientY) || [];
+  writingActions.forEach(item => menuItems.push({ icon: getUIIcon("replace"), ...item }));
+  if (writingActions.length && selectedText) menuItems.push({ divider: true });
+
   // lexicon contextual options
   if (selectedText) {
     menuItems.push({
-      icon: "📚",
+      icon: getUIIcon("book-open"),
       label: "Open Lexicon Matches",
       action: () => {
         lexiconLookupSelectionRange = null;
@@ -7426,7 +7435,7 @@ document.getElementById("docPagesHost")?.addEventListener("contextmenu", (e) => 
     });
 
     menuItems.push({
-      icon: "⇄",
+      icon: getUIIcon("replace"),
       label: "Replace with Lexicon",
       action: () => {
         saveLexiconLookupSelectionRange();
@@ -7435,7 +7444,7 @@ document.getElementById("docPagesHost")?.addEventListener("contextmenu", (e) => 
     });
 
     menuItems.push({
-      icon: "＋",
+      icon: getUIIcon("plus"),
       label: "Save to Lexicon",
       action: () => {
         openLexiconQuickSaveMenu(selectedText, e.clientX, e.clientY);
@@ -7456,7 +7465,7 @@ document.getElementById("docPagesHost")?.addEventListener("contextmenu", (e) => 
       });
     } else {
       menuItems.push({
-        icon: "🧵",
+        icon: getUIIcon("link"),
         label: "Add threads in Inspector first",
         disabled: true,
         action: () => {},
@@ -7468,7 +7477,7 @@ document.getElementById("docPagesHost")?.addEventListener("contextmenu", (e) => 
   if (target) {
     if (menuItems.length) menuItems.push({ divider: true });
     menuItems.push({
-      icon: "⚓",
+      icon: getUIIcon("anchor"),
       label: "Set Anchor",
       action: () => setAnchorOnParagraph(target),
     });
@@ -7536,7 +7545,7 @@ document.getElementById("docPagesHost")?.addEventListener("click", (e) => {
   tip.innerHTML = `
     <span class="doc-thread-color-dot" style="background:${thread.color}"></span>
     <span>${thread.name}</span>
-    <button id="threadTipRemove" title="Remove tag">✕</button>
+    <button id="threadTipRemove" title="Remove tag" aria-label="Remove tag">${getUIIcon("x")}</button>
   `;
   tip.style.top = `${e.clientY - 36}px`;
   tip.style.left = `${e.clientX}px`;
@@ -7665,7 +7674,7 @@ function showAnchorPicker(x, y) {
   docAnchors.forEach(anchor => {
     const item = document.createElement("div");
     item.className = "thread-picker-item";
-    item.innerHTML = `<span>⚓</span><span>${anchor.name}</span>${anchor.sectionIndex !== activeSectionIndex ? `<span style="font-size:10px;color:var(--muted3);margin-left:auto;">§${anchor.sectionIndex + 1}</span>` : ""}`;
+    item.innerHTML = `${getUIIcon("anchor")}<span>${anchor.name}</span>${anchor.sectionIndex !== activeSectionIndex ? `<span style="font-size:10px;color:var(--muted3);margin-left:auto;">§${anchor.sectionIndex + 1}</span>` : ""}`;
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
       jumpToAnchor(anchor);
@@ -8716,7 +8725,7 @@ function syncLexiconTopControls() {
 
   const sortBtn = document.getElementById("docLexiconSortBtn");
   if (sortBtn) {
-    sortBtn.textContent = `Sort: ${getLexiconViewLabel(activeLexiconView)}`;
+    sortBtn.innerHTML = `${getUIIcon("arrow-up-down")}<span>Sort: ${getLexiconViewLabel(activeLexiconView)}</span>`;
   }
 
   document.querySelectorAll("#docLexiconSortMenu button").forEach((btn) => {
@@ -8882,8 +8891,8 @@ function openLexiconBrowserMenu(anchorEl, payload) {
   menu.id = "docLexiconBrowserMenu";
   menu.className = "doc-lexicon-entry-popup-menu";
   menu.innerHTML = `
-    <button class="doc-lexicon-entry-popup-item" data-action="rename">Rename</button>
-    <button class="doc-lexicon-entry-popup-item danger" data-action="delete">Delete</button>
+    <button class="doc-lexicon-entry-popup-item" data-action="rename">${getUIIcon("pencil")}<span>Rename</span></button>
+    <button class="doc-lexicon-entry-popup-item danger" data-action="delete">${getUIIcon("trash-2")}<span>Delete</span></button>
   `;
 
   document.body.appendChild(menu);
@@ -9035,10 +9044,10 @@ function openLexiconEntryMenu(anchorEl, { groupId, sectionId, entryId }) {
   menu.id = "docLexiconEntryMenu";
   menu.className = "doc-lexicon-entry-popup-menu";
   menu.innerHTML = `
-    <button class="doc-lexicon-entry-popup-item" data-action="edit">Edit</button>
-    <button class="doc-lexicon-entry-popup-item" data-action="copy">Copy</button>
-    <button class="doc-lexicon-entry-popup-item" data-action="favorite">${initialEntry.favorite ? "Unfavorite" : "Favorite"}</button>
-    <button class="doc-lexicon-entry-popup-item danger" data-action="delete">Delete</button>
+    <button class="doc-lexicon-entry-popup-item" data-action="edit">${getUIIcon("pencil")}<span>Edit</span></button>
+    <button class="doc-lexicon-entry-popup-item" data-action="copy">${getUIIcon("copy")}<span>Copy</span></button>
+    <button class="doc-lexicon-entry-popup-item" data-action="favorite">${getUIIcon("star")}<span>${initialEntry.favorite ? "Unfavorite" : "Favorite"}</span></button>
+    <button class="doc-lexicon-entry-popup-item danger" data-action="delete">${getUIIcon("trash-2")}<span>Delete</span></button>
   `;
 
   document.body.appendChild(menu);
@@ -9148,7 +9157,7 @@ function renderLexicon() {
         </div>
         <div class="doc-lexicon-browser-tools">
           <div class="doc-lexicon-browser-count">${g.sections.length}</div>
-          <button class="doc-lexicon-browser-menu" data-action="delete-group">⋮</button>
+          <button class="doc-lexicon-browser-menu" data-action="delete-group" aria-label="More options">${getUIIcon("ellipsis-vertical")}</button>
         </div>
       `;
 
@@ -9190,7 +9199,7 @@ function renderLexicon() {
         </div>
         <div class="doc-lexicon-browser-tools">
           <div class="doc-lexicon-browser-count">${s.entries.length}</div>
-          <button class="doc-lexicon-browser-menu" data-action="delete-section">⋮</button>
+          <button class="doc-lexicon-browser-menu" data-action="delete-section" aria-label="More options">${getUIIcon("ellipsis-vertical")}</button>
         </div>
       `;
 
@@ -9262,7 +9271,7 @@ function renderLexicon() {
     row.innerHTML = `
       <div class="doc-lexicon-entry-text">${entry.text}</div>
       ${entry.favorite ? '<span class="doc-lexicon-entry-star">★</span>' : ""}
-      <button class="doc-lexicon-entry-menu" data-action="menu">⋮</button>
+      <button class="doc-lexicon-entry-menu" data-action="menu" aria-label="More options">${getUIIcon("ellipsis-vertical")}</button>
     `;
 
     row.classList.toggle("selected", activeLexiconEntryId === entry.id);
@@ -9737,7 +9746,7 @@ function openStyleKitEditor(existing = null) {
     <div class="doc-kit-modal">
       <div class="doc-kit-header">
         <input class="doc-kit-name-input" id="kitNameInput" value="${kit.name}" placeholder="Style name..." />
-        <button class="doc-kit-close" id="docKitClose">✕</button>
+        <button class="doc-kit-close" id="docKitClose" aria-label="Close">${getUIIcon("x")}</button>
       </div>
       <div class="doc-kit-body">
         <div class="doc-kit-section-title">Headings</div>
@@ -9801,8 +9810,8 @@ function openStyleKitEditor(existing = null) {
         </div>
       </div>
       <div class="doc-kit-footer">
-        <button class="doc-kit-btn preview" id="kitPreviewBtn">Preview</button>
-        <button class="doc-kit-btn save" id="kitSaveBtn">Save & Apply</button>
+        <button class="doc-kit-btn preview" id="kitPreviewBtn">${getUIIcon("eye")}<span>Preview</span></button>
+        <button class="doc-kit-btn save" id="kitSaveBtn">${getUIIcon("check")}<span>Save & Apply</span></button>
       </div>
     </div>
   `;
@@ -9894,7 +9903,7 @@ function openPagePresetEditor(existing = null) {
     <div class="doc-kit-modal">
       <div class="doc-kit-header">
         <input class="doc-kit-name-input" id="presetNameInput" value="${preset.name}" placeholder="Preset name..." />
-        <button class="doc-kit-close" id="docPresetClose">✕</button>
+        <button class="doc-kit-close" id="docPresetClose" aria-label="Close">${getUIIcon("x")}</button>
       </div>
       <div class="doc-kit-body">
         <div class="doc-kit-section-title">Page</div>
@@ -9932,8 +9941,8 @@ function openPagePresetEditor(existing = null) {
         </div>
       </div>
       <div class="doc-kit-footer">
-        <button class="doc-kit-btn preview" id="presetPreviewBtn">Preview</button>
-        <button class="doc-kit-btn save" id="presetSaveBtn">Save & Apply</button>
+        <button class="doc-kit-btn preview" id="presetPreviewBtn">${getUIIcon("eye")}<span>Preview</span></button>
+        <button class="doc-kit-btn save" id="presetSaveBtn">${getUIIcon("check")}<span>Save & Apply</span></button>
       </div>
     </div>
   `;
@@ -9995,7 +10004,7 @@ function renderStyleKitList() {
     item.className = "doc-submenu-item";
     const currentKit = docSections[activeSectionIndex]?.styleKit;
     if (currentKit === kit.name) item.classList.add("active");
-    item.innerHTML = `<span>${kit.name}</span><button class="doc-submenu-edit" data-name="${kit.name}">✎</button>`;
+    item.innerHTML = `<span>${kit.name}</span><button class="doc-submenu-edit" data-name="${kit.name}" aria-label="Edit">${getUIIcon("pencil")}</button>`;
     item.addEventListener("click", (e) => {
       if (e.target.closest(".doc-submenu-edit")) return;
       applyStyleKit(kit);
@@ -10025,7 +10034,7 @@ function renderPagePresetList() {
   presets.forEach(preset => {
     const item = document.createElement("div");
     item.className = "doc-submenu-item";
-    item.innerHTML = `<span>${preset.name}</span><button class="doc-submenu-edit" data-name="${preset.name}">✎</button>`;
+    item.innerHTML = `<span>${preset.name}</span><button class="doc-submenu-edit" data-name="${preset.name}" aria-label="Edit">${getUIIcon("pencil")}</button>`;
     item.addEventListener("click", (e) => {
       if (e.target.closest(".doc-submenu-edit")) return;
       applyPagePreset(preset);

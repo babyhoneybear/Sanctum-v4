@@ -4,12 +4,14 @@
   if (root) root.SanctumBackupData = api;
 })(typeof window !== "undefined" ? window : globalThis, function () {
   const STORAGE_FIELDS = [
+    ["chatgptDatabaseHistory", "chatgptDatabaseHistory", []],
     ["blocks", "pageBlocks", {}],
     ["pageSettings", "pageSettings", {}],
     ["pageActivity", "pageActivity", {}],
     ["documents", "documents", {}],
     ["docSettings", "docSettings", {}],
     ["journals", "journals", {}],
+    ["maps", "maps", {}],
     ["chronicles", "chronicles", []],
     ["trash", "trash", []],
     ["pins", "pins", []],
@@ -23,8 +25,13 @@
     ["annotations", "annotations", {}],
     ["canvasLines", "canvasLines", {}],
     ["pageProps", "pageProps", {}],
+    ["customTypes", "customTypes", []],
+    ["timelines", "timelines", {}],
+    ["relationshipTrees", "relationshipTrees", {}],
     ["relationshipGraphSettings", "relationshipGraphSettings", {}],
     ["lexicon", "lexicon", []],
+    ["writingDictionary", "writingDictionary", []],
+    ["writingSettings", "writingSettings", {}],
     ["styleKits", "styleKits", {}],
     ["pagePresets", "pagePresets", {}],
     ["studyActivity", "studyActivity", {}],
@@ -81,6 +88,27 @@
       throw new TypeError("Import adapter requires readJSON, writeJSON, and keys.");
     }
 
+    // Validate the type library before any existing vault data is replaced.
+    if (Object.hasOwn(data, "customTypes")) {
+      const ids = new Set();
+      if (!Array.isArray(data.customTypes) || data.customTypes.some(type => {
+        if (!type || !/^custom-type-[a-z0-9-]+$/i.test(type.id || "") || ids.has(type.id)) return true;
+        ids.add(type.id);
+        const fieldIds = new Set();
+        return typeof type.name !== "string" || !type.name.trim()
+          || !["board-canvas", "infinite-canvas", "document"].includes(type.layout)
+          || !Number.isInteger(type.version) || type.version < 1
+          || !Array.isArray(type.sections) || type.sections.some(title => typeof title !== "string")
+          || !Array.isArray(type.fields) || type.fields.some(field => {
+            if (!field || typeof field.id !== "string" || !field.id || fieldIds.has(field.id)) return true;
+            fieldIds.add(field.id);
+            return typeof field.label !== "string" || !field.label.trim()
+              || !["text", "relation"].includes(field.type)
+              || (field.type === "text" && typeof field.defaultValue !== "string");
+          });
+      })) throw new TypeError("Backup contains an invalid custom type library.");
+    }
+
     let writes = 0;
     if (data.settings && typeof adapter.writeSettings === "function") {
       adapter.writeSettings(data.settings);
@@ -126,8 +154,10 @@
       || Object.keys(data?.blocks || {}).length > 0
       || Object.keys(data?.documents || {}).length > 0
       || Object.keys(data?.journals || {}).length > 0
+      || Object.keys(data?.maps || {}).length > 0
       || Object.keys(data?.pageDatabases || {}).length > 0
-      || (data?.notesVault?.length || 0) > 0;
+      || (data?.notesVault?.length || 0) > 0
+      || (data?.customTypes?.length || 0) > 0;
   }
 
   return {

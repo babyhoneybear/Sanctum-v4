@@ -1,0 +1,43 @@
+::highlight(sanctum-spelling) { text-decoration: underline wavy #e58f7d; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+::highlight(sanctum-grammar) { text-decoration: underline wavy #85b9dc; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.writing-check-panel { box-sizing:border-box; position:fixed; top:90px; right:22px; width:min(280px,calc(100vw - 32px)); max-height:min(360px,calc(100dvh - 120px)); overflow:auto; padding:12px; background:var(--panel-bg,#242424); color:var(--text-main,#eee); border:1px solid var(--panel-border-strong,#555); border-radius:8px; box-shadow:0 8px 24px #0004; z-index:12000; font:12px/1.5 system-ui,sans-serif; }
+.writing-check-panel header { display:flex; justify-content:space-between; gap:12px; padding:0 0 12px; border-bottom:1px solid var(--panel-border,#555); }
+.writing-check-panel h2 { font-size:16px; margin:0; }
+.writing-check-panel p { margin:6px 0; }
+.writing-check-panel header p,.writing-check-help { color:var(--muted2,#aaa); font-size:11px; }
+.writing-check-panel button { font:inherit; color:inherit; border:1px solid var(--panel-border-strong,#555); background:var(--field-bg,#ffffff08); border-radius:5px; padding:5px 9px; cursor:pointer; }
+.writing-check-panel button:hover { background:var(--hover,#ffffff12); }
+.writing-check-panel button:disabled { opacity:.45; cursor:default; }
+.writing-check-panel :is(input,select) { font:inherit; color:inherit; background:var(--field-bg,#ffffff08); border:1px solid var(--panel-border-strong,#555); border-radius:5px; padding:6px; min-width:0; }
+.writing-check-panel select option { background:var(--panel-bg,#242424); }
+.writing-check-controls { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; align-items:center; }
+.writing-check-controls label { display:flex; gap:8px; align-items:center; }
+.writing-check-live { width:100%; }
+.writing-check-panel details { margin-top:18px; border-top:1px solid var(--panel-border,#555); padding-top:12px; }
+.writing-check-panel summary { cursor:pointer; font-weight:600; }
+.writing-check-panel form { display:flex; align-items:flex-end; gap:6px; margin:12px 0; }
+.writing-check-panel form label { display:flex; flex-direction:column; flex:1; gap:4px; }
+.writing-dictionary-word { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; overflow-wrap:anywhere; }
+.writing-check-panel [data-dictionary] { max-height:180px; overflow:auto; }
+.writing-check-mirror { position:fixed; overflow:hidden; pointer-events:none; user-select:none; z-index:11000; color:transparent; background:none; border:0; }
+.writing-check-mirror-text { box-sizing:border-box; margin:0; border:0; color:transparent; }
+.writing-check-mirror span { color:transparent; background:none; text-decoration-line:underline; text-decoration-style:wavy; text-decoration-thickness:1px; text-underline-offset:3px; }
+.writing-check-spelling { text-decoration-color:#e58f7d; }
+.writing-check-grammar { text-decoration-color:#85b9dc; }
+.writing-check-suggestion { box-sizing:border-box; position:fixed; width:200px; max-width:calc(100vw - 16px); max-height:calc(100dvh - 16px); overflow:auto; padding:4px 0; background:var(--menu-bg,#1b1b1b); color:var(--text-main,#eee); border:0; border-radius:3px; box-shadow:0 3px 12px var(--shadow-strong,#0004); z-index:12002; font:12px/1.4 system-ui,sans-serif; }
+.writing-check-suggestion header { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:3px 12px 4px; color:var(--muted2,#aaa); font-size:10px; }
+.writing-check-suggestion header span { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.writing-check-suggestion button { display:block; border:0; border-radius:0; padding:6px 12px; background:transparent; color:inherit; text-align:left; font:inherit; cursor:pointer; }
+.writing-check-suggestion button:hover,.writing-check-suggestion button:focus-visible { background:var(--hover,#ffffff12); }
+.writing-check-suggestion button:disabled { opacity:.45; cursor:default; }
+.writing-check-suggestion header button { padding:0 4px; color:var(--muted2,#aaa); }
+.writing-check-card-tools { display:flex; align-items:center; gap:2px; flex-shrink:0; }
+.writing-check-suggestion p { margin:3px 12px 6px; color:var(--muted2,#aaa); font-size:11px; }
+.writing-check-explanation { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.writing-check-quick-choices { display:flex; flex-direction:column; }
+.writing-check-quick-choices button { width:100%; font-weight:400; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.writing-check-card-meta { margin-top:3px; color:var(--muted2,#aaa); font-size:11px; }
+.writing-check-card-meta button { width:100%; }
+.writing-check-card-actions { display:flex; flex-direction:column; border-top:1px solid var(--subtle-border,#ffffff0c); padding-top:3px; margin-top:3px; color:var(--muted2,#aaa); font-size:11px; }
+.writing-check-card-actions button { width:100%; }
+@media(max-width:600px) { .writing-check-panel {top:60px;right:12px;max-height:calc(100dvh - 80px);} }

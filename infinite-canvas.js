@@ -3,10 +3,9 @@
   const DEFAULT_GRID_HEIGHT = 3200;
   const GRID_PADDING = 720;
   const DEFAULT_TOP_OFFSET = 720;
-  const MIN_SCALE = 0.35;
+  const MIN_SCALE = 0.05;
   const MAX_SCALE = 2.5;
   const ZOOM_FACTOR = 1.14;   // ~14% per button click
-  const WHEEL_FACTOR = 1.09;  // ~9% per scroll tick
   const SAVE_DELAY = 160;
 
   let panState = null;
@@ -97,6 +96,8 @@
   }
 
   function getCanvasBlockBounds(grid) {
+    let minLeft = Infinity;
+    let minTop = Infinity;
     let maxRight = 0;
     let maxBottom = 0;
 
@@ -106,11 +107,16 @@
       const top = parseInt(block.style.top || "0", 10) || 0;
       const width = parseInt(block.style.width || block.getBoundingClientRect().width || "0", 10) || 0;
       const height = parseInt(block.style.height || block.getBoundingClientRect().height || "0", 10) || 0;
+      minLeft = Math.min(minLeft, left);
+      minTop = Math.min(minTop, top);
       maxRight = Math.max(maxRight, left + width);
       maxBottom = Math.max(maxBottom, top + height);
     });
 
     return {
+      minLeft: Number.isFinite(minLeft) ? minLeft : 0,
+      minTop: Number.isFinite(minTop) ? minTop : 0,
+      empty: !Number.isFinite(minLeft),
       maxRight,
       maxBottom
     };
@@ -137,6 +143,18 @@
     pageCanvas.classList.add("is-infinite-canvas");
     boardSurface.classList.add("is-infinite-canvas");
     document.body.classList.add("infinite-canvas-page");
+
+    // The stage is an ancestor of pageCanvas: its dimensions must inherit
+    // from the board surface, not from the transformed child.
+    for (const [name, value] of Object.entries({
+      "--infinite-canvas-scale": String(scale),
+      "--infinite-grid-width": `${logicalWidth}px`,
+      "--infinite-grid-height": `${logicalHeight}px`,
+      "--infinite-stage-width": `${logicalWidth * scale}px`,
+      "--infinite-stage-height": `${logicalHeight * scale}px`
+    })) boardSurface.style.setProperty(name, value);
+    grid.style.removeProperty("min-width");
+    grid.style.removeProperty("min-height");
 
     pageCanvas.style.setProperty("--infinite-canvas-scale", String(scale));
     pageCanvas.style.setProperty("--infinite-grid-width", `${Math.round(logicalWidth)}px`);
@@ -167,6 +185,7 @@
     pageCanvas.style.removeProperty("--infinite-grid-height");
     pageCanvas.style.removeProperty("--infinite-stage-width");
     pageCanvas.style.removeProperty("--infinite-stage-height");
+    ["--infinite-canvas-scale", "--infinite-grid-width", "--infinite-grid-height", "--infinite-stage-width", "--infinite-stage-height"].forEach(name => boardSurface.style.removeProperty(name));
 
     delete grid.dataset.canvasScale;
     delete grid.dataset.canvasWidth;
@@ -204,6 +223,7 @@
     if (!isInfiniteCanvasPage(pageId)) return false;
 
     const commit = () => {
+      if (pageId !== getCurrentPageIdSafe() || !isInfiniteCanvasPage(pageId)) return false;
       const current = getMetrics(pageId);
       if (!current?.viewport) return false;
       return savePageCanvasSettings(pageId, {
@@ -238,13 +258,16 @@
 
     const maxLeft = Math.max(0, metrics.logicalWidth * metrics.scale - metrics.viewport.clientWidth);
     const maxTop = Math.max(0, metrics.logicalHeight * metrics.scale - metrics.viewport.clientHeight);
+    const bounds = getCanvasBlockBounds(metrics.grid);
+    const centerX = bounds.empty ? metrics.logicalWidth / 2 : (bounds.minLeft + bounds.maxRight) / 2;
+    const centerY = bounds.empty ? DEFAULT_TOP_OFFSET + metrics.viewport.clientHeight / (2 * metrics.scale) : (bounds.minTop + bounds.maxBottom) / 2;
     const nextLeft = clamp(
-      options.left ?? ((metrics.logicalWidth * metrics.scale - metrics.viewport.clientWidth) / 2),
+      options.left ?? (centerX * metrics.scale - metrics.viewport.clientWidth / 2),
       0,
       maxLeft
     );
     const nextTop = clamp(
-      options.top ?? (DEFAULT_TOP_OFFSET * metrics.scale),
+      options.top ?? (centerY * metrics.scale - metrics.viewport.clientHeight / 2),
       0,
       maxTop
     );
@@ -262,8 +285,10 @@
     if (!grid || !viewport) return null;
 
     const settings = getPageCanvasSettings(pageId);
-    const logicalSize = getLogicalSize(grid);
     const scale = normalizeZoom(options.scale ?? settings.canvasZoom ?? grid.dataset.canvasScale ?? 1);
+    const logicalSize = getLogicalSize(grid);
+    logicalSize.width = Math.max(logicalSize.width, Math.ceil(viewport.clientWidth / scale));
+    logicalSize.height = Math.max(logicalSize.height, Math.ceil(viewport.clientHeight / scale));
 
     setCanvasVariables(scale, logicalSize.width, logicalSize.height);
     const metrics = getMetrics(pageId);
@@ -314,9 +339,11 @@
     const metrics = getMetrics(pageId);
     if (!metrics?.isInfinite) return;
 
+    const bounds = getCanvasBlockBounds(metrics.grid);
+    if (bounds.empty) { zoomTo(pageId, 1); centerView(pageId); return; }
     const nextScale = normalizeZoom(Math.min(
-      metrics.viewport.clientWidth / metrics.logicalWidth,
-      metrics.viewport.clientHeight / metrics.logicalHeight,
+      (metrics.viewport.clientWidth - 160) / Math.max(1, bounds.maxRight - bounds.minLeft),
+      (metrics.viewport.clientHeight - 160) / Math.max(1, bounds.maxBottom - bounds.minTop),
       1
     ));
 
@@ -367,6 +394,7 @@
     }
 
     requestAnimationFrame(() => {
+      if (pageId !== getCurrentPageIdSafe() || !isInfiniteCanvasPage(pageId)) return;
       applyLayout(pageId, { restoreView: true });
       setPanModeClass();
     });
@@ -431,13 +459,12 @@
   const viewportEl = document.getElementById("infiniteCanvasViewport");
   viewportEl?.addEventListener("wheel", (event) => {
     const pageId = getCurrentPageIdSafe();
-    if (!isInfiniteCanvasPage(pageId) || !event.ctrlKey) return;
+    if (!isInfiniteCanvasPage(pageId) || !(event.ctrlKey || event.metaKey)) return;
 
     event.preventDefault();
     const metrics = getMetrics(pageId);
     if (!metrics?.isInfinite) return;
-    const zoomIn = event.deltaY < 0;
-    zoomTo(pageId, zoomIn ? metrics.scale * WHEEL_FACTOR : metrics.scale / WHEEL_FACTOR, event);
+    zoomTo(pageId, metrics.scale * Math.exp(-event.deltaY * 0.002), event);
   }, { passive: false });
 
   viewportEl?.addEventListener("scroll", () => {
@@ -449,12 +476,13 @@
   viewportEl?.addEventListener("mousedown", (event) => {
     const pageId = getCurrentPageIdSafe();
     if (!isInfiniteCanvasPage(pageId)) return;
-    if (event.target.closest(".block, .topbar-dropdown, .page-database-floating-menu, .page-database-property-panel")) return;
-
-    const canPan = event.button === 1 || spacePanEnabled || !document.body.classList.contains("editing");
+    const explicitPan = event.button === 1 || (event.button === 0 && spacePanEnabled);
+    if (!explicitPan && event.target.closest(".block, .topbar-dropdown, .page-database-floating-menu, .page-database-property-panel")) return;
+    const canPan = explicitPan || !document.body.classList.contains("editing");
     if (!canPan) return;
+    event.stopImmediatePropagation();
     beginPan(event);
-  });
+  }, true);
 
   document.addEventListener("mousemove", (event) => {
     const metrics = getMetrics();
@@ -471,6 +499,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!isInfiniteCanvasPage()) return;
     if (event.code !== "Space" || event.repeat) return;
 
     const activeEl = document.activeElement;
@@ -489,6 +518,13 @@
     if (event.code !== "Space") return;
     spacePanEnabled = false;
     document.body.classList.remove("infinite-canvas-pan-ready");
+    setPanModeClass();
+  });
+
+  window.addEventListener("blur", () => {
+    spacePanEnabled = false;
+    document.body.classList.remove("infinite-canvas-pan-ready");
+    endPan();
     setPanModeClass();
   });
 

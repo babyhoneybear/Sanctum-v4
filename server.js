@@ -28,6 +28,8 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   : null;
 
 app.use(express.json({ limit: '1mb' }));
+require('./writing-check-service').mount(app);
+require('./chatgpt-relay').mount(app, { port: PORT, siteUrl: require('./chatgpt-plugin-connection.json').url });
 
 function safeText(value, max = 4000) {
   return String(value || '').slice(0, max);
@@ -1376,7 +1378,7 @@ Return JSON only:
   }
 });
 
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, { dotfiles: 'ignore' }));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();

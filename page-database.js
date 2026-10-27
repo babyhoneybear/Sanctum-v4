@@ -1015,6 +1015,8 @@
 
   function normalizeEmbedView(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
+    if (safe === "tree" || (!safe && fallback === "tree")) return "tree";
+    if (safe === "timeline" || (!safe && fallback === "timeline")) return "timeline";
       if (safe === "calendar" || safe === "gallery" || safe === "board" || safe === "checklist" || safe === "table") return safe;
       if (fallback === "calendar" || fallback === "gallery" || fallback === "board" || fallback === "checklist") return fallback;
     return "table";
@@ -1113,6 +1115,8 @@
 
   function getInlineViewLabel(view = "table") {
     const normalized = normalizeEmbedView(view, "table");
+    if (normalized === "tree") return "Relationship tree";
+    if (normalized === "timeline") return "Timeline";
     if (normalized === "calendar") return "Calendar";
     if (normalized === "gallery") return "Gallery";
     if (normalized === "checklist") return "Checklist";
@@ -1154,6 +1158,8 @@
 
   function normalizeViewMode(value = "", fallback = "table") {
     const safe = String(value || "").trim().toLowerCase();
+    if (safe === "tree" || (!safe && fallback === "tree")) return "tree";
+    if (safe === "timeline" || (!safe && fallback === "timeline")) return "timeline";
     if (safe === "calendar" || safe === "gallery" || safe === "table" || safe === "board" || safe === "checklist") return safe;
     if (fallback === "calendar" || fallback === "gallery" || fallback === "board" || fallback === "checklist") return fallback;
     return "table";
@@ -1929,7 +1935,11 @@
     if (type === "status") property.statusGroups = normalizeStatusGroups(raw.statusGroups || []);
     if (type === "tag") property.tagOptions = normalizeTagOptions(raw.tagOptions || []);
     if (type === "select") property.selectOptions = normalizeSelectOptions(raw.selectOptions || []);
-    if (type === "relation") property.relationTarget = normalizeRelationTarget(raw.relationTarget || {});
+    if (type === "relation") {
+      property.relationTarget = normalizeRelationTarget(raw.relationTarget || {});
+      if (typeof raw.treeKind === 'string') property.treeKind = raw.treeKind;
+      if (typeof raw.treeLabel === 'string') property.treeLabel = raw.treeLabel;
+    }
     if (type === "summary") property.summaryConfig = normalizeSummaryConfig(raw.summaryConfig || {});
     if (type === "formula") property.formulaConfig = normalizeFormulaConfig(raw.formulaConfig || {});
     return property;
@@ -2190,7 +2200,8 @@
     const totalWidth = widths.reduce((sum, width) => sum + width, 0);
     if (totalWidth <= safeAvailableWidth) return widths;
 
-    const minimumWidths = safeProperties.map((property) => getResponsivePropertyMinWidth(property));
+    // Saved widths are deliberate sizes. Only automatic columns may shrink to fit.
+    const minimumWidths = safeProperties.map((property) => database.columnWidths?.[property.id] || getResponsivePropertyMinWidth(property));
     const capacities = widths.map((width, index) => Math.max(0, width - minimumWidths[index]));
     const totalCapacity = capacities.reduce((sum, width) => sum + width, 0);
     if (totalCapacity <= 0) return widths;
@@ -2446,7 +2457,7 @@
   function writePageDatabases(allDatabases) {
     if (typeof window.writeStorageJSON !== "function") return false;
     const safeValue = allDatabases || {};
-    window.writeStorageJSON(PAGE_DB_KEY, safeValue);
+    if (window.writeStorageJSON(PAGE_DB_KEY, safeValue) === false) return false;
     window.writeStorageJSON(LEGACY_PAGE_DB_KEY, safeValue);
     return true;
   }
@@ -2472,7 +2483,7 @@
       title: page?.title || database?.title || "Database"
     }, { defaultView: "table" });
     all[pageId] = serializeDatabaseForStorage(normalized);
-    writePageDatabases(all);
+    return writePageDatabases(all);
   }
 
   window.SanctumAssistantPageDatabaseStore = {
@@ -2954,7 +2965,7 @@
   function saveDatabaseToSource(source, database) {
     if (!source || !database) return false;
     if (source.kind === "page") {
-      savePageDatabase(source.pageId || "", database);
+      if (savePageDatabase(source.pageId || "", database) === false) return false;
       emitDatabaseSourceUpdated({
         kind: "page",
         pageId: source.pageId || "",
@@ -3003,7 +3014,7 @@
 
     blocks[blockIndex] = nextBlock;
     allBlocks[source.pageId] = blocks;
-    window.writeAllPageBlocks(allBlocks);
+    if (window.writeAllPageBlocks(allBlocks) === false) return false;
     emitDatabaseSourceUpdated({
       kind: "block",
       pageId: source.pageId || "",
@@ -3614,7 +3625,7 @@
     }
   }
 
-  function getDatabaseRowPeekData(pageId = "") {
+  function getDatabaseRowPeekData(pageId = "", options = {}) {
     const page = getCurrentPageRecord(pageId);
     if (!page || !isDatabaseRowPageRecord(page)) return null;
 
@@ -3643,6 +3654,17 @@
         typeLabel: "Database row",
         properties: [],
         missing: true
+      };
+    }
+
+    // Live dashboard labels need current row content, not the full property
+    // editor. Building relation controls here can scan the vault per field.
+    if (options.summaryOnly) {
+      return {
+        pageId: row.pageId || pageId,
+        title: getRowTitle(database, row),
+        coverSource: getBoardCardPreviewSource(row),
+        missing: false
       };
     }
 
@@ -3910,6 +3932,9 @@
   function getBacklinkRelationProperties(database, source) {
     const sourceKey = getDatabaseSourceKey(source);
     return getRelationProperties(database).filter((property) => {
+      // Family/character relationships have directional meaning. Their inverse is
+      // derived by the tree, never copied into every link column in another table.
+      if (property.treeKind || (window.SanctumTreeData && !window.SanctumTreeData.classify(property).kind.startsWith('custom:'))) return false;
       const targetKey = getDatabaseSourceKey(property.relationTarget || {});
       return targetKey === sourceKey;
     });
@@ -3930,6 +3955,7 @@
 
   function syncRelationBacklinks(source, sourceDatabase, rowId = "", relationProperty, previousValue = "", nextValue = "") {
     if (!source || !sourceDatabase || !relationProperty || normalizePropertyType(relationProperty.type || "", "") !== "relation") return;
+    if (relationProperty.treeKind || (window.SanctumTreeData && !window.SanctumTreeData.classify(relationProperty).kind.startsWith('custom:'))) return;
     const targetSource = getRelationSource(relationProperty);
     const targetDatabase = getDatabaseFromSource(targetSource);
     if (!targetSource || !targetDatabase) return;
@@ -5008,11 +5034,37 @@
     return title || "Untitled";
   }
 
+  const automaticTitleLinkKeysInFlight = new Set();
+  let automaticTitleLinkedDatabases = null;
+
+  // Naming a whole table from a link reads the linked table once per row, and
+  // reading a table re-parses every row in it. Hold the linked tables for the
+  // length of one naming pass so a 200 row table costs one read instead of 200.
+  function withAutomaticTitleLinkCache(run) {
+    const ownsCache = !automaticTitleLinkedDatabases;
+    if (ownsCache) automaticTitleLinkedDatabases = new Map();
+    try {
+      return run();
+    } finally {
+      if (ownsCache) automaticTitleLinkedDatabases = null;
+    }
+  }
+
+  function readAutomaticTitleLinkedDatabase(source) {
+    if (!source) return null;
+    if (!automaticTitleLinkedDatabases) return getDatabaseFromSource(source);
+    const key = getDatabaseSourceKey(source);
+    if (!automaticTitleLinkedDatabases.has(key)) {
+      automaticTitleLinkedDatabases.set(key, getDatabaseFromSource(source));
+    }
+    return automaticTitleLinkedDatabases.get(key);
+  }
+
   function getAutomaticTitleSource(database) {
     const titleProperty = getTitleProperty(database);
     const config = normalizeTitleConfig(titleProperty.titleConfig || {});
     const sourceProperty = getPropertyById(database, config.sourcePropertyId);
-    if (!sourceProperty || sourceProperty.type !== "date") {
+    if (!sourceProperty || !["date", "relation"].includes(sourceProperty.type)) {
       return { titleProperty, config: normalizeTitleConfig({}), sourceProperty: null };
     }
     return { titleProperty, config, sourceProperty };
@@ -5044,6 +5096,31 @@
   function getAutomaticTitleValue(database, row) {
     const { config, sourceProperty } = getAutomaticTitleSource(database);
     if (!sourceProperty) return "";
+    if (sourceProperty.type === "relation") {
+      // Reading a linked row's name loads that row's own table, and loading a
+      // table re-derives its automatic names. Tables that link to themselves
+      // ("Parent task") or to each other would loop forever, so remember which
+      // tables are already being read and stop when one comes back around. The
+      // table we stop at keeps whatever name it has stored.
+      const linkSource = getRelationSource(sourceProperty);
+      const linkKey = getDatabaseSourceKey(linkSource || {});
+      if (automaticTitleLinkKeysInFlight.has(linkKey)) return "";
+      automaticTitleLinkKeysInFlight.add(linkKey);
+      let relationLabel = "";
+      try {
+        const linkedDatabase = readAutomaticTitleLinkedDatabase(linkSource);
+        if (linkedDatabase) {
+          relationLabel = parseRelationValues(getRowValue(row, sourceProperty.id))
+            .map((linkedRowId) => getRowById(linkedDatabase, linkedRowId))
+            .filter(Boolean)
+            .map((linkedRow) => getRowTitle(linkedDatabase, linkedRow))
+            .join(", ");
+        }
+      } finally {
+        automaticTitleLinkKeysInFlight.delete(linkKey);
+      }
+      return relationLabel ? `${config.prefix || ""}${relationLabel}`.trim() : "";
+    }
     const dateLabel = formatAutomaticTitleDate(getRowValue(row, sourceProperty.id), config.dateFormat);
     if (!dateLabel) return "";
     return `${config.prefix || ""}${dateLabel}`.trim();
@@ -5055,6 +5132,10 @@
     if (!sourceProperty) return false;
     const currentTitle = String(getRowValue(row, titleProperty.id) || "").trim();
     const nextTitle = getAutomaticTitleValue(database, row);
+    // An empty date or an empty link has no name to generate. Blanking the row
+    // instead would turn real names into "Untitled" the moment someone clears
+    // the source field, so leave whatever name the row already carries.
+    if (!nextTitle) return false;
     const shouldSync = config.syncMode === "sync" || options.force === true;
     if (!shouldSync && currentTitle) return false;
     if (currentTitle === nextTitle) return false;
@@ -5063,11 +5144,13 @@
   }
 
   function applyAutomaticTitles(database, options = {}) {
-    let changed = false;
-    safeParseArray(database?.rows || []).forEach((row) => {
-      changed = applyAutomaticTitleToRow(database, row, options) || changed;
+    return withAutomaticTitleLinkCache(() => {
+      let changed = false;
+      safeParseArray(database?.rows || []).forEach((row) => {
+        changed = applyAutomaticTitleToRow(database, row, options) || changed;
+      });
+      return changed;
     });
-    return changed;
   }
 
   function formatCellDisplay(property, value = "") {
@@ -5826,12 +5909,13 @@
   }
 
   function getPropertyIconLabel(property) {
-    return property?.showIcon === false ? "No icon" : (getPropertyIcon(property) || "No icon");
+    const value = getPropertyIcon(property);
+    return property?.showIcon === false ? "No icon" : (window.SanctumIconCatalog?.entries.find(e => e.value === value)?.label || (isImageIconValue(value) ? "Custom image" : value) || "No icon");
   }
 
   function buildPropertyIconHTML(property, className = "page-database-col-icon") {
     const icon = getPropertyIcon(property);
-    return icon ? `<span class="${escapeHTML(className)}">${escapeHTML(icon)}</span>` : "";
+    return icon ? getIconMarkup(icon, "", className) : "";
   }
 
   function getRowToneAttributes(row) {
@@ -6817,8 +6901,8 @@
           <div class="page-database-date-monthlabel">${escapeHTML(formatMonthLabel(normalizedMonth))}</div>
           <div class="page-database-date-monthactions">
             <button type="button" class="page-database-date-nav" data-date-action="today">Today</button>
-            <button type="button" class="page-database-date-nav" data-date-action="prev">‹</button>
-            <button type="button" class="page-database-date-nav" data-date-action="next">›</button>
+            <button type="button" class="page-database-date-nav" data-date-action="prev" aria-label="Previous">${getUIIcon("chevron-left")}</button>
+            <button type="button" class="page-database-date-nav" data-date-action="next" aria-label="Next">${getUIIcon("chevron-right")}</button>
           </div>
         </div>
         <div class="page-database-date-weekdays">${["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((label) => `<span>${label}</span>`).join("")}</div>
@@ -7940,7 +8024,7 @@
     }
 
     const pageIconHTML = property.type === "title" && hasPageIcon(database)
-      ? `<span class="page-db-row-icon" aria-hidden="true">${escapeHTML(getRowIcon(row))}</span>`
+      ? buildRowIconHTML(row, "page-db-row-icon")
       : "";
 
     return `
@@ -8027,7 +8111,7 @@
           const groupRows = group.rows.map((row) => `
             <div class="page-database-row-shell${row.color ? " has-row-color" : ""}${row.archived ? " is-archived" : ""}" data-db-row-shell-id="${escapeHTML(row.id)}" data-db-row-page-id="${escapeHTML(row.pageId || "")}"${row.archived ? ' data-db-archived="1"' : ""}${row.color ? ` data-row-color="${escapeHTML(row.color)}" style="--page-db-row-accent:${escapeHTML(getRowToneColor(row.color))};"` : ""}>
               <div class="page-database-row-actions page-database-row-actions-left">
-                <button type="button" class="page-database-row-action page-database-row-menu-trigger" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
+                <button type="button" class="page-database-row-action page-database-row-menu-trigger" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">${getUIIcon("ellipsis-vertical")}</button>
               </div>
               <div class="page-database-row-editor page-database-data-row" style="grid-template-columns:${rowTemplate};">
                 ${visibleProperties.map((property) => buildEditableCellHTML(database, row, property)).join("")}
@@ -8093,9 +8177,9 @@
         <div class="page-calendar-toolbar">
           <div class="page-calendar-month">${escapeHTML(viewData.monthLabel)}</div>
             <div class="page-calendar-nav">
-              <button type="button" class="page-calendar-nav-btn" data-calendar-action="prev" aria-label="Previous month">‹</button>
+              <button type="button" class="page-calendar-nav-btn" data-calendar-action="prev" aria-label="Previous month">${getUIIcon("chevron-left")}</button>
               <button type="button" class="page-calendar-nav-btn today" data-calendar-action="today">Today</button>
-              <button type="button" class="page-calendar-nav-btn" data-calendar-action="next" aria-label="Next month">›</button>
+              <button type="button" class="page-calendar-nav-btn" data-calendar-action="next" aria-label="Next month">${getUIIcon("chevron-right")}</button>
             </div>
         </div>
           ${viewData.weekdaysHTML
@@ -8205,7 +8289,7 @@
         ${showPreview
           ? `<button type="button" class="page-database-board-card-preview has-image" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Replace cover"><img src="${escapeHTML(previewSource)}" alt="" /></button>`
           : ""}
-        <button type="button" class="page-database-board-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
+        <button type="button" class="page-database-board-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">${getUIIcon("ellipsis-vertical")}</button>
         ${showAddCoverButton
           ? `<button type="button" class="page-database-board-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
           : ""}
@@ -8332,7 +8416,7 @@
               : ""}
           </div>
         </div>
-        <button type="button" class="page-database-gallery-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">⋮</button>
+        <button type="button" class="page-database-gallery-card-menu" data-db-action="open-row-menu" data-row-id="${escapeHTML(row.id)}" aria-label="Row options">${getUIIcon("ellipsis-vertical")}</button>
         ${showAddCoverButton
           ? `<button type="button" class="page-database-gallery-card-cover-btn" data-db-action="set-board-card-preview" data-row-id="${escapeHTML(row.id)}" aria-label="Add cover">Add cover</button>`
           : ""}
@@ -8370,6 +8454,8 @@
   }
 
   function buildPageEditorHTML(database, options = {}) {
+    if (database.view === "tree") return '<div class="sanctum-tree-mount"></div>';
+    if (database.view === "timeline") return '<div class="sanctum-timeline-mount"></div>';
     return database.view === "calendar"
       ? buildPageCalendarShellHTML(database)
       : database.view === "board"
@@ -8733,6 +8819,7 @@
     if (folderMode) {
       appendMenuDivider(menuEl);
       appendMenuLabel(menuEl, "Folder rows are refreshed from the connected folder.");
+      positionDatabaseFloatingEl(menuEl, anchorEl, { align: "right" });
       return;
     }
     if (!isArchivedRow) {
@@ -8761,6 +8848,7 @@
       rerenderCalendarContext(context);
       closeDatabaseMenus();
     }, { danger: true });
+    positionDatabaseFloatingEl(menuEl, anchorEl, { align: "right" });
   }
 
   function openPropertyIconMenu(anchorEl, context, database, propertyId = "", options = {}) {
@@ -8788,14 +8876,17 @@
         options.onChange?.();
         closeIconMenus();
       }, { active: property.showIcon !== false && !String(property.icon || "").trim() });
-      appendMenuButton(submenuEl, "Custom...", () => {
-        const nextIcon = window.prompt?.("Enter an icon or short label", getPropertyIcon(property) || getPropertyDefaultIcon(property)) || "";
-        if (!String(nextIcon).trim()) return;
-        setPropertyIcon(database, propertyId, nextIcon, { show: true });
-        saveDatabaseForContext(context, database);
-        rerenderCalendarContext(context);
-        options.onChange?.();
-        closeIconMenus();
+      appendMenuButton(submenuEl, "Choose icon…", () => {
+        window.openIconPicker({
+          title: "Property icon", value: getPropertyIcon(property),
+          onSave: nextIcon => {
+            setPropertyIcon(database, propertyId, nextIcon, { show: !!nextIcon });
+            saveDatabaseForContext(context, database);
+            rerenderCalendarContext(context);
+            options.onChange?.();
+            closeIconMenus();
+          }
+        });
       });
       appendMenuDivider(submenuEl);
       PROPERTY_ICON_PRESETS.forEach((entry) => {
@@ -8818,6 +8909,15 @@
     const property = getPropertyById(database, propertyId);
     if (!property) return;
 
+    // Full-page tables may be fitted narrower than their stored/default widths.
+    // Keep the visible sizes so dragging does not jump or resize other columns.
+    if (context.kind === "page") {
+      context.surfaceEl?.querySelectorAll(".page-database-col-head-wrap[data-db-header-prop-id]").forEach((headerEl) => {
+        const width = headerEl.getBoundingClientRect().width;
+        if (width > 0) setPropertyWidth(database, headerEl.dataset.dbHeaderPropId, width);
+      });
+    }
+
     activeColumnResize = {
       context,
       database,
@@ -8831,6 +8931,14 @@
   function openViewMenu(anchorEl, context, database) {
     const menuEl = mountDatabaseFloatingEl(DATABASE_MENU_ID, "topbar-dropdown page-database-floating-menu", anchorEl);
     appendMenuLabel(menuEl, "View");
+    appendMenuButton(menuEl, "Relationship tree", () => {
+      database.view = "tree"; saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context); closeDatabaseMenus();
+    }, { active: database.view === "tree" });
+    appendMenuButton(menuEl, "Timeline", () => {
+      database.view = "timeline"; saveDatabaseForContext(context, database);
+      rerenderCalendarContext(context); closeDatabaseMenus();
+    }, { active: database.view === "timeline" });
     appendMenuButton(menuEl, "Table", () => {
       database.view = "table";
       saveDatabaseForContext(context, database);
@@ -8997,6 +9105,14 @@
           rerenderCalendarContext(context);
           closeDatabaseMenus();
         }, { active: activeView === "table" });
+        appendMenuButton(submenuEl, "Relationship tree", () => {
+          database.view = "tree"; saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context); closeDatabaseMenus();
+        }, { active: activeView === "tree" });
+        appendMenuButton(submenuEl, "Timeline", () => {
+          database.view = "timeline"; saveDatabaseForContext(context, database);
+          rerenderCalendarContext(context); closeDatabaseMenus();
+        }, { active: activeView === "timeline" });
         appendMenuButton(submenuEl, "Calendar", () => {
           database.view = "calendar";
           saveDatabaseForContext(context, database);
@@ -9100,6 +9216,8 @@
   }
 
   function getDatabaseViewLabel(database) {
+    if (database.view === "tree") return "Relationship tree";
+    if (database.view === "timeline") return "Timeline";
     return database.view === "calendar"
       ? "Calendar"
       : database.view === "board"
@@ -9578,7 +9696,7 @@
               <div class="page-database-automation-title">Automations</div>
               <div class="page-database-automation-subtitle">Build rules like: when one field matches something, update one or more other fields on the same row.</div>
             </div>
-            <button type="button" class="page-database-automation-icon-btn" data-status-automation-action="close" aria-label="Close">&times;</button>
+            <button type="button" class="page-database-automation-icon-btn" data-status-automation-action="close" aria-label="Close">${getUIIcon("x")}</button>
           </header>
           <div class="page-database-automation-body">
             <details class="page-database-automation-ai">
@@ -9630,7 +9748,7 @@
                         <select data-status-automation-input="action-property-${actionIndex}">${targetFieldOptionsHTML(action.propertyId)}</select>
                         <span>to</span>
                         ${actionValueControlHTML(action.propertyId, action.value || "", actionIndex)}
-                        <button type="button" class="page-database-automation-mini-btn" data-status-automation-action="delete-action" data-index="${index}" data-action-index="${actionIndex}" aria-label="Delete action">&times;</button>
+                        <button type="button" class="page-database-automation-mini-btn" data-status-automation-action="delete-action" data-index="${index}" data-action-index="${actionIndex}" aria-label="Delete action">${getUIIcon("x")}</button>
                       </div>
                     `).join("")}
                   </div>
@@ -10131,7 +10249,7 @@
         </button>
         <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="status-option-name" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}" />
         <span class="page-database-status-default-badge${defaultLabel ? " is-active" : ""}">${defaultLabel}</span>
-        <button type="button" class="page-database-status-inline-btn" data-db-action="open-status-color-menu" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}" aria-label="Choose status color">›</button>
+        <button type="button" class="page-database-status-inline-btn" data-db-action="open-status-color-menu" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}" aria-label="Choose status color">${getUIIcon("chevron-right")}</button>
         <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-status-option" data-status-group-index="${groupIndex}" data-status-option-index="${optionIndex}">×</button>
       </div>
     `;
@@ -10179,7 +10297,7 @@
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10220,7 +10338,7 @@
         <span class="page-database-status-chip-btn page-database-select-chip-preview">${buildValuePillHTML({ type: "select", selectOptions: [option] }, option.name)}</span>
         <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="select-option-name" data-select-option-index="${optionIndex}" />
         <span class="page-database-status-default-badge"></span>
-        <button type="button" class="page-database-status-inline-btn" data-db-action="open-select-color-menu" data-select-option-index="${optionIndex}" aria-label="Choose select color">›</button>
+        <button type="button" class="page-database-status-inline-btn" data-db-action="open-select-color-menu" data-select-option-index="${optionIndex}" aria-label="Choose select color">${getUIIcon("chevron-right")}</button>
         <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-select-option" data-select-option-index="${optionIndex}">×</button>
       </div>
     `;
@@ -10234,7 +10352,7 @@
         <input class="page-database-status-option-input" type="text" value="${escapeHTML(option.name)}" data-db-action="tag-option-name" data-tag-option-index="${optionIndex}" />
         <span class="page-database-status-default-badge"></span>
         <button type="button" class="page-database-status-inline-btn" data-db-action="open-tag-color-menu" data-tag-option-index="${optionIndex}" aria-label="Choose tag color">&rsaquo;</button>
-        <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-tag-option" data-tag-option-index="${optionIndex}">&times;</button>
+        <button type="button" class="page-database-status-inline-btn danger" data-db-action="delete-tag-option" data-tag-option-index="${optionIndex}" aria-label="Close">${getUIIcon("x")}</button>
       </div>
     `;
   }
@@ -10248,11 +10366,11 @@
         <div class="page-database-property-panel-header">
           <button type="button" class="page-database-property-panel-back" data-db-action="close-property-panel">&larr;</button>
           <div class="page-database-property-panel-title">Edit property</div>
-          <button type="button" class="page-database-property-panel-close" data-db-action="close-property-panel">&times;</button>
+          <button type="button" class="page-database-property-panel-close" data-db-action="close-property-panel" aria-label="Close">${getUIIcon("x")}</button>
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10305,7 +10423,7 @@
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10356,7 +10474,7 @@
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10408,7 +10526,7 @@
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10501,7 +10619,7 @@
         </div>
         <div class="page-database-property-panel-body">
           <div class="page-database-property-name-row">
-            <span class="page-database-menu-head-icon">${getPropertyIcon(property)}</span>
+            ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
             <input class="page-database-property-panel-name" type="text" value="${escapeHTML(property.name)}" data-db-action="property-panel-name" />
           </div>
           <button type="button" class="page-database-property-panel-item" data-db-action="open-property-type-menu" data-prop-id="${escapeHTML(property.id)}">
@@ -10654,7 +10772,7 @@
     const menuEl = mountDatabaseFloatingEl(DATABASE_MENU_ID, "page-database-property-menu topbar-dropdown", anchorEl);
     menuEl.innerHTML = `
       <div class="page-database-menu-head">
-        <span class="page-database-menu-head-icon">${escapeHTML(getPropertyIcon(property))}</span>
+        ${buildPropertyIconHTML(property, "page-database-menu-head-icon")}
         <input class="page-database-menu-name-input" type="text" value="${escapeHTML(property.name)}" />
       </div>
       <div class="page-database-menu-section" data-db-menu-section="actions"></div>
@@ -10703,9 +10821,10 @@
       const titleConfig = normalizeTitleConfig(property.titleConfig || {});
       const automaticSource = getPropertyById(database, titleConfig.sourcePropertyId);
       const dateProperties = database.properties.filter((entry) => entry.type === "date");
+      const relationProperties = database.properties.filter((entry) => entry.type === "relation");
       appendMenuSubmenuButton(
         actionsEl,
-        `Automatic name: ${automaticSource?.type === "date" ? automaticSource.name : "Off"}`,
+        `Automatic name: ${["date", "relation"].includes(automaticSource?.type) ? automaticSource.name : "Off"}`,
         (buttonEl) => {
           openPropertySubmenu(buttonEl, "Automatic name", (submenuEl) => {
             appendMenuButton(submenuEl, "Off", () => {
@@ -10713,7 +10832,7 @@
               commit();
             }, { active: !automaticSource });
 
-            if (dateProperties.length) appendMenuDivider(submenuEl);
+            if (dateProperties.length || relationProperties.length) appendMenuDivider(submenuEl);
             dateProperties.forEach((dateProperty) => {
               appendMenuButton(submenuEl, `Use ${dateProperty.name}`, () => {
                 property.titleConfig = normalizeTitleConfig({
@@ -10725,12 +10844,23 @@
               }, { active: automaticSource?.id === dateProperty.id });
             });
 
-            if (!dateProperties.length) {
-              appendMenuLabel(submenuEl, "Add a Date property first");
+            relationProperties.forEach((relationProperty) => {
+              appendMenuButton(submenuEl, `Use ${relationProperty.name}`, () => {
+                property.titleConfig = normalizeTitleConfig({
+                  ...titleConfig,
+                  sourcePropertyId: relationProperty.id
+                });
+                applyAutomaticTitles(database);
+                commit();
+              }, { active: automaticSource?.id === relationProperty.id });
+            });
+
+            if (!dateProperties.length && !relationProperties.length) {
+              appendMenuLabel(submenuEl, "Add a Date or Link property first");
             }
           });
         },
-        { active: automaticSource?.type === "date" }
+        { active: ["date", "relation"].includes(automaticSource?.type) }
       );
 
       if (automaticSource?.type === "date") {
@@ -10764,11 +10894,13 @@
                 commit();
               }, { active: titleConfig.syncMode !== "sync" });
               appendMenuButton(submenuEl, "Keep synced to date", () => {
-                const wouldReplaceNames = database.rows.some((row) => {
+                // A row with no date generates nothing and keeps the name it
+                // already has, so it is not what this warning is about.
+                const wouldReplaceNames = withAutomaticTitleLinkCache(() => database.rows.some((row) => {
                   const currentTitle = String(getRowValue(row, property.id) || "").trim();
                   const generatedTitle = getAutomaticTitleValue(database, row);
-                  return currentTitle && currentTitle !== generatedTitle;
-                });
+                  return currentTitle && generatedTitle && currentTitle !== generatedTitle;
+                }));
                 if (wouldReplaceNames && !window.confirm("Keep every row name synced to its date?\n\nExisting names will be replaced by their generated date names.")) {
                   return;
                 }
@@ -10782,6 +10914,40 @@
 
         appendMenuButton(actionsEl, `Prefix: ${titleConfig.prefix || "None"}`, () => {
           const nextPrefix = window.prompt("Text to place before every generated date name", titleConfig.prefix || "");
+          if (nextPrefix === null) return;
+          property.titleConfig = normalizeTitleConfig({ ...titleConfig, prefix: nextPrefix });
+          applyAutomaticTitles(database, { force: titleConfig.syncMode === "sync" });
+          commit();
+        }, { active: !!titleConfig.prefix });
+      } else if (automaticSource?.type === "relation") {
+        appendMenuSubmenuButton(
+          actionsEl,
+          `Updates: ${titleConfig.syncMode === "sync" ? "Keep synced" : "Fill blank names"}`,
+          (buttonEl) => {
+            openPropertySubmenu(buttonEl, "Name updates", (submenuEl) => {
+              appendMenuButton(submenuEl, "Fill blank names only", () => {
+                property.titleConfig = normalizeTitleConfig({ ...titleConfig, syncMode: "fill-empty" });
+                applyAutomaticTitles(database);
+                commit();
+              }, { active: titleConfig.syncMode !== "sync" });
+              appendMenuButton(submenuEl, "Keep synced to link", () => {
+                // A row with no link generates nothing and keeps the name it
+                // already has, so it is not what this warning is about.
+                const wouldReplaceNames = withAutomaticTitleLinkCache(() => database.rows.some((row) => {
+                  const currentTitle = String(getRowValue(row, property.id) || "").trim();
+                  const generatedTitle = getAutomaticTitleValue(database, row);
+                  return currentTitle && generatedTitle && currentTitle !== generatedTitle;
+                }));
+                if (wouldReplaceNames && !window.confirm("Keep every row name synced to its linked item?\n\nExisting names will be replaced by the linked row name.")) return;
+                property.titleConfig = normalizeTitleConfig({ ...titleConfig, syncMode: "sync" });
+                applyAutomaticTitles(database, { force: true });
+                commit();
+              }, { active: titleConfig.syncMode === "sync" });
+            });
+          }
+        );
+        appendMenuButton(actionsEl, `Prefix: ${titleConfig.prefix || "None"}`, () => {
+          const nextPrefix = window.prompt("Text to place before every generated linked name", titleConfig.prefix || "");
           if (nextPrefix === null) return;
           property.titleConfig = normalizeTitleConfig({ ...titleConfig, prefix: nextPrefix });
           applyAutomaticTitles(database, { force: titleConfig.syncMode === "sync" });
@@ -11073,6 +11239,8 @@
   }
 
   function renderPageEditorSurface(surfaceEl, database) {
+    surfaceEl.classList.toggle("has-tree", database.view === "tree");
+    surfaceEl.classList.toggle("has-timeline", database.view === "timeline");
     const pageIconBtn = surfaceEl.querySelector(".page-database-page-icon-btn");
     const pageTitleEl = surfaceEl.querySelector(".page-database-page-title");
     const viewPillEl = surfaceEl.querySelector(".page-database-view-pill");
@@ -11097,6 +11265,8 @@
         fitWidth: database.view === "table",
         availableWidth
       });
+      if (database.view === "tree") mountTreeSurface(surfaceEl, database);
+      if (database.view === "timeline") mountTimelineSurface(surfaceEl, database);
     }
     autoGrowDatabaseTextareas(surfaceEl);
     applyFrozenColumns(surfaceEl, database);
@@ -11109,6 +11279,8 @@
   }
 
   function renderBlockViewSurface(surfaceEl, database) {
+    surfaceEl.classList.toggle("has-tree", database.view === "tree");
+    surfaceEl.classList.toggle("has-timeline", database.view === "timeline");
     const blockShell = surfaceEl.querySelector(".page-database-block-shell");
     const pageMenuBtn = surfaceEl.querySelector(".page-database-block-page-menu");
     const titleEl = surfaceEl.querySelector(".page-database-block-title");
@@ -11116,6 +11288,7 @@
     const settingsButton = surfaceEl.querySelector('[data-db-action="open-database-settings-menu"]');
     const collapseButton = surfaceEl.querySelector(".page-database-block-collapse-btn");
     const toolbarActionsEl = surfaceEl.querySelector(".page-database-block-toolbar-actions");
+    toolbarActionsEl?.querySelector('.tl-inline-actions')?.remove();
     const filterButton = surfaceEl.querySelector('[data-db-action="open-filter-menu"]');
     const sortButton = surfaceEl.querySelector('[data-db-action="open-sort-menu"]');
     const groupButton = surfaceEl.querySelector('[data-db-action="open-group-menu"]');
@@ -11148,7 +11321,7 @@
 
     if (collapseButton) {
       collapseButton.hidden = !source;
-      collapseButton.textContent = collapsed ? "▸" : "▾";
+      collapseButton.innerHTML = getUIIcon(collapsed ? "chevron-right" : "chevron-down");
       collapseButton.setAttribute("aria-label", collapsed ? "Show database controls" : "Hide database controls");
     }
 
@@ -11164,7 +11337,7 @@
     if (sortButton) sortButton.classList.toggle("active", Array.isArray(database.sorts) && database.sorts.length > 0);
     if (groupButton) groupButton.classList.toggle("active", !!database.groupBy);
     if (folderButton) {
-      folderButton.textContent = folderAction.label;
+      folderButton.innerHTML = getUIIcon("folder-input") + `<span>${escapeHTML(folderAction.label)}</span>`;
       folderButton.dataset.dbAction = folderAction.action;
       folderButton.classList.toggle("active", folderAction.active);
       folderButton.disabled = !source || folderAction.disabled;
@@ -11174,7 +11347,7 @@
       if (button) button.disabled = !source;
     });
     if (newButton) {
-      newButton.hidden = isFolderDatabase(database);
+      newButton.hidden = isFolderDatabase(database) || activeView === 'timeline';
       newButton.disabled = !source || isFolderDatabase(database);
     }
 
@@ -11195,7 +11368,7 @@
         return;
       }
 
-      contentEl.innerHTML = activeView === "calendar"
+      contentEl.innerHTML = activeView === "tree" ? '<div class="sanctum-tree-mount"></div>' : activeView === "timeline" ? '<div class="sanctum-timeline-mount"></div>' : activeView === "calendar"
         ? buildPageCalendarShellHTML({ ...database, view: "calendar" })
         : activeView === "board"
           ? buildBoardViewHTML({ ...database, view: "board" }).bodyHTML
@@ -11212,6 +11385,8 @@
       contentEl.classList.toggle("gallery-mode", activeView === "gallery");
       contentEl.classList.toggle("checklist-mode", activeView === "checklist");
       contentEl.classList.toggle("table-mode", activeView === "table");
+      if (activeView === "tree") mountTreeSurface(surfaceEl, database);
+      if (activeView === "timeline") mountTimelineSurface(surfaceEl, database);
 
       const blockScroll = surfaceEl.querySelector(".page-database-block-scroll");
       if (blockShell && blockScroll) {
@@ -11329,6 +11504,8 @@
   }
 
   function getViewPillLabel(database) {
+    if (database.view === "tree") return "Relationship tree";
+    if (database.view === "timeline") return "Timeline";
     return database.view === "calendar"
       ? "🗓 Calendar"
       : database.view === "board"
@@ -11365,12 +11542,12 @@
             <div class="page-database-toolbar-row">
               <button type="button" class="page-database-view-pill" data-db-action="open-view-menu">${escapeHTML(getViewPillLabel(database))}</button>
               <button type="button" class="page-database-settings-btn" data-db-action="open-database-settings-menu" aria-haspopup="menu" aria-label="Open database settings">
-                <span class="page-database-settings-btn-icon" aria-hidden="true">⚙</span>
+                ${getUIIcon("settings-2")}
               </button>
               <div class="page-database-toolbar-actions">
-                <button type="button" class="page-database-toolbar-btn${hasFilters ? " active" : ""}" data-db-action="open-filter-menu">Filter</button>
-                <button type="button" class="page-database-toolbar-btn${hasSorts ? " active" : ""}" data-db-action="open-sort-menu">Sort</button>
-                <button type="button" class="page-database-toolbar-btn${hasGrouping ? " active" : ""}" data-db-action="open-group-menu">Group</button>
+                <button type="button" class="page-database-toolbar-btn${hasFilters ? " active" : ""}" data-db-action="open-filter-menu">${getUIIcon('filter')}<span>Filter</span></button>
+                <button type="button" class="page-database-toolbar-btn${hasSorts ? " active" : ""}" data-db-action="open-sort-menu">${getUIIcon('arrow-up-down')}<span>Sort</span></button>
+                <button type="button" class="page-database-toolbar-btn${hasGrouping ? " active" : ""}" data-db-action="open-group-menu">${getUIIcon('layers')}<span>Group</span></button>
                 <button type="button" class="page-database-toolbar-btn${folderAction.active ? " active" : ""}" data-db-action="${escapeHTML(folderAction.action)}"${folderAction.disabled ? " disabled" : ""}>${escapeHTML(folderAction.label)}</button>
                 ${folderMode ? "" : `<button type="button" class="page-database-toolbar-new-btn" data-db-action="add-row">New</button>`}
               </div>
@@ -12687,7 +12864,248 @@
     });
   };
 
+  function mountTreeSurface(surfaceEl, database) {
+    const host = surfaceEl.querySelector('.sanctum-tree-mount'), context = getCalendarContext(surfaceEl);
+    if (!host || !context || !window.SanctumTreeUI) return;
+    const source = context.kind === 'page' ? {kind:'page',pageId:context.pageId}
+      : getEmbedSourceTarget(surfaceEl) || {kind:'block',pageId:context.pageId || getCurrentPageId(),blockId:surfaceEl.id};
+    window.SanctumTreeUI.mount(host, {database, rows:getVisibleRows(database), source, fullPage:context.kind === 'page',
+      viewKey:context.kind === 'page' ? `page:${context.pageId}` : `block:${context.pageId || getCurrentPageId()}:${surfaceEl.id}`,
+      readOnly:isFolderDatabase(database)});
+  }
+  function treeRow(pageId) {
+    const page = getCurrentPageRecord(pageId), ref = page?.databaseRowRef;
+    if (!ref) return null;
+    const source = {kind:ref.sourceKind === 'block' ? 'block' : 'page',pageId:ref.sourcePageId,blockId:ref.sourceBlockId || ''};
+    const db = getDatabaseFromSource(source), row = db && getRowById(db,ref.rowId);
+    return row && !row.archived ? {source,db,row,page} : null;
+  }
+  function saveTreeDatabase(source, db) {
+    const {context} = getButtonDatabaseContext(source);
+    syncDatabaseRowPages(context,db);
+    if (source.kind === 'block' && context.blockEl) {
+      saveDatabaseForContext(context,db);
+      emitDatabaseSourceUpdated(source);
+    } else if (!saveDatabaseToSource(source,db)) throw new Error('Could not save these changes.');
+    rerenderDatabaseSourceIfVisible(source);
+  }
+  window.SanctumTreeDatabase = {
+    create(pageId,title) {
+      const source = {kind:'page',pageId};
+      savePageDatabase(pageId,normalizeDatabase({title,view:'tree',properties:[
+        {id:'name',name:'Name',type:'title'},
+        {id:'parents',name:'Parents',type:'relation',treeKind:'parent',relationTarget:source},
+        {id:'partners',name:'Partners',type:'relation',treeKind:'partner',relationTarget:source},
+        {id:'born',name:'Born',type:'text'}, {id:'died',name:'Died',type:'text'}
+      ],rows:[]}));
+    },
+    person(pageId) {
+      const record=treeRow(pageId); if(!record)return null;
+      const {db,row}=record;
+      const field=names=>db.properties.find(p=>names.includes(String(p.name||'').toLowerCase()) && ['text','date','url'].includes(p.type));
+      const image=field(['portrait','image','photo']),born=field(['born','birth','birth date']),died=field(['died','death','death date']);
+      return {...record,title:getRowTitle(db,row),image:row.values[image?.id] || getBoardCardPreviewSource(row),born:row.values[born?.id] || '',died:row.values[died?.id] || '',fields:{image,born,died},readOnly:isFolderDatabase(db)};
+    },
+    edges(pages) {
+      const result=[], sources=new Map(), M=window.SanctumTreeData;
+      for(const page of pages) {
+        const ref=page.databaseRowRef;if(!ref)continue;
+        const source={kind:ref.sourceKind === 'block'?'block':'page',pageId:ref.sourcePageId,blockId:ref.sourceBlockId||''};
+        sources.set(getDatabaseSourceKey(source),source);
+      }
+      for(const source of sources.values()) {
+        const db=getDatabaseFromSource(source);if(!db)continue;
+        for(const property of db.properties.filter(p=>p.type==='relation')) {
+          const target=getRelationSource(property);if(!target)continue;
+          const targetDb=getDatabaseFromSource(target);if(!targetDb)continue;
+          for(const row of db.rows.filter(r=>r.pageId&&!r.archived)) for(const id of parseRelationValues(row.values[property.id])) {
+            const targetRow=getRowById(targetDb,id);if(!targetRow?.pageId||targetRow.archived)continue;
+            result.push(M.edge(row.pageId,targetRow.pageId,property,{kind:'database',source, rowId:row.id,propertyId:property.id,target:id,readOnly:isFolderDatabase(db)||property.readOnly}));
+          }
+        }
+      }
+      return result;
+    },
+    savePerson(pageId, patch) {
+      const current=this.person(pageId);if(!current){if(getCurrentPageRecord(pageId)?.databaseRowRef)throw new Error('This database entry is no longer available.');return false;}
+      const {db,row,source}=current;if(current.readOnly)throw new Error('Edit this person in the source folder.');
+      if(patch.title!==undefined)row.values[db.properties.find(p=>p.type==='title').id]=String(patch.title).trim();
+      for(const role of ['image','born','died']) {
+        if(patch[role]===undefined)continue;
+        let field=current.fields[role];
+        if(role==='image'&&!field) {row.icon=patch.image;continue;}
+        if(!field){if(!patch[role])continue;field=normalizeProperty({id:createId('prop'),name:role==='born'?'Born':'Died',type:'text'});db.properties.push(field);}
+        if(field.readOnly)throw new Error('This field is read only.');
+        if(field.type==='date'&&patch[role]&&!/^\d{4}-\d{2}-\d{2}$/.test(patch[role]))throw new Error('This database uses a Date field. Enter YYYY-MM-DD, or change that field to text for fictional dates.');
+        row.values[field.id]=normalizeCellValue(field,patch[role]);
+      }
+      row.updatedAt=new Date().toISOString();saveTreeDatabase(source,db);
+      if(patch.title!==undefined)syncDatabaseRowPageTitleFromRow(pageId,row,db);
+      return true;
+    },
+    connect(from,to,kind,label) {
+      const a=treeRow(from),b=treeRow(to);
+      if((!a&&getCurrentPageRecord(from)?.databaseRowRef)||(!b&&getCurrentPageRecord(to)?.databaseRowRef))throw new Error('A database entry is no longer available.');
+      if(!a||!b)return false;
+      if(isFolderDatabase(a.db))throw new Error('Edit this relationship in its source folder.');
+      const M=window.SanctumTreeData;
+      let property=a.db.properties.find(p=>p.type==='relation' && M.classify(p).kind===(M.TYPES[kind]?kind:`custom:${label.trim().toLowerCase()}`) && !M.classify(p).reverse && getDatabaseSourceKey(p.relationTarget)===getDatabaseSourceKey(b.source));
+      if(property?.readOnly)throw new Error('This relationship field is read only.');
+      if(!property) {property=normalizeProperty({id:createId('prop'),name:M.TYPES[kind]?.label||label,type:'relation',treeKind:kind,treeLabel:label,relationTarget:b.source});a.db.properties.push(property);}
+      const old=a.row.values[property.id], value=serializeRelationValue([...parseRelationValues(old),b.row.id]);
+      a.row.values[property.id]=value;syncRelationBacklinks(a.source,a.db,a.row.id,property,old,value);
+      a.row.updatedAt=new Date().toISOString();saveTreeDatabase(a.source,a.db);return true;
+    },
+    unlink(ref) {
+      const db=getDatabaseFromSource(ref.source),row=db&&getRowById(db,ref.rowId),property=db&&getPropertyById(db,ref.propertyId);
+      if(!row||!property)return;
+      if(isFolderDatabase(db)||property.readOnly)throw new Error('This relationship is read only.');
+      const old=row.values[property.id],value=serializeRelationValue(parseRelationValues(old).filter(id=>id!==ref.target));
+      row.values[property.id]=value;syncRelationBacklinks(ref.source,db,row.id,property,old,value);saveTreeDatabase(ref.source,db);
+    }
+  };
+
+  function mountTimelineSurface(surfaceEl, database) {
+    const host = surfaceEl.querySelector('.sanctum-timeline-mount');
+    const context = getCalendarContext(surfaceEl);
+    if (!host || !context || !window.SanctumTimelineUI) return;
+    const source = context.kind === 'page' ? { kind: 'page', pageId: context.pageId }
+      : getEmbedSourceTarget(surfaceEl) || { kind: 'block', pageId: context.pageId || getCurrentPageId(), blockId: surfaceEl.id };
+    window.SanctumTimelineUI.mount(host, { database, rows: getVisibleRows(database), source,
+      fullPage: context.kind === 'page',
+      actionsHost: context.kind === 'page' ? null : surfaceEl.querySelector('.page-database-block-toolbar-actions'),
+      onResize: context.kind === 'page' ? undefined : () => syncInlineDatabaseBlockSize(surfaceEl),
+      viewKey: context.kind === 'page' ? `page:${context.pageId}` : `block:${context.pageId || getCurrentPageId()}:${surfaceEl.id}`,
+      readOnly: isFolderDatabase(database) });
+  }
+
+  // Timeline edits always resolve the current source, never a cached filtered view.
+  window.SanctumTimelineDatabase = {
+    get(source) {
+      if (!getCurrentPageRecord(source?.pageId)) return null;
+      return getDatabaseFromSource(source);
+    },
+    visibleRows: getVisibleRows,
+    sources: getDatabaseCalloutSources,
+    create(pageId, title) {
+      savePageDatabase(pageId, normalizeDatabase({ title, view: 'timeline', properties: [
+        { id: 'name', name: 'Event', type: 'title' },
+        { id: 'when', name: 'When', type: 'text' },
+        { id: 'until', name: 'Until', type: 'text' },
+        { id: 'details', name: 'Details', type: 'text' },
+        { id: 'track', name: 'Track', type: 'text' },
+        { id: 'image', name: 'Image', type: 'text' }
+      ], rows: [] }));
+    },
+    addFields(source, fields) {
+      const db = this.get(source);
+      if (!db || isFolderDatabase(db)) throw new Error('This source cannot be edited.');
+      fields.forEach(field => {
+        if (!db.properties.some(p => p.id === field.id)) db.properties.push(normalizeProperty(field, db.properties.length));
+      });
+      const { context } = getButtonDatabaseContext(source);
+      if (source.kind === 'block' && context.blockEl) saveDatabaseForContext(context, db);
+      else if (!saveDatabaseToSource(source, db)) throw new Error('Could not save timeline fields.');
+      rerenderDatabaseSourceIfVisible(source);
+      return this.get(source);
+    },
+    saveEvent(source, rowId, patch, options = {}) {
+      const db = this.get(source);
+      if (!db || isFolderDatabase(db)) throw new Error('This source cannot be edited.');
+      let row = rowId ? getRowById(db, rowId) : null;
+      if (rowId && (!row || row.archived)) throw new Error('This event is no longer available.');
+      if (!row) row = addRowToDatabase(db, {});
+      Object.entries(patch).forEach(([id, value]) => {
+        const property = getPropertyById(db, id);
+        if (!property || ['formula', 'summary', 'rollup', 'created', 'edited'].includes(property.type) || isTimestampProperty(property)) return;
+        row.values[id] = normalizeCellValue(property, value);
+      });
+      if (options.color !== undefined) row.color = normalizeRowColor(options.color);
+      if (options.archived) { row.archived = true; row.archivedAt = new Date().toISOString(); }
+      row.updatedAt = new Date().toISOString();
+      applyStatusAutomation(db, row);
+      const { context } = getButtonDatabaseContext(source);
+      syncDatabaseRowPageForRow(context, db, row.id);
+      if (source.kind === 'block' && context.blockEl) {
+        saveDatabaseForContext(context, db); rerenderCalendarContext(context);
+      } else {
+        if (!saveDatabaseToSource(source, db)) throw new Error('Could not save this event.');
+        rerenderDatabaseSourceIfVisible(source);
+      }
+      return { ...row };
+    },
+    refresh(host) {
+      const surface = host.closest('.calendar-db-surface, .block[data-type="calendar"]');
+      const context = surface && getCalendarContext(surface);
+      if (context) rerenderCalendarContext(context);
+    },
+    openEvent(source, rowId) {
+      const db = this.get(source), row = db && getRowById(db, rowId);
+      if (row?.pageId) window.openPage?.(row.pageId);
+    }
+  };
+
   window.renderPageCalendarDatabase = renderPageCalendarDatabase;
+  // Narrow native database access for the optional ChatGPT connection. The
+  // planner validates requests before any of these write methods are called.
+  window.SanctumChatGPTDatabaseNative = {
+    normalize: database => normalizeDatabase(database, { defaultView: "table" }),
+    save(source, database) {
+      const saved = saveDatabaseToSource(source, database);
+      if (saved) rerenderDatabaseSourceIfVisible(source);
+      return saved;
+    },
+    validateCell(property, value) {
+      if (value == null || value === '') return '';
+      if (property.type === 'date' && !resolveDateCellValue(value).start) return 'Invalid date for ' + property.name + '.';
+      if (property.type === 'number') {
+        const config = getNumberConfig(property), numeric = Number(String(value).replace(/,/g, ''));
+        if (config.format === 'range' && (numeric < config.rangeMin || numeric > config.rangeMax)) return property.name + ' is outside its configured range.';
+      }
+      if (property.type === 'checkbox' && ![true,false,0,1,'','true','false','0','1','on'].includes(value)) return 'Invalid checkbox value for ' + property.name + '.';
+      return '';
+    },
+    validateFormula(database, expression) {
+      const validation = validateAdvancedFormulaExpression(expression);
+      if (!validation.ok) return validation.reason;
+      const withoutStrings = expression.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
+      for (const match of withoutStrings.matchAll(/\[([^\]]+)\]/g)) {
+        if (!resolveFormulaFieldProperty(database, match[1])) return `Unknown formula field: ${match[1]}`;
+      }
+      const identifiers = withoutStrings.replace(/\[[^\]]+\]/g, '0').replace(/\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b/gi, '0');
+      const allowed = new Set(['sum','average','count','percent','daysUntil','compare','checked','allChecked','if','and','or','not','round','abs','min','max','concat','empty','contains','true','false','null']);
+      for (const name of identifiers.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) || []) {
+        if (!allowed.has(name)) return 'Unsupported formula identifier: ' + name;
+      }
+      const prepared = expression.replace(/\[([^\]]+)\]/g, '0').replace(/\bif\s*\(/gi, 'ifFn(').replace(/\band\s*\(/gi, 'andFn(').replace(/\bor\s*\(/gi, 'orFn(').replace(/\bnot\s*\(/gi, 'notFn(');
+      try { new Function('return (' + prepared + ')'); } catch { return 'Formula syntax is invalid.'; }
+      return "";
+    },
+    capabilities() {
+      return {
+        propertyTypes: ["title", ...PROPERTY_TYPES.map(item => item.value)],
+        propertyKeys: ["id", "name", "type", "icon", "showIcon", "hidden", "headerColor", "defaultToday", "numberConfig", "titleConfig", "statusGroups", "tagOptions", "selectOptions", "relationTarget", "summaryConfig", "formulaConfig"],
+        views: ["table", "board", "gallery", "calendar", "checklist", "timeline", "tree"],
+        optionColors: TAG_COLOR_OPTIONS.map(item => item.value),
+        statusColors: STATUS_COLOR_OPTIONS.map(item => item.value),
+        headerColors: Object.keys(ROW_COLOR_VALUES), rowColors: Object.keys(ROW_COLOR_VALUES),
+        summaryModes: SUMMARY_TYPE_OPTIONS.map(item => item.value),
+        formulaTypes: FORMULA_SIMPLE_OPTIONS.map(item => item.value),
+        formulaKeys: Object.keys(normalizeFormulaConfig({})),
+        columnMinimums: Object.fromEntries(["title", ...PROPERTY_TYPES.map(item => item.value)].map(type => [type, getManualPropertyMinWidth({ type })])),
+        formulaExamples: FORMULA_ADVANCED_FUNCTIONS.map(item => item.token),
+        filterModes: ["equals", "contains", "empty"],
+        examples: {
+          select: { id: "category", name: "Category", type: "select", selectOptions: [{ name: "Personal", color: "sage-green" }] },
+          relation: { id: "purchases", name: "Purchases", type: "relation", relationTarget: { kind: "page", pageId: "EXACT_DATABASE_PAGE_ID", blockId: "" } },
+          rollup: { id: "total", name: "Total", type: "summary", summaryConfig: { relationPropertyId: "purchases", mode: "sum", targetPropertyId: "cost" } },
+          formula: { id: "remaining", name: "Remaining", type: "formula", formulaConfig: { mode: "simple", simpleType: "subtract", leftPropertyId: "budget", rightPropertyId: "total" } }
+        },
+        notes: ["rollup maps to Sanctum's native Summary property.", "Properties, rows and views are patched by stable ID; omissions are preserved.", "To add a reverse connection, explicitly add a Link pointing back in the other database. Existing reverse Links synchronize automatically.", "Date strings use YYYY-MM-DD; use native date objects for ranges and time.", "A create target is the parent page; an update target is the database page or an exact local database block.", "Linked views are independent blocks on board pages, rather than tabs on the database page."],
+        limitations: ["Reusable row templates, non-Document row page creation, separate linked-view column widths and database page renaming are not supported by this first plugin version.", "Cross-database setups are applied one database at a time; every individual change is recoverable.", "Native Summary supports count, sum, and latest-date. Other rollup aggregations are not supported.", "No timers, reminders, daily check-ins, or permanent deletion tools.", "Sanctum must stay open and connected. One tab can be connected at a time."]
+      };
+    }
+  };
   window.syncInlineDatabaseBlockTone = syncInlineDatabaseBlockTone;
   window.applySelectedInlineDatabaseRowColor = applySelectedInlineDatabaseRowColor;
   window.getSelectedInlineDatabaseRowColor = getSelectedInlineDatabaseRowColor;

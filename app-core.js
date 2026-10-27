@@ -63,13 +63,13 @@ function openTopbarDropdown(anchorEl, items, options = {}) {
       return;
     }
 
-    const btn = document.createElement("div");
+    const btn = document.createElement("button");
+    btn.type = "button";
     const hasChildren = Array.isArray(item.children) && item.children.length;
     const nextPath = item.key ? [...parentPath, item.key] : parentPath;
     btn.className = `topbar-dropdown-btn${item.danger ? " danger" : ""}${hasChildren ? " has-submenu" : ""}`;
-    btn.innerHTML = hasChildren
-      ? `<span>${escapeHTML(item.label || "")}</span><span class="topbar-dropdown-submenu-arrow">&lsaquo;</span>`
-      : escapeHTML(item.label || "");
+    btn.innerHTML = `${item.icon ? `<span class="topbar-dropdown-icon">${getUIIcon(item.icon)}</span>` : ''}<span class="topbar-dropdown-text">${escapeHTML(item.label || "")}</span>${hasChildren ? `<span class="topbar-dropdown-submenu-arrow">${getUIIcon('chevron-left')}</span>` : ''}`;
+    if (hasChildren) btn.setAttribute('aria-haspopup', 'true');
     if (item.key) btn.dataset.menuPath = nextPath.join("/");
     if (item.active) btn.classList.add("active");
     if (item.fontFamily) btn.style.fontFamily = item.fontFamily;
@@ -164,6 +164,7 @@ function openPageDetails(pageId) {
   }
   document.getElementById("pageDetailsName").value = page.title || "";
   document.getElementById("pageDetailsLayout").value = page.layout || "board-canvas";
+  window.SanctumCustomTypesUI?.populate(document.getElementById("pageDetailsCategory"), page.category || "none");
   document.getElementById("pageDetailsCategory").value = page.category || "none";
   document.getElementById("pageDetailsSummary").value = page.summary || "";
   const scopeBoundaryInput = document.getElementById("pageDetailsScopeBoundary");
@@ -261,6 +262,7 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
 
   const isDomain = userDomains.some(d => d.id === editingPageId);
   const previousLayout = page.layout || "board-canvas";
+  const previousCategory = page.category || "none";
 
   const iconInput = document.getElementById("pageDetailsIcon");
   const rawIconValue = iconInput?.value.trim() || "";
@@ -272,6 +274,7 @@ document.getElementById("pageDetailsConfirm").addEventListener("click", () => {
   if (!isDomain) {
     page.layout   = document.getElementById("pageDetailsLayout").value;
     page.category = document.getElementById("pageDetailsCategory").value;
+    if (page.category !== previousCategory) window.SanctumCustomTypesUI?.applyProperties(page.id, page.category, true);
     page.summary  = document.getElementById("pageDetailsSummary").value.trim();
     page.isScopeBoundary = document.getElementById("pageDetailsScopeBoundary")?.checked === true;
     page.openBehavior = getDefaultOpenBehavior(page.category, page.containerType || "page");
@@ -403,19 +406,19 @@ function renderDocInsertPanel() {
     panel.innerHTML = `
       <div class="doc-insert-title">Insert</div>
       <button class="doc-insert-item" id="docInsertImageAction">
-        🖼 Image
+        ${getUIIcon("image")}<span>Image</span>
       </button>
       <button class="doc-insert-item" id="docInsertTableAction">
-        ⊞ Table
+        ${getUIIcon("table-2")}<span>Table</span>
       </button>
       <button class="doc-insert-item" id="docInsertDividerAction">
-        ─ Divider
+        ${getUIIcon("minus")}<span>Divider</span>
       </button>
       <button class="doc-insert-item" id="docInsertQuoteAction">
-        " Quote
+        ${getUIIcon("text-quote")}<span>Quote</span>
       </button>
       <button class="doc-insert-item" id="docInsertChecklistAction">
-        ☐ Checklist
+        ${getUIIcon("list-checks")}<span>Checklist</span>
       </button>
     `;
     toolbar.appendChild(panel);
@@ -593,17 +596,17 @@ function renderDocAnnotateDock() {
     panel.id = "docAnnotatePanelEl";
     panel.className = "dock-mode dock-mode-doc-annotate";
     panel.innerHTML = `
-      <button class="dock-btn" data-doc-ann-tool="highlight" title="Highlight">H</button>
-      <button class="dock-btn" data-doc-ann-tool="underline" title="Underline">U</button>
-      <button class="dock-btn" data-doc-ann-tool="squiggle" title="Squiggly underline">〰</button>
-      <button class="dock-btn" data-doc-ann-tool="circle" title="Circle">◯</button>
-      <button class="dock-btn" data-doc-ann-tool="bracket" title="Bracket">}</button>
-      <button class="dock-btn" data-doc-ann-tool="note" title="Sticky note">🗒</button>
+      <button class="dock-btn" data-doc-ann-tool="highlight" title="Highlight">${getUIIcon('highlighter')}</button>
+      <button class="dock-btn" data-doc-ann-tool="underline" title="Underline">${getUIIcon('underline')}</button>
+      <button class="dock-btn" data-doc-ann-tool="squiggle" title="Squiggly underline">${getUIIcon('waves')}</button>
+      <button class="dock-btn" data-doc-ann-tool="circle" title="Circle">${getUIIcon('circle')}</button>
+      <button class="dock-btn" data-doc-ann-tool="bracket" title="Bracket">${getUIIcon('brackets')}</button>
+      <button class="dock-btn" data-doc-ann-tool="note" title="Sticky note">${getUIIcon('sticky-note')}</button>
 
       <div class="dock-divider"></div>
 
-      <button class="dock-btn" id="docAnnUndoAction" title="Undo last annotation">↺</button>
-      <button class="dock-btn" id="docAnnClearAction" title="Clear section annotations">✕</button>
+      <button class="dock-btn" id="docAnnUndoAction" title="Undo last annotation">${getUIIcon('undo-2')}</button>
+      <button class="dock-btn" id="docAnnClearAction" title="Clear section annotations">${getUIIcon('x')}</button>
     `;
     dock.appendChild(panel);
 
@@ -641,7 +644,7 @@ function renderDocAnnotateDock() {
     colorsPanel.id = "docAnnotateColorsPanelEl";
     colorsPanel.className = "dock-mode dock-mode-doc-annotate-colors";
     colorsPanel.innerHTML = `
-      <button class="dock-btn" id="docAnnBackAction" title="Back to tools">←</button>
+      <button class="dock-btn" id="docAnnBackAction" title="Back to tools">${getUIIcon('arrow-left')}</button>
       <button class="dock-btn doc-ann-color" data-doc-ann-color="#ffff00" title="Yellow">●</button>
       <button class="dock-btn doc-ann-color" data-doc-ann-color="#8ec5ff" title="Blue">●</button>
       <button class="dock-btn doc-ann-color" data-doc-ann-color="#a7f3a1" title="Green">●</button>
@@ -858,7 +861,7 @@ function renderPageHero(pageId) {
   const isJournalPage = page?.layout === "journal";
 
   // hide everything on system pages
-  if (isSystem || isDatabasePage || isInfiniteCanvasPage || isJournalPage) {
+  if (isSystem || isDatabasePage || isInfiniteCanvasPage || isJournalPage || page?.layout === "map") {
     hero.style.display = "none";
     return;
   }
@@ -899,6 +902,7 @@ function renderPageHero(pageId) {
   }
 
   updateHeroPositionPreview(headerPos);
+  window.renderBannerAppearance?.(pageId, settings);
 
   // icon
   heroIcon.style.display = settings.showIcon ? "" : "none";
@@ -926,6 +930,8 @@ function renderPageHero(pageId) {
 }
 
 let iconPickerPageId = null;
+let iconPickerSaveHandler = null;
+let iconPickerOpener = null;
 
 function getPageIconPickerScale() {
   return normalizeIconImageScale((Number(document.getElementById("pageIconScale")?.value) || 100) / 100, 1);
@@ -939,12 +945,17 @@ function refreshPageIconPickerPreview(value = "", fallback = "📄", scale = get
   if (scaleControl) scaleControl.hidden = !isImageIconValue(value);
   const scaleValue = document.getElementById("pageIconScaleValue");
   if (scaleValue) scaleValue.textContent = `${Math.round(scale * 100)}%`;
+  window.syncPageIconLibrary?.();
 }
 
 function closePageIconPicker() {
   const overlay = document.getElementById("pageIconOverlay");
   overlay?.classList.remove("open");
+  if (overlay?.open) overlay.close();
   iconPickerPageId = null;
+  iconPickerSaveHandler = null;
+  if (iconPickerOpener?.isConnected) iconPickerOpener.focus();
+  iconPickerOpener = null;
 
   if (typeof setUIState === "function") {
     const state = getUIState?.();
@@ -955,7 +966,7 @@ function closePageIconPicker() {
 }
 
 function savePageIconPickerSelection() {
-  if (!iconPickerPageId) return;
+  if (!iconPickerSaveHandler) return;
 
   const input = document.getElementById("pageIconInput");
   if (!input) return;
@@ -965,28 +976,47 @@ function savePageIconPickerSelection() {
     ? ""
     : (typedValue || input.dataset.currentIcon || "");
 
-  const saved = applyPageIconEverywhere(iconPickerPageId, nextIcon, getPageIconPickerScale());
+  const saved = iconPickerSaveHandler(nextIcon, getPageIconPickerScale());
   if (saved === false) {
     alert("That icon file is too large to store here. Try a smaller image or shorter GIF.");
     return;
   }
 
-  saveCurrentPageBlocks();
   closePageIconPicker();
 }
 
 function openPageIconPicker(pageId) {
   const page = userDomains.find((d) => d.id === pageId) || userPages.find((p) => p.id === pageId);
+  if (!page) return;
+  openIconPicker({
+    value: page.icon || "", scale: page.iconScale,
+    title: "Page Icon", fallback: page.type === "domain" ? "⌂" : "📄", allowImageScale: true,
+    onSave: (value, scale) => {
+      const saved = applyPageIconEverywhere(pageId, value, scale);
+      if (saved !== false) saveCurrentPageBlocks();
+      return saved;
+    }
+  });
+  iconPickerPageId = pageId;
+}
+
+// Shared picker keeps the owning form/menu and its unsaved fields intact.
+function openIconPicker(options = {}) {
   const overlay = document.getElementById("pageIconOverlay");
   const input = document.getElementById("pageIconInput");
 
-  if (!page || !overlay || !input) return;
+  if (!overlay || !input || typeof options.onSave !== "function") return;
 
-  iconPickerPageId = pageId;
-  const fallback = page.type === "domain" ? "⌂" : "📄";
-  const currentIcon = typeof page.icon === "string" ? page.icon : "";
-  const currentScale = normalizeIconImageScale(page.iconScale, 1);
+  iconPickerOpener = document.activeElement;
+  iconPickerPageId = null;
+  iconPickerSaveHandler = options.onSave;
+  const fallback = options.fallback ?? "✦";
+  const currentIcon = typeof options.value === "string" ? options.value : "";
+  const currentScale = normalizeIconImageScale(options.scale, 1);
   const scaleInput = document.getElementById("pageIconScale");
+  overlay.querySelector('.page-icon-title').textContent = options.title || "Choose icon";
+  overlay.dataset.allowImageScale = String(options.allowImageScale === true);
+  overlay.setAttribute('aria-label', options.title === "Page Icon" ? "Choose page icon" : options.title || "Choose icon");
 
   input.dataset.currentIcon = currentIcon;
   input.dataset.clear = "false";
@@ -995,17 +1025,45 @@ function openPageIconPicker(pageId) {
   if (scaleInput) scaleInput.value = String(Math.round(currentScale * 100));
 
   refreshPageIconPickerPreview(currentIcon, fallback, currentScale);
+  window.preparePageIconLibrary?.(currentIcon);
 
-  if (typeof openOverlay === "function") {
-    openOverlay("pageIconOverlay", overlay);
-  } else {
-    overlay.classList.add("open");
-  }
+  overlay.classList.add("open");
+  if (!overlay.open) overlay.showModal();
 
   requestAnimationFrame(() => {
-    input.focus();
-    input.select();
+    if (window.focusPageIconLibrary) window.focusPageIconLibrary();
+    else { input.focus(); input.select(); }
   });
+}
+window.openIconPicker = openIconPicker;
+
+function openIconPickerForInput(input) {
+  if (!input || input.disabled) return;
+  openIconPicker({
+    value: input.value === "/remove" ? "" : input.value.trim() || input.dataset.currentIcon || "",
+    onSave: value => {
+      if (!input.isConnected) return false;
+      input.removeAttribute("maxlength");
+      input.dataset.currentIcon = value;
+      input.value = value || (input.id === "pageDetailsIcon" ? "/remove" : "");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+  });
+}
+window.openIconPickerForInput = openIconPickerForInput;
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-choose-icon-for]');
+  if (!button) return;
+  event.preventDefault(); event.stopPropagation();
+  openIconPickerForInput(document.querySelector(button.dataset.chooseIconFor));
+});
+const sharedIconDialog = document.getElementById('pageIconOverlay');
+sharedIconDialog?.addEventListener('cancel', event => { event.preventDefault(); closePageIconPicker(); });
+for (const name of ['mousedown', 'pointerdown', 'click', 'keydown']) {
+  sharedIconDialog?.addEventListener(name, event => event.stopPropagation());
 }
 
 document.getElementById("pageIconInput")?.addEventListener("input", (e) => {
@@ -1122,6 +1180,7 @@ document.querySelectorAll("[data-hero-size]").forEach((btn) => {
 
     const settings = getPageSettings(currentPageId);
     settings.headerSize = btn.dataset.heroSize || "md";
+    if (settings.bannerAppearance) settings.bannerAppearance.height = 0;
     savePageSettings(currentPageId, settings);
     renderPageHero(currentPageId);
   });
@@ -1358,7 +1417,7 @@ function updatePinBtn() {
   const btn = document.getElementById("pinCurrentBtn");
   if (!btn) return;
   const isPinned = pinnedPages.some(p => p.id === currentPageId);
-  btn.textContent = isPinned ? "📍" : "📌";
+  btn.innerHTML = getUIIcon(isPinned ? "pin-off" : "pin");
 }
 
 
@@ -1379,7 +1438,7 @@ function renderPinListView() {
   resetPinPanelHeader();
 
   if (!pinnedPages.length) {
-    content.innerHTML = `<div class="pin-empty">No pins yet. Navigate to a page and click 📌 to pin it.</div>`;
+    content.innerHTML = `<div class="pin-empty">No pins yet. Navigate to a page and use Pin to pin it.</div>`;
     return;
   }
 
@@ -1438,9 +1497,9 @@ function renderPinPageView() {
   }
   if (headerRight) {
     headerRight.innerHTML = `
-      <button class="pin-nav-btn" id="pinPrevBtn2">‹</button>
-      <button class="pin-nav-btn" id="pinNextBtn2">›</button>
-      <button class="pin-panel-close" id="pinPanelClose">✕</button>
+      <button class="pin-nav-btn" id="pinPrevBtn2" aria-label="Previous">${getUIIcon("chevron-left")}</button>
+      <button class="pin-nav-btn" id="pinNextBtn2" aria-label="Next">${getUIIcon("chevron-right")}</button>
+      <button class="pin-panel-close" id="pinPanelClose" aria-label="Close">${getUIIcon("x")}</button>
     `;
     document.getElementById("pinPrevBtn2").addEventListener("click", () => {
       if (!pinnedPages.length) return;
@@ -1624,7 +1683,7 @@ function resetPinPanelHeader() {
   const titleEl = document.getElementById("pinPanelTitle");
   const headerRight = document.getElementById("pinPanelHeaderRight");
   if (titleEl) titleEl.textContent = "Pins";
-  if (headerRight) headerRight.innerHTML = `<button class="pin-panel-close" id="pinPanelClose">✕</button>`;
+  if (headerRight) headerRight.innerHTML = `<button class="pin-panel-close" id="pinPanelClose" aria-label="Close">${getUIIcon("x")}</button>`;
   document.getElementById("pinPanelClose")?.addEventListener("click", closePinPanel);
 }
 
@@ -1714,6 +1773,8 @@ function getAllVaultPages() {
     category: page.category || "none",
     layout: page.layout || "board-canvas",
     containerType: page.containerType || "page",
+    organizationRole: page.organizationRole,
+    definesScope: page.definesScope,
     parent: page.parent || "",
     isScopeBoundary: page.isScopeBoundary,
     recordKind: typeof window.getVaultRecordKind === "function" ? window.getVaultRecordKind(page) : (page.recordKind || "record"),
@@ -1731,7 +1792,7 @@ function getCurrentVaultScopeId() {
 }
 
 function getVaultCandidateMeta(item, currentScopeId = getCurrentVaultScopeId()) {
-  const base = item.type === "domain" ? "Domain" : (item.containerType || item.category || "Page");
+  const base = window.getVaultRecordRoleLabel?.(item) || item.containerType || "Page";
   if (!currentScopeId || typeof window.isVaultRecordInScope !== "function") return base;
   if (window.isVaultRecordInScope(item, currentScopeId)) return `${base} · current area`;
 
@@ -1826,7 +1887,7 @@ function compareVaultLinkCandidatesV2(left, right, query = "", currentScopeId = 
 }
 
 function getVaultCandidateMetaV2(item, currentScopeId = getCurrentVaultScopeId()) {
-  const base = item.type === "domain" ? "Domain" : (item.containerType || item.category || "Page");
+  const base = window.getVaultRecordRoleLabel?.(item) || item.containerType || "Page";
   const pathLabel = typeof window.getVaultRecordPathLabel === "function"
     ? window.getVaultRecordPathLabel(item.id, { omitSelf: true })
     : "";
@@ -2092,6 +2153,8 @@ const PAGE_TEMPLATES = {
 };
 
 function applyPageTemplate(pageId, category, layout) {
+  if (window.SanctumCustomTypesUI?.applyStarter(pageId, category, layout)) return;
+  if (category === "character" && window.SanctumCharacterSheet?.applyStarter(pageId, layout)) return;
   const tpl = PAGE_TEMPLATES[category];
   if (!tpl) return;
 
@@ -2423,7 +2486,7 @@ function openPeek(pageId) {
     ? window.getDatabaseRowPeekData(pageId)
     : null;
   const displayTitle = rowPeekData?.title || page.title || "Untitled";
-  const displayType = rowPeekData?.typeLabel || page.category || page.layout || "page";
+  const displayType = rowPeekData?.typeLabel || (page.category && page.category !== "none" ? (window.SanctumCustomTypes?.label(page.category) || page.category) : "page");
   const displayIcon = rowPeekData ? (rowPeekData.icon || "📄") : icon;
   const rowCoverSource = rowPeekData?.coverSource || "";
   const summary = rowPeekData ? readPeekPageNotes(pageId) : (page.summary || "");
@@ -2508,6 +2571,7 @@ function openPeek(pageId) {
   `;
 
   drawer.dataset.peekPageId = pageId;
+  window.renderIncomingPageRelations?.(drawer.querySelector(".peek-scroll"), pageId);
   if (rowPeekData?.sourceKind) {
     drawer.dataset.peekDbKind = rowPeekData.sourceKind;
     drawer.dataset.peekDbPageId = rowPeekData.sourcePageId || "";
@@ -2719,6 +2783,7 @@ const PAGE_CONTENT_STORAGE_KEYS = [
   "documents",
   "docSettings",
   "journals",
+  "maps",
   "pageDatabases",
   "stickers",
   "threads",
@@ -2776,6 +2841,8 @@ function createPageContentSnapshot(pageId) {
     copiedAt: new Date().toISOString(),
     sourcePageId: pageId,
     sourceTitle: page.title || "Untitled",
+    timelineSettings: window.SanctumTimelineData?.captureSettings(readStorageJSON(STORAGE_KEYS.timelines, {}), pageId),
+    treeSettings: window.SanctumTimelineData?.captureSettings(readStorageJSON(STORAGE_KEYS.relationshipTrees, {}), pageId),
     sourceKind: userDomains.some((entry) => entry.id === pageId) ? "domain" : "page",
     pageAppearance: {
       layout: page.layout || "board-canvas",
@@ -2844,6 +2911,12 @@ function remapPageClipboardContent(snapshot, destinationPageId) {
   };
 
   remapReferences(scopedData);
+  scopedData.treeSettings = window.SanctumTimelineData?.pasteSettings(
+    {}, snapshot.treeSettings, sourcePageId, destinationPageId, Object.fromEntries(idMap)
+  );
+  scopedData.timelineSettings = window.SanctumTimelineData?.pasteSettings(
+    {}, snapshot.timelineSettings, sourcePageId, destinationPageId, Object.fromEntries(idMap)
+  );
 
   if (Array.isArray(scopedData.canvasLines)) {
     scopedData.canvasLines.forEach((line) => {
@@ -2855,7 +2928,7 @@ function remapPageClipboardContent(snapshot, destinationPageId) {
 }
 
 function destinationHasPageContent(pageId) {
-  const meaningfulKeys = ["pageBlocks", "documents", "journals", "pageDatabases", "stickers", "canvasLines"];
+  const meaningfulKeys = ["pageBlocks", "documents", "journals", "maps", "pageDatabases", "stickers", "canvasLines"];
   return meaningfulKeys.some((keyName) => {
     const storageKey = getPageContentStorageKey(keyName);
     const value = readStorageJSON(storageKey, {})?.[pageId];
@@ -2897,6 +2970,15 @@ function applyPageContentSnapshot(snapshot, destinationPageId, options = {}) {
     }
   });
 
+  if (window.SanctumTimelineData) {
+    const timelines = window.SanctumTimelineData.pasteSettings(
+      readStorageJSON(STORAGE_KEYS.timelines, {}), scopedData.timelineSettings, destinationPageId, destinationPageId
+    );
+    writeStorageJSON(STORAGE_KEYS.timelines, timelines);
+    writeStorageJSON(STORAGE_KEYS.relationshipTrees, window.SanctumTimelineData.pasteSettings(
+      readStorageJSON(STORAGE_KEYS.relationshipTrees, {}), scopedData.treeSettings, destinationPageId, destinationPageId
+    ));
+  }
   const appearance = snapshot.pageAppearance || {};
   if (!destinationIsDomain) {
     destination.layout = appearance.layout || destination.layout || "board-canvas";
@@ -2943,20 +3025,25 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     });
   };
 
+  items.push({ label: "Custom types", icon: "layers", action: () => window.SanctumCustomTypesUI?.openManager() });
+  if (isDomain || isPage) items.push({ label: "Page organization", icon: "folder", action: () => window.SanctumProjectUI?.open(currentPageId) });
+  if (isPage) items.push({ label: "Page fields", icon: "list", action: () => window.SanctumCustomTypesUI?.openFields(currentPageId) });
+  if (isPage && ['board-canvas','infinite-canvas'].includes(userPages.find(p => p.id === currentPageId)?.layout)) items.push({ label: "Character sections", icon: "layers", action: () => window.SanctumCharacterSheet?.openSections(currentPageId) });
+
   if (isDomain || isPage) {
     const currentPage = isDomain
       ? userDomains.find(d => d.id === currentPageId)
       : userPages.find(p => p.id === currentPageId);
 
     items.push({
-  label: "Rename",
+  label: "Rename", icon: "pencil",
   action: () => {
     openRenameModal(currentPageId, currentPage?.title || "");
   }
 });
 
     if (isPage) items.push({
-      label: "Duplicate",
+      label: "Duplicate", icon: "copy",
       action: () => {
         const orig = userPages.find(p => p.id === currentPageId);
         if (!orig) return;
@@ -2977,7 +3064,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     });
 
     if (isPage || isDomain) items.push({
-      label: "Copy whole page",
+      label: "Copy whole page", icon: "copy",
       action: () => {
         const snapshot = createPageContentSnapshot(currentPageId);
         if (!snapshot) return;
@@ -2987,7 +3074,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     });
 
     if (isPage || isDomain) items.push({
-      label: "Paste whole page",
+      label: "Paste whole page", icon: "clipboard",
       action: () => {
         const snapshot = readPageContentClipboard();
         if (!snapshot) {
@@ -3008,12 +3095,17 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     });
 
     if (isPage) items.push({
-      label: "Move to",
+      label: "Move to", icon: "folder-input",
       action: () => {
         const page = userPages.find(p => p.id === currentPageId);
         if (!page) return;
         openMoveToModal(page);
       }
+    });
+
+    if (isPage || isDomain) items.push({
+      label: "Change page icon", icon: "smile",
+      action: () => openPageIconPicker(currentPageId)
     });
 
     // display toggles — not applicable on document or infinite-canvas layout pages
@@ -3030,8 +3122,9 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
 
       items.push({
         key: "banner-title",
-        label: "Banner / title",
+        label: "Banner / title", icon: "image",
         children: [
+          { label: "Appearance…", icon: "palette", action: () => window.openBannerAppearance?.() },
           {
             key: "banner-image",
             label: pageSettings.showHeader ? "Banner image: On" : "Banner image: Off",
@@ -3049,6 +3142,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
               active: pageSettings.headerSize === size,
               action: keepMoreMenuOpen(() => {
                 pageSettings.headerSize = size;
+                if (pageSettings.bannerAppearance) pageSettings.bannerAppearance.height = 0;
                 saveHeroSettings();
               }, ["banner-title", "banner-size"])
             }))
@@ -3076,7 +3170,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     }
 
     items.push({
-      key: "page-font",
+      key: "page-font", icon: "type",
       label: `Page Font: ${getPageFontPresetMeta(fontPreset).label}`,
       children: Object.entries(PAGE_FONT_PRESETS).map(([presetKey, meta]) => ({
         key: `page-font-${presetKey}`,
@@ -3093,7 +3187,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     });
 
     items.push({
-      key: "page-theme",
+      key: "page-theme", icon: "palette",
       label: `Page Theme: ${getPageThemeLabel(pageSettings.theme)}`,
       children: [
         { value: "", label: `Use workspace (${getPageThemeLabel(getWorkspaceTheme())})` },
@@ -3115,7 +3209,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     items.push({ type: "divider" });
 
     items.push({
-      label: "Relationship graph",
+      label: "Relationship graph", icon: "network",
       action: () => {
         if (typeof window.openRelationshipGraph === "function") {
           window.openRelationshipGraph({ focusId: currentPageId, mode: "local" });
@@ -3128,7 +3222,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
     items.push({ type: "divider" });
 
     items.push({
-      label: "Trash",
+      label: "Trash", icon: "trash-2",
       danger: true,
       action: () => {
         const name = currentPage?.title || "this page";
@@ -3157,7 +3251,7 @@ function openCurrentPageMoreMenu(anchorEl, options = {}) {
   if (isHome || isInbox) {
     if (isHome) {
       items.push({
-        label: "Global relationship graph",
+        label: "Global relationship graph", icon: "globe",
         action: () => {
           if (typeof window.openRelationshipGraph === "function") {
             window.openRelationshipGraph({ focusId: "home", mode: "global" });
@@ -3188,6 +3282,10 @@ editToggle.addEventListener("click", () => {
   const isDocPage = pageObj?.layout === "document";
   const isJournalPage = pageObj?.layout === "journal";
   // Chronicle removed — no layout-specific toolbar overrides needed
+
+  if (pageObj?.layout === "map") {
+    return;
+  }
 
   if (isDocPage) {
     if (typeof setDocUIState === "function") {
@@ -3273,7 +3371,7 @@ let pageCreateLinkTargetType = "all";
 
 function normalizePageCreateLayout(value = "") {
   const safe = String(value || "").trim().toLowerCase();
-  return ["board-canvas", "infinite-canvas", "document", "sheet", "journal"].includes(safe)
+  return ["board-canvas", "infinite-canvas", "document", "sheet", "timeline", "tree", "journal", "map"].includes(safe)
     ? safe
     : "board-canvas";
 }
@@ -3732,6 +3830,13 @@ function getPreferredContainerType(parentId = currentPageId) {
 }
 
 function applyContainerTypeDefaults(containerType) {
+  const customType = window.SanctumCustomTypes?.get(document.getElementById("pageCreateCategory").value);
+  if (customType) {
+    selectedLayout = customType.layout;
+    document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(button => button.classList.toggle("active", button.dataset.layout === selectedLayout));
+    window.SanctumCustomTypesUI?.updateSummary();
+    return;
+  }
   if (containerType === "detail") {
     document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
     document.querySelector('#pageCreateLayouts .page-type-btn[data-layout="profile"]')?.classList.add("active");
@@ -3857,10 +3962,23 @@ document.getElementById("pageCreateContainerTypes")?.addEventListener("click", (
 
 document.getElementById("pageCreateLayouts").addEventListener("click", (e) => {
   const btn = e.target.closest(".page-type-btn");
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
   document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
   selectedLayout = btn.dataset.layout;
+  renderPageCreateResults();
+});
+
+document.getElementById("pageCreateCategory").addEventListener("change", event => {
+  selectedCategory = event.target.value;
+  const type = window.SanctumCustomTypes?.get(selectedCategory);
+  if (type) {
+    selectedLayout = type.layout;
+    document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(button => {
+      button.classList.toggle("active", button.dataset.layout === selectedLayout);
+    });
+  }
+  window.SanctumCustomTypesUI?.updateSummary();
   renderPageCreateResults();
 });
 
@@ -3869,6 +3987,7 @@ function openPageCreateModal(block, options = {}) {
   pendingPageRestoreData = options.restoreData ? { ...options.restoreData } : null;
   selectedLayout = normalizePageCreateLayout(options.initialLayout || "board-canvas");
   selectedCategory = typeof options.initialCategory === "string" ? options.initialCategory : "none";
+  window.SanctumCustomTypesUI?.populate(document.getElementById("pageCreateCategory"), selectedCategory);
   selectedContainerType = typeof options.initialContainerType === "string" ? options.initialContainerType : "page";
   pageCreateMode = options.mode === "link" ? "link" : "create";
   pageCreateLinkTargetType = pageCreateMode === "link"
@@ -3903,6 +4022,8 @@ function openPageCreateModal(block, options = {}) {
     document.querySelectorAll("#pageCreateLayouts .page-type-btn").forEach(b => b.classList.remove("active"));
     document.querySelector(`#pageCreateLayouts .page-type-btn[data-layout="${selectedLayout}"]`)?.classList.add("active");
   }
+
+  window.SanctumCustomTypesUI?.updateSummary();
 
   if (typeof openOverlay === "function") {
     openOverlay("pageCreateOverlay", pageCreateOverlay);
@@ -4019,7 +4140,7 @@ function confirmPageCreate() {
       {
         ...newPage,
         type: "page",
-        layout: selectedLayout,
+        layout: newPage.layout,
         category: selectedCategory,
         containerType: selectedContainerType,
         summary: newPage.summary || ""
@@ -4373,9 +4494,11 @@ function renderWorkspace() {
     ${settingsField("Default Borders", "Block border style", settingsSelect("wsBorders", [{value:"none",label:"None"},{value:"subtle",label:"Subtle"},{value:"visible",label:"Visible"}], ws.borders))}
     ${settingsField("Corner Style", "", settingsSelect("wsCorners", [{value:"square",label:"Square"},{value:"slight",label:"Slightly Rounded"},{value:"round",label:"Fully Rounded"}], ws.cornerStyle))}
     ${settingsField("Default Grid Size", "", settingsSelect("wsGrid", [{value:"small",label:"Small"},{value:"medium",label:"Medium"},{value:"large",label:"Large"}], ws.gridSize))}
+    ${settingsField("Custom types", "Reusable fields and starter sections for new pages", '<button class="settings-btn" id="settingsCustomTypes">Manage types</button>')}
     <div style="margin-top:16px;"><button class="settings-btn" id="saveWorkspaceBtn">Save Changes</button></div>
   `;
 
+  document.getElementById("settingsCustomTypes").addEventListener("click", () => window.SanctumCustomTypesUI?.openManager());
   document.getElementById("saveWorkspaceBtn").addEventListener("click", () => {
     sanctumSettings.workspace.theme = document.getElementById("wsTheme").value;
     sanctumSettings.workspace.uiFont = document.getElementById("wsFont").value;
@@ -4475,7 +4598,8 @@ function renderData() {
           window.SanctumBackupData.importBackupData(data, backupAdapter);
           const flush = window.SanctumStorage && window.SanctumStorage.flush;
           const doReload = () => { alert("Import successful. Reloading..."); location.reload(); };
-          flush ? flush().then(doReload).catch(doReload) : doReload();
+          const failed = () => showAppToast("Import is in memory but could not be saved. Keep this tab open and retry saving.", "error");
+          flush ? flush().then((saved) => saved === false ? failed() : doReload()).catch(failed) : doReload();
         } catch {
           alert("Invalid backup file.");
         }
@@ -4491,7 +4615,10 @@ function renderData() {
     downloadBackupData(recoveryFilename("before-reset"), { onlyWhenPopulated: true });
     localStorage.clear();
     if (window.SanctumStorage?.flush) {
-      await window.SanctumStorage.flush();
+      if (await window.SanctumStorage.flush() === false) {
+        showAppToast("Reset could not be saved. Keep this tab open and retry saving.", "error");
+        return;
+      }
     }
     location.reload();
   });

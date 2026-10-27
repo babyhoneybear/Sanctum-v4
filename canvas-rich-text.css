@@ -85,9 +85,27 @@
 .canvas-toggle-content h2,
 .canvas-toggle-content h3 {
     margin: 8px 0 4px;
-    color: var(--text-main);
+    color: var(--canvas-title-color, inherit);
     line-height: 1.2;
     letter-spacing: -0.02em;
+}
+
+#canvasHeadingSelect { max-width: 110px; min-height: 32px; background: var(--field-bg); color: var(--text-main); border: 1px solid var(--panel-border-strong); border-radius: 4px; }
+#canvasHeadingSelect[hidden] { display: none; }
+
+.block-body p,
+.frame-item-text-content p {
+    margin: 0;
+}
+
+.block-body > :first-child,
+.frame-item-text-content > :first-child {
+    margin-top: 0;
+}
+
+.block-body > :last-child,
+.frame-item-text-content > :last-child {
+    margin-bottom: 0;
 }
 
 .block-body h1,

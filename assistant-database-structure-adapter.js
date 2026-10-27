@@ -2,6 +2,7 @@
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) {
+    root.SanctumDatabaseStructureTools = api;
     root.SanctumDatabaseStructureTransactionAdapter = api.createAdapter({
       readPageBlocks: () => root.SanctumAssistantPageBlockStore?.read?.() || root.readAllPageBlocks?.() || {},
       writePageBlocks: (next) => root.SanctumAssistantPageBlockStore?.write?.(next) ?? false,
@@ -425,5 +426,6 @@
   return {
     VERSION,
     createAdapter,
+    makeDatabaseBlock,
   };
 });

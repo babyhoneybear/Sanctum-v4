@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Canvas overlay checks</title>
+<style>
+body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{display:flex;align-items:center;gap:12px;padding:8px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 80px)}pre{white-space:pre-wrap}#sample.narrow{width:768px;max-width:100%}
+</style>
+<nav><button id="seed" disabled>Load gallery sample</button><button id="run" disabled>Check overlays</button><button id="narrow">Tablet width</button><span id="status">Loading</span></nav>
+<details><summary>Results</summary><pre id="results"></pre></details>
+<iframe id="sample" title="Isolated gallery canvas"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('sample'),status=document.getElementById('status'),results=document.getElementById('results');
+let w,dbBlockId;
+frame.src='/';
+const tick=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
+const settle=()=>new Promise(resolve=>setTimeout(resolve,300));
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n';};
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(resolve=>w.addEventListener('sanctum:scripts-ready',resolve,{once:true}));document.getElementById('seed').disabled=false;document.getElementById('run').disabled=false;status.textContent='Ready';};
+async function seed(){
+  w.stopPlacing(true);w.closeAllOverlays();w.openPage('home');
+  const pageId='canvas-overlay-sample';
+  if(!w.userPages.some(page=>page.id===pageId))w.SanctumAssistantPageRegistryStore.create({pageId,title:'Systems Map · sample',parentId:'home',layout:'infinite-canvas'});
+  let block=w.getPageBlocks(pageId).find(block=>block.type==='calendar');
+  if(!block){
+    w.setPageBlocks(pageId,[{id:'overlay-note',type:'text',x:500,y:550,w:240,h:100,bodyHTML:'What is MANA'}]);
+    const api=w.SanctumChatGPTConnection.service;
+    const plan=api.plan({request:{mode:'create',target:{pageId},title:'Currents of Magic · sample',
+      properties:[{id:'description',name:'Description',type:'text'}],
+      rows:['Enhancement','Perception','Barriers & Wards','Vitality','Kinesis','Utility & Communication'].map((name,index)=>({icon:'/assets/worldbuilding/'+['nature','culture','scenes','castle','hero','nature'][index]+'.jpg',values:{name,description:'Editable sample property'}})),
+      view:{view:'gallery',galleryOpenMode:'peek',galleryCardSize:'medium'},
+      views:[{page:{pageId},title:'Currents of Magic',view:'gallery'}]}});
+    await api.apply({planId:plan.planId});
+    const blocks=w.getPageBlocks(pageId);
+    block=blocks.find(block=>block.type==='calendar');
+    Object.assign(block,{x:850,y:500,w:760,h:880});w.setPageBlocks(pageId,blocks);
+  }
+  dbBlockId=block.id;w.openPage(pageId);await tick();
+  w.document.querySelector('[data-infinite-canvas-action="fit"]').click();await tick();
+  status.textContent='Gallery sample ready';
+}
+document.getElementById('seed').onclick=()=>seed().catch(fail);
+document.getElementById('narrow').onclick=async()=>{frame.classList.toggle('narrow');await tick();status.textContent=frame.classList.contains('narrow')?'Tablet width · 768px':'Desktop width';};
+function fail(error){status.textContent='FAILED';results.textContent+=error.stack;document.querySelector('details').open=true;}
+const visible=el=>!!el&&w.getComputedStyle(el).display!=='none'&&el.getBoundingClientRect().height>0;
+function checkRail(label){
+  const d=w.document,dock=d.getElementById('editorDock'),r=dock.getBoundingClientRect(),header=d.querySelector('#mainPane > .topbar').getBoundingClientRect(),zoom=d.querySelector('.dock-zoom-section').getBoundingClientRect();
+  check(r.top>=header.bottom+8&&r.bottom<=w.innerHeight-70,label+': rail clears header and bottom controls');
+  check(zoom.top>=r.top&&zoom.bottom<=r.bottom+1,label+': all zoom controls remain inside rail');
+  for(const mode of dock.querySelectorAll('.dock-mode'))if(visible(mode)){
+    check(w.getComputedStyle(mode).flexDirection==='column',label+': '+mode.className+' is vertical');
+    for(const button of mode.querySelectorAll('button'))if(visible(button)){
+      const b=button.getBoundingClientRect();check(b.left>=r.left&&b.right<=r.right&&b.height>=29,label+': '+button.getAttribute('aria-label')+' is full size and inside rail');
+    }
+  }
+}
+async function checkWidth(label){
+  const d=w.document,block=d.getElementById(dbBlockId);w.closeAllOverlays();w.clearCanvasSelection();await tick();checkRail(label+' create');
+  const before=JSON.stringify(w.getPageBlocks('canvas-overlay-sample'));
+  w.selectCanvasBlock(block);await tick();checkRail(label+' database');
+  const scroll=d.querySelector('.dock-tools-scroll');check(w.getComputedStyle(scroll).overflowY==='auto',label+': selected tools scroll vertically');
+  const last=d.getElementById('blockDeleteBtn');last.scrollIntoView({block:'nearest'});await tick();
+  const lastRect=last.getBoundingClientRect(),scrollRect=scroll.getBoundingClientRect();check(lastRect.top>=scrollRect.top&&lastRect.bottom<=scrollRect.bottom+1,label+': last editing action can be reached');scroll.scrollTop=0;
+  block.querySelector('.page-database-gallery-card').click();await settle();
+  const drawer=d.getElementById('peekDrawer'),dock=d.getElementById('editorDock'),dr=drawer.getBoundingClientRect(),rail=dock.getBoundingClientRect();
+  check(drawer.classList.contains('open')&&rail.right+8<=dr.left,label+': rail sits beside the row editor');
+  const player=d.getElementById('soundbarBar'),pr=player.getBoundingClientRect();
+  check(pr.left>=0&&pr.right+8<=dr.left,label+': music player fits beside the row editor');
+  for(const el of player.querySelectorAll('button,input'))if(visible(el)){
+    const r=el.getBoundingClientRect(),hit=d.elementFromPoint(r.left+r.width/2,r.top+r.height/2);check(el===hit||el.contains(hit),label+': music control '+el.getAttribute('aria-label')+' is unobstructed');
+  }
+  for(const el of drawer.querySelectorAll('textarea,input,.peek-cover-btn,.peek-btn'))if(visible(el)){
+    if(el.matches('.peek-cover-btn')){el.focus();await settle();}
+    const r=el.getBoundingClientRect(),hit=d.elementFromPoint(r.left+r.width/2,r.top+r.height/2);check(el===hit||el.contains(hit),label+': row control '+(el.getAttribute('aria-label')||el.className)+' is unobstructed');
+  }
+  d.getElementById('moreBtn').click();await tick();
+  const menu=d.querySelector('.topbar-dropdown');check(!!menu,label+': page menu opens');
+  const r=dock.getBoundingClientRect(),m=menu.getBoundingClientRect(),x=Math.min(m.right-4,r.left+r.width/2),y=Math.max(m.top+4,r.top+20),hit=d.elementFromPoint(x,y);
+  check(!!hit?.closest('.topbar-dropdown'),label+': page menu paints above the rail');
+  w.closeAllOverlays();await tick();check(dock.getBoundingClientRect().right>w.innerWidth-30,label+': closing drawer restores rail position');
+  check(JSON.stringify(w.getPageBlocks('canvas-overlay-sample'))===before,label+': opening controls preserves saved content and positions');
+}
+document.getElementById('run').onclick=async()=>{results.textContent='';document.querySelector('details').open=false;try{
+  await seed();await checkWidth('Desktop');frame.classList.add('narrow');await tick();await checkWidth('Tablet');
+  const d=w.document;d.getElementById('tabToggleBtn').click();await tick();checkRail('Collapsed tabs');d.getElementById('tabToggleBtn').click();await tick();
+  frame.classList.remove('narrow');await tick();d.getElementById(dbBlockId).querySelector('.page-database-gallery-card').click();await settle();
+  status.textContent='All overlay checks passed';
+}catch(error){fail(error);}};
+</script></html>

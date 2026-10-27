@@ -25,9 +25,11 @@ const STORAGE_KEYS = {
   pageSettings: "sanctum_page_settings",
   pageActivity: "sanctum_page_activity_v1",
   journals: "sanctum_journals_v1",
+  maps: "sanctum_maps_v1",
   documents: "sanctum_documents",
   docSettings: "sanctum_doc_settings",
   pageDatabases: "sanctum_page_databases",
+  chatgptDatabaseHistory: "sanctum_chatgpt_database_history_v1",
   legacyCalendarDatabases: "sanctum_calendar_databases",
   chronicles: "sanctum_chronicles",
   trash: "sanctum_trash",
@@ -50,8 +52,13 @@ const STORAGE_KEYS = {
   annotations: "sanctum_annotations",
   canvasLines: "sanctum_canvas_lines",
   pageProps: "sanctum_page_props_v1",
+  customTypes: "sanctum_custom_types_v1",
+  timelines: "sanctum_timelines_v1",
+  relationshipTrees: "sanctum_relationship_trees_v1",
   relationshipGraphSettings: "sanctum.relationshipGraph.settings.v1",
   lexicon: "sanctumLexicon",
+  writingDictionary: "sanctum_writing_dictionary_v1",
+  writingSettings: "sanctum_writing_settings_v1",
   styleKits: "sanctum_style_kits",
   pagePresets: "sanctum_page_presets",
   studyActivity: "sanctum.studyActivity.v1",
@@ -134,7 +141,7 @@ function isOverlayElement(el) {
 
 function isPanelElement(el) {
   if (!el) return false;
-  return !!el.closest("#pinPanel, #stickerPanel, #soundbarPanel");
+  return !!el.closest("#pinPanel, #stickerPanel, #soundbar, .soundbar-library-dialog");
 }
 
 function closeAllOverlays(except = null) {
@@ -185,8 +192,15 @@ function closeAllPanels(except = null) {
 
   if (soundbarPanel && !keep.has("soundbarPanel")) {
     soundbarPanel.classList.remove("open");
+    soundbarPanel.setAttribute('aria-hidden', 'true');
+    soundbarPanel.inert = true;
+    document.getElementById('soundbarBar')?.classList.remove('panel-open');
     const toggleBtn = document.getElementById("soundbarToggleBtn");
-    if (toggleBtn) toggleBtn.textContent = "\u2303";
+    if (toggleBtn) {
+      toggleBtn.innerHTML = getUIIcon("chevron-up");
+      toggleBtn.setAttribute('aria-label', 'Open music controls');
+      toggleBtn.setAttribute('aria-expanded', 'false');
+    }
     if (typeof soundbarExpanded !== "undefined") soundbarExpanded = false;
   }
 
@@ -196,6 +210,7 @@ function closeAllPanels(except = null) {
 }
 
 function openOverlay(id, el) {
+  window.SanctumContextPreviewUI?.close();
   closeAllOverlays(id);
   closeAllPanels(["pinPanel"]);
 
@@ -229,8 +244,13 @@ function openPanel(id, el) {
   }
 
   if (id === "soundbarPanel") {
+    if (el) { el.setAttribute('aria-hidden', 'false'); el.inert = false; }
     const toggleBtn = document.getElementById("soundbarToggleBtn");
-    if (toggleBtn) toggleBtn.textContent = "⌄";
+    if (toggleBtn) {
+      toggleBtn.innerHTML = getUIIcon("chevron-down");
+      toggleBtn.setAttribute('aria-label', 'Close music controls');
+      toggleBtn.setAttribute('aria-expanded', 'true');
+    }
     if (typeof soundbarExpanded !== "undefined") soundbarExpanded = true;
   }
 
@@ -267,6 +287,25 @@ function showAppToast(message, tone = "default") {
 }
 
 window.showAppToast = showAppToast;
+
+function syncStorageSaveWarning() {
+  const warning = document.getElementById("storageSaveWarning");
+  if (warning) warning.hidden = window.SanctumStorage?.saveState !== "error";
+}
+window.addEventListener("sanctum-storage-status", syncStorageSaveWarning);
+document.getElementById("storageRetrySave")?.addEventListener("click", async () => {
+  const button = document.getElementById("storageRetrySave");
+  button.disabled = true;
+  try { await window.SanctumStorage?.flush(); }
+  finally { button.disabled = false; syncStorageSaveWarning(); }
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!window.SanctumStorage?.hasPendingChanges) return;
+  void window.SanctumStorage.flush();
+  event.preventDefault();
+  event.returnValue = "";
+});
+syncStorageSaveWarning();
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
@@ -361,6 +400,7 @@ function normalizePageSettings(settings = {}) {
     headerSrc: typeof settings.headerSrc === "string" ? settings.headerSrc : "",
     headerSize: ["sm", "md", "lg", "xl"].includes(settings.headerSize) ? settings.headerSize : "md",
     headerPos: normalizeHeaderPos(settings.headerPos),
+    bannerAppearance: settings.bannerAppearance == null ? null : (window.normalizeAppearance?.(settings.bannerAppearance) || settings.bannerAppearance),
     fontPreset: normalizePageFontPreset(settings.fontPreset),
     theme: normalizePageThemeOverride(settings.theme || settings.themeOverride || ""),
     heroOverlay: !!settings.heroOverlay,
@@ -442,7 +482,7 @@ function normalizePageFontPreset(value) {
   if (preset === "biz udpgothic" || preset === "biz ud gothic" || preset === "ud gothic") return "bizUdGothic";
   if (preset === "biz udpmincho" || preset === "biz ud mincho" || preset === "ud mincho") return "bizUdMincho";
   if (preset === "m plus rounded" || preset === "m plus rounded 1c") return "mPlusRounded";
-  return Object.prototype.hasOwnProperty.call(PAGE_FONT_PRESETS, preset) ? preset : "";
+  return Object.keys(PAGE_FONT_PRESETS).find(key => key.toLowerCase() === preset) || "";
 }
 
 function getPageFontPresetMeta(preset = "") {
@@ -475,6 +515,8 @@ function getIconMarkup(iconValue, fallback = "📄", className = "", options = {
     ? ` class="${className}"`
     : "";
 
+  const symbol = window.SanctumIconCatalog?.getSymbolMarkup(value);
+  if (symbol) return `<span${safeClassName} data-icon-type="symbol">${symbol}</span>`;
   if (isImageIconValue(value)) {
     const scale = normalizeIconImageScale(options?.scale, 1);
     return `<span${safeClassName} data-icon-type="image" style="--icon-image-user-scale:${scale}"><img class="icon-render-img" src="${escapeHTML(value)}" alt=""></span>`;
@@ -488,6 +530,13 @@ function setIconElementContent(el, iconValue, fallback = "📄", options = {}) {
 
   const value = typeof iconValue === "string" && iconValue.trim() ? iconValue.trim() : fallback;
 
+  const symbol = window.SanctumIconCatalog?.getSymbolMarkup(value);
+  if (symbol) {
+    el.dataset.iconType = "symbol";
+    el.style.removeProperty("--icon-image-user-scale");
+    el.innerHTML = symbol;
+    return;
+  }
   if (isImageIconValue(value)) {
     el.dataset.iconType = "image";
     el.style.setProperty("--icon-image-user-scale", String(normalizeIconImageScale(options?.scale, 1)));
@@ -520,7 +569,9 @@ function readAllPageBlocks() {
 }
 
 function writeAllPageBlocks(allBlocks) {
-  return writeStorageJSON(STORAGE_KEYS.pageBlocks, allBlocks || {});
+  const saved = writeStorageJSON(STORAGE_KEYS.pageBlocks, allBlocks || {});
+  if (saved !== false) window.dispatchEvent(new CustomEvent("sanctum:canvas-content-updated"));
+  return saved;
 }
 
 function getPageBlocks(pageId) {
@@ -594,6 +645,7 @@ function normalizeVaultAliases(value) {
 
 function isVaultScopeBoundary(record) {
   if (!record?.id) return false;
+  if (window.SanctumProjects) return window.SanctumProjects.isBoundary(record);
   if (record.type === "domain") return true;
   if (record.isScopeBoundary === true || record.definesScope === true) return true;
   if (record.isScopeBoundary === false || record.definesScope === false) return false;
@@ -694,6 +746,7 @@ function getDefaultVaultRecordKind(record = {}) {
 }
 
 function getVaultRecordKind(record = {}) {
+  if (window.SanctumProjects && ['project', 'hub'].includes(window.SanctumProjects.role(record))) return 'space';
   return normalizeVaultRecordKind(record?.recordKind || record?.kind || "", getDefaultVaultRecordKind(record));
 }
 
@@ -852,6 +905,8 @@ function findExistingVaultPageForCreate(options = {}) {
 }
 
 window.getVaultRecords = getVaultRecords;
+window.getVaultRecordRole = record => window.SanctumProjects?.role(record) || record?.containerType || 'page';
+window.getVaultRecordRoleLabel = record => window.SanctumProjects?.label(record) || 'Page';
 window.getVaultRecordById = getVaultRecordById;
 window.normalizeVaultAliases = normalizeVaultAliases;
 window.isVaultScopeBoundary = isVaultScopeBoundary;
@@ -888,6 +943,7 @@ function updateLinkedCardTitlesEverywhere(pageId, newTitle) {
           padding: b.padding || "",
           pageCardHideIcon: b.pageCardHideIcon || 0,
           pageCardView: b.pageCardView || "default",
+          pageCardGalleryStyle: b.pageCardGalleryStyle || "standard",
           w: b.w || 0,
           h: b.h || 0
         });
@@ -1263,6 +1319,12 @@ function snapshotTrashItem(rootId, kind = "page") {
     annotations: {}
   };
 
+  const allMaps = readStorageJSON(STORAGE_KEYS.maps, {});
+  item.maps = {};
+  targetIds.forEach((id) => {
+    if (Object.prototype.hasOwnProperty.call(allMaps, id)) item.maps[id] = allMaps[id];
+  });
+
   targetIds.forEach((id) => {
     if (Object.prototype.hasOwnProperty.call(allDocs, id)) item.documents[id] = allDocs[id];
     if (Object.prototype.hasOwnProperty.call(docSettings, id)) item.docSettings[id] = docSettings[id];
@@ -1325,6 +1387,10 @@ function restoreTrashItem(trashId) {
   const docSettings = readStorageJSON(STORAGE_KEYS.docSettings, {});
   Object.assign(docSettings, item.docSettings || {});
   writeStorageJSON(STORAGE_KEYS.docSettings, docSettings);
+
+  const maps = readStorageJSON(STORAGE_KEYS.maps, {});
+  Object.assign(maps, item.maps || {});
+  writeStorageJSON(STORAGE_KEYS.maps, maps);
 
   const pageSettings = readStorageJSON(STORAGE_KEYS.pageSettings, {});
   Object.assign(pageSettings, item.pageSettings || {});
@@ -1473,6 +1539,10 @@ function deletePagesAndStoredData(pageIds = []) {
     delete journals[id];
   });
   writeStorageJSON(STORAGE_KEYS.journals, journals);
+
+  const maps = readStorageJSON(STORAGE_KEYS.maps, {});
+  ids.forEach((id) => delete maps[id]);
+  writeStorageJSON(STORAGE_KEYS.maps, maps);
 
   const docSettings = readStorageJSON(STORAGE_KEYS.docSettings, {});
   ids.forEach((id) => delete docSettings[id]);

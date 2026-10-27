@@ -145,20 +145,91 @@
 
   function insertCanvasHeadingMarkup(editable, level = 1) {
     const safeLevel = Math.max(1, Math.min(3, Number(level) || 1));
-    const tagName = `h${safeLevel}`;
-    const headingId = `canvas-heading-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const markup = `<${tagName} class="canvas-rich-heading" data-canvas-heading-id="${headingId}"><br></${tagName}>`;
-
-    document.execCommand("insertHTML", false, markup);
-
-    const heading = editable?.querySelector(`[data-canvas-heading-id="${headingId}"]`);
-    if (heading) {
-      placeCaretInsideElement(heading);
-      heading.removeAttribute("data-canvas-heading-id");
-    }
-
-    return heading;
+    return applyCanvasTextFormat(editable, `h${safeLevel}`);
   }
+
+  function applyCanvasTextFormat(editable, format) {
+    if (!editable || !['p', 'h1', 'h2', 'h3'].includes(format)) return false;
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    if (!editable.contains(range.startContainer) || !editable.contains(range.endContainer)) return false;
+    // Removing a slash command can leave a completely empty editing host.
+    // Chromium's formatBlock does nothing there unless a paragraph exists.
+    if (!editable.textContent && !editable.querySelector(':not(br)')) {
+      const emptyRange = document.createRange();
+      emptyRange.selectNodeContents(editable);
+      selection.removeAllRanges();
+      selection.addRange(emptyRange);
+      document.execCommand('insertHTML', false, `<${format}><br></${format}>`);
+      placeCaretInsideElement(editable.querySelector(format));
+    } else {
+      document.execCommand('formatBlock', false, format);
+    }
+    const formattedRange = selection.rangeCount ? selection.getRangeAt(0) : null;
+    if (!formattedRange) return false;
+    editable.querySelectorAll(format).forEach(part => {
+      if (!formattedRange.intersectsNode(part)) return;
+      part.classList.toggle('canvas-rich-heading', format !== 'p');
+      // An explicit level change takes precedence over an old custom heading size.
+      part.style.fontSize = ({h1:'24px', h2:'19px', h3:'15px'})[format] || '';
+      part.querySelectorAll('[style]').forEach(child => child.style.removeProperty('font-size'));
+      part.querySelectorAll('font[size]').forEach(child => child.removeAttribute('size'));
+    });
+    syncBlockAfterCanvasRichTextChange(editable);
+    window.syncCanvasTextFormat?.();
+    return true;
+  }
+
+  const headingSelect = document.getElementById('canvasHeadingSelect');
+  let savedFormatRange = null;
+  function getFormatEditable() {
+    const target = typeof selectedBlock === 'undefined' ? null : selectedBlock;
+    if (!target || (target.dataset.type || target.dataset.frameChildType) !== 'text') return null;
+    return target.querySelector('.frame-item-text-content, .block-body');
+  }
+  function rememberFormatRange() {
+    const editable = getFormatEditable();
+    const selection = window.getSelection();
+    if (editable && selection?.rangeCount) {
+      const range = selection.getRangeAt(0);
+      if (editable.contains(range.startContainer) && editable.contains(range.endContainer)) savedFormatRange = range.cloneRange();
+    }
+  }
+  window.syncCanvasTextFormat = () => {
+    if (!headingSelect) return;
+    const compact = !!window.isInfiniteCanvasPage?.();
+    for (const option of headingSelect.options) {
+      const label = ({p:'Paragraph', h1:'Heading 1', h2:'Heading 2', h3:'Heading 3'})[option.value];
+      const text = compact ? ({p:'P', h1:'H1', h2:'H2', h3:'H3'})[option.value] : label;
+      if (option.textContent !== text) option.textContent = text;
+      option.title = label;
+    }
+    const editable = getFormatEditable();
+    headingSelect.hidden = !editable;
+    if (!editable) { savedFormatRange = null; return; }
+    rememberFormatRange();
+    const node = savedFormatRange && editable.contains(savedFormatRange.startContainer) ? savedFormatRange.startContainer : editable.firstChild;
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    headingSelect.value = element?.closest('h1,h2,h3')?.tagName.toLowerCase() || 'p';
+  };
+  headingSelect?.addEventListener('mousedown', rememberFormatRange);
+  headingSelect?.addEventListener('change', () => {
+    const editable = getFormatEditable();
+    if (!editable) return;
+    const format = headingSelect.value;
+    const range = savedFormatRange && editable.contains(savedFormatRange.startContainer) && editable.contains(savedFormatRange.endContainer)
+      ? savedFormatRange : document.createRange();
+    if (range !== savedFormatRange) range.selectNodeContents(editable);
+    editable.focus();
+    const selection = window.getSelection();
+    selection.removeAllRanges(); selection.addRange(range);
+    applyCanvasTextFormat(editable, format);
+    rememberFormatRange();
+  });
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement !== headingSelect) window.syncCanvasTextFormat();
+  });
 
   function insertCanvasToggleMarkup() {
     const toggle = createToggleElement({ open: false, summaryHTML: "" });
@@ -306,19 +377,19 @@
     {
       label: "Heading 1",
       icon: "H1",
-      keywords: ["header", "title", "large"],
+      keywords: ["h1", "heading1", "header", "title", "large"],
       run: (editable) => insertCanvasHeadingMarkup(editable, 1)
     },
     {
       label: "Heading 2",
       icon: "H2",
-      keywords: ["header", "subhead", "section"],
+      keywords: ["h2", "heading2", "header", "subhead", "section"],
       run: (editable) => insertCanvasHeadingMarkup(editable, 2)
     },
     {
       label: "Heading 3",
       icon: "H3",
-      keywords: ["header", "small heading", "subsection"],
+      keywords: ["h3", "heading3", "header", "small heading", "subsection"],
       run: (editable) => insertCanvasHeadingMarkup(editable, 3)
     },
     {
@@ -702,7 +773,7 @@
     if (slashIdx === -1) return null;
 
     const query = textBefore.slice(slashIdx + 1);
-    if (/\s/.test(query)) return null;
+    if (/[\r\n]/.test(query)) return null;
 
     return {
       editable,
@@ -710,7 +781,7 @@
       range: range.cloneRange(),
       startNode: textNode,
       startOffset: slashIdx,
-      query: query.toLowerCase()
+      query: query.trim().replace(/\s+/g, ' ').toLowerCase()
     };
   }
 
@@ -934,6 +1005,7 @@
   }, true);
 
   document.addEventListener("focusin", (e) => {
+    if (e.target.closest('.canvas-slash-menu')) return;
     const editable = e.target.closest?.('[contenteditable="true"]');
     if (!isCanvasSlashEditable(editable)) {
       closeCanvasSlashMenu();

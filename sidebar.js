@@ -272,6 +272,9 @@ function saveSanctumRegistry() {
 
   const domainsSaved = writeStorageJSON(STORAGE_KEYS.domains, userDomains);
   const pagesSaved = writeStorageJSON(STORAGE_KEYS.pagesRegistry, userPages);
+  window.SanctumSoundbar?.refreshScopes();
+  if (domainsSaved && pagesSaved) window.SanctumProjectUI?.refreshIdentity();
+  if (domainsSaved && pagesSaved) window.SanctumTreeUI?.refresh();
   return domainsSaved && pagesSaved;
 }
 
@@ -383,13 +386,13 @@ function renderSidebarDomains() {
     if (!hasChildren) {
       expandBtn?.classList.add("hidden");
     } else {
-      expandBtn.textContent = expanded ? "▾" : "▸";
+      expandBtn.innerHTML = getUIIcon(expanded ? "chevron-down" : "chevron-right");
       expandBtn?.addEventListener("click", (e) => {
         e.stopPropagation();
         childrenEl.classList.toggle("collapsed");
         const nextExpanded = !childrenEl.classList.contains("collapsed");
         setSidebarExpanded(idValue, nextExpanded);
-        expandBtn.textContent = nextExpanded ? "▾" : "▸";
+        expandBtn.innerHTML = getUIIcon(nextExpanded ? "chevron-down" : "chevron-right");
       });
     }
 
@@ -933,8 +936,8 @@ function renderTabBar() {
     const isActive = tab.id === activeTabId;
     const isSplit = !!splitOwnerTabId && tab.id === splitOwnerTabId && document.body.classList.contains("split-active");
     const cls = ["tab-item", isActive ? "active" : "", isSplit ? "split-view" : ""].filter(Boolean).join(" ");
-    return `<div class="${cls}" data-tab-id="${escapeHTML(tab.id)}"><span class="tab-item-label">${escapeHTML(page.title || "Untitled")}</span><button class="tab-close" data-tab-close="${escapeHTML(tab.id)}" aria-label="Close tab">×</button></div>`;
-  }).join("") + `<button class="tab-new-btn" id="tabNewBtn" aria-label="New tab" title="New tab"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>`;
+    return `<div class="${cls}" data-tab-id="${escapeHTML(tab.id)}"><span class="tab-item-label">${escapeHTML(page.title || "Untitled")}</span><button class="tab-close" data-tab-close="${escapeHTML(tab.id)}" aria-label="Close tab" title="Close tab">${getUIIcon("x")}</button></div>`;
+  }).join("") + `<button class="tab-new-btn" id="tabNewBtn" aria-label="New tab" title="New tab">${getUIIcon("plus")}</button>`;
 }
 
 function syncTabsWithRegistry(removedIds = []) {
@@ -1221,6 +1224,9 @@ document.addEventListener("pointerdown", touchActivePageSession, { passive: true
 document.addEventListener("keydown", touchActivePageSession);
 
 function openPage(pageId, options = {}) {
+  window.SanctumProjectUI?.close();
+  window.SanctumContextPreviewUI?.close();
+  window.closeMapPage?.();
   const { revealSidebarPath = true, skipTabHistory = false } = options;
 
   if (!isNavHistoryTravel && !skipTabHistory) pushTabHistory(pageId);
@@ -1235,6 +1241,7 @@ function openPage(pageId, options = {}) {
   }
 
   currentPageId = pageId;
+  window.SanctumSoundbar?.pageChanged(pageId);
   rememberActivePageForSession(pageId);
   if (typeof applyResolvedTheme === "function") {
     applyResolvedTheme(pageId);
@@ -1255,15 +1262,10 @@ function openPage(pageId, options = {}) {
   document.body.classList.toggle("profile-page", page?.layout === "profile");
   document.body.classList.toggle("infinite-canvas-page", page?.layout === "infinite-canvas");
   document.body.classList.toggle("journal-page", page?.layout === "journal");
+  document.body.classList.toggle("map-page", page?.layout === "map");
 
-  // page properties strip
-  if (typeof window.openPageProps === "function") {
-    if (page?.category && page.category !== "none") {
-      window.openPageProps(pageId);
-    } else {
-      window.closePageProps?.();
-    }
-  }
+  // Properties are placed on the canvas as optional connection blocks.
+  window.closePageProps?.();
 
   // clear grid and load this page's blocks
   clearGrid();
@@ -1279,6 +1281,8 @@ function openPage(pageId, options = {}) {
         </section>
       `;
     }
+  } else if (page?.layout === "map") {
+    window.closeJournalPage?.();
   } else {
     window.closeJournalPage?.();
     loadPageBlocks(pageId);
@@ -1345,6 +1349,13 @@ function openPage(pageId, options = {}) {
   applyPageFontPreset(pageId);
   window.syncInfiniteCanvasPage?.(pageId);
 
+  if (page?.layout === "map") {
+    if (typeof window.renderMapPage === "function") window.renderMapPage(pageId);
+    else window.addEventListener("sanctum:map-ready", () => {
+      if (currentPageId === pageId) window.renderMapPage(pageId);
+    }, { once: true });
+  }
+
   if (page?.layout === "journal") {
     if (typeof window.renderJournalPage === "function") {
       window.renderJournalPage(pageId);
@@ -1374,7 +1385,7 @@ function openPage(pageId, options = {}) {
     tabToggleBtn.setAttribute("aria-pressed", !tabBarWrap.classList.contains("tabs-collapsed"));
   }
 
-  if (page?.layout !== "journal" && typeof window.onSanctumPageOpen === "function") {
+  if (page?.layout !== "journal" && page?.layout !== "map" && typeof window.onSanctumPageOpen === "function") {
     window.onSanctumPageOpen(pageId);
   }
 
@@ -1478,6 +1489,7 @@ function renderBreadcrumbs(pageId) {
     }
     if (i < visible.length - 1) appendSep();
   });
+  window.SanctumProjectUI?.refreshIdentity(pageId);
 }
 
 
@@ -1518,8 +1530,8 @@ function updateTopbarContext(pageId) {
  // show/hide edit toggle — repurpose as insert on document pages
   const editToggle = document.getElementById("editToggle");
   if (editToggle) {
-    editToggle.style.display = (isInbox || isSearch || isNotes || isSheetPage) ? "none" : "";
-    editToggle.textContent = "✎";
+    editToggle.style.display = (isInbox || isSearch || isNotes || isSheetPage || pageObj?.layout === "map") ? "none" : "";
+    editToggle.innerHTML = getUIIcon("pencil");
     editToggle.title = isDocPage ? "Annotate Tools" : "Edit";
   }
 
@@ -1533,6 +1545,7 @@ function updateTopbarContext(pageId) {
 }
 
 function saveCurrentPageBlocks() {
+  if (userPages.find(page => page.id === currentPageId)?.layout === "map") return;
   setPageBlocks(currentPageId, serializeBlocks());
 }
 
@@ -1654,7 +1667,7 @@ function loadSplitBlocks(pageId) {
   const layout = page?.layout;
 
   // Page types that need their own full renderer — show a prompt to open in main
-  const specialLayouts = ["sheet", "infinite-canvas", "journal", "document", "profile"];
+  const specialLayouts = ["sheet", "infinite-canvas", "journal", "document", "profile", "map"];
   if (layout && specialLayouts.includes(layout)) {
     const label = layout === "sheet" ? "database" : layout.replace("-", " ");
     canvas.innerHTML = `<div class="split-unsupported"><p>This is a <strong>${label}</strong> page.</p><button class="split-open-main-btn" id="splitUnsupportedOpenMain">Open in main</button></div>`;
@@ -2017,7 +2030,7 @@ window.SanctumAssistantPageBlockStore = {
     writeAllPageBlocks(nextBlocks && typeof nextBlocks === "object" ? nextBlocks : {});
     const page = userPages.find((entry) => entry.id === currentPageId)
       || userDomains.find((entry) => entry.id === currentPageId);
-    if (hasOpenedPage && page?.layout !== "document" && page?.layout !== "journal") {
+    if (hasOpenedPage && page?.layout !== "document" && page?.layout !== "journal" && page?.layout !== "map") {
       clearGrid();
       loadPageBlocks(currentPageId);
     }
@@ -2062,6 +2075,7 @@ window.SanctumAssistantPageRegistryStore = {
         pageId: String(config.pageId || "").trim(),
         recordKind: config.recordKind || "",
         reuseExisting: false,
+        skipTemplate: config.skipTemplate === true,
       }
     );
     const allBlocks = readAllPageBlocks();
@@ -2254,7 +2268,8 @@ window.SanctumAssistantPageRegistryStore = {
 };
 
 function loadPageBlocks(pageId) {
-  const blocks = getPageBlocks(pageId);
+  const saved = getPageBlocks(pageId);
+  const blocks = window.SanctumCharacterSheet?.fitPage(pageId,saved) || saved;
   blocks.forEach(data => {
     const b = buildBlockFromData(data);
     document.getElementById("grid").appendChild(b);
@@ -2281,8 +2296,11 @@ function getCardStyle(layout, category, containerType) {
 }
 
 function createPage(title, parentId, layout = "board-canvas", category = "none", containerType = "page", options = {}) {
+  const timelineRequested = layout === "timeline";
+  const treeRequested = layout === "tree";
+  if (timelineRequested || treeRequested) layout = "sheet";
   const createOptions = options && typeof options === "object" ? options : {};
-  if (layout === "journal") {
+  if (layout === "journal" || layout === "map") {
     containerType = "page";
     category = "none";
   }
@@ -2325,8 +2343,8 @@ function createPage(title, parentId, layout = "board-canvas", category = "none",
     layout:        layout,
     category:      category,
     containerType: containerType,
-    openBehavior:  layout === "journal" ? "open" : getDefaultOpenBehavior(category, containerType),
-    icon:          "",
+    openBehavior:  layout === "journal" || layout === "map" ? "open" : getDefaultOpenBehavior(category, containerType),
+    icon:          window.SanctumCustomTypes?.get(category)?.icon || "",
     summary:       "",
     tags:          [],
     isScopeBoundary: containerType === "project",
@@ -2337,7 +2355,9 @@ function createPage(title, parentId, layout = "board-canvas", category = "none",
   };
   userPages.push(page);
   saveSanctumRegistry();
-  if (typeof window.applyPageTemplate === "function") {
+  if (timelineRequested) window.SanctumTimelineDatabase?.create(page.id, page.title);
+  if (treeRequested) window.SanctumTreeDatabase?.create(page.id, page.title);
+  if (!timelineRequested && !treeRequested && createOptions.skipTemplate !== true && typeof window.applyPageTemplate === "function") {
     window.applyPageTemplate(page.id, category, layout);
   }
   setTimeout(() => {

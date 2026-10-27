@@ -1,0 +1,47 @@
+<!doctype html><meta charset="utf-8"><title>Canvas interaction checks</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px;display:flex;gap:12px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 80px)}pre{white-space:pre-wrap}</style>
+<nav><button id="seed" disabled>Load interaction sample</button><button id="run" disabled>Check interactions</button><span id="status">Loading</span></nav><details><summary>Results</summary><pre id="results"></pre></details><iframe id="app" title="Canvas interaction sample"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('app'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r)));
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(r=>w.addEventListener('sanctum:scripts-ready',r,{once:true}));for(const id of ['seed','run'])document.getElementById(id).disabled=false;status.textContent='Ready'};
+async function seed(){w.stopPlacing(true);w.openPage('home');if(!w.userPages.some(p=>p.id==='interaction-test'))w.SanctumAssistantPageRegistryStore.create({pageId:'interaction-test',title:'Select · move · edit',parentId:'home',layout:'infinite-canvas'});
+ if(!w.userPages.some(p=>p.id==='interaction-linked'))w.SanctumAssistantPageRegistryStore.create({pageId:'interaction-linked',title:'Linked research',parentId:'home',layout:'board-canvas'});
+ w.setPageBlocks('interaction-test',[
+ {id:'interaction-frame',type:'container',containerTitle:'Magic research',containerItems:[{id:'legacy-note',type:'text',bodyHTML:'Older saved text'}],x:700,y:500,w:700,h:500,z:1},
+ {id:'interaction-text',type:'text',bodyHTML:'<b>Mana flows through living things.</b><br>Double-click to edit this note.',x:750,y:600,w:288,h:120,z:2},
+ {id:'interaction-list',type:'list',bodyHTML:'• Attunement<br>• Shaping<br>• Manifestation',x:1100,y:600,w:240,h:120,z:3},
+ {id:'interaction-button',type:'button',x:750,y:800,w:240,h:72,z:4},
+ {id:'interaction-page',type:'page',linkedPageId:'interaction-linked',pageCardTitle:'Linked research',x:1100,y:800,w:240,h:72,z:5}]);
+ w.openPage('interaction-test');await tick();w.document.querySelector('[data-infinite-canvas-action="fit"]').click();await tick();status.textContent='Click text to edit · Grip to move · Escape finishes';}
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n'};
+const mouse=(target,type,x,y)=>target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,button:0,clientX:x,clientY:y}));
+function gesture(target,dx=0,dy=0){const r=target.getBoundingClientRect(),x=r.left+15,y=r.top+15;mouse(target,'mousedown',x,y);mouse(w.document,'mousemove',x+dx,y+dy);mouse(w.document,'mouseup',x+dx,y+dy);mouse(target,'click',x+dx,y+dy);}
+document.getElementById('seed').onclick=seed;
+document.getElementById('run').onclick=async()=>{await seed();results.textContent='';try{
+ const d=w.document,grid=d.getElementById('grid'),b=d.getElementById('interaction-text'),body=b.querySelector('.block-body'),html=body.innerHTML;
+ const initial={x:b.style.left,y:b.style.top};gesture(body,2,1);
+ check(b.classList.contains('selected')&&b.style.left===initial.x&&b.style.top===initial.y&&b.classList.contains('is-text-editing')&&d.activeElement===body,'Single click returns to text editing without moving the block');
+ for(let i=0;i<3;i++){gesture(grid);check(!b.classList.contains('is-text-editing'),'Click away exits editing '+i);gesture(body);check(b.classList.contains('is-text-editing')&&d.activeElement===body,'Click back restores editing '+i);}
+ gesture(grid);
+ w.startPlacingPreset('image');const count=grid.querySelectorAll(':scope>.block:not(.ghost)').length;gesture(body,80,40);
+ check(b.style.left!==initial.x&&body.innerHTML===html&&grid.querySelectorAll(':scope>.block:not(.ghost)').length===count&&!grid.querySelector('.ghost'),'Dragging text moves original content and cancels the armed add tool');
+ const r=body.getBoundingClientRect();mouse(body,'dblclick',r.left+20,r.top+15);
+ check(b.classList.contains('is-text-editing')&&d.activeElement===body,'Double-click enters text editing');
+ const editingX=b.style.left;gesture(body,40,0);check(b.style.left===editingX,'Dragging while editing does not move the text block');
+ body.innerHTML=html+'<br>Saved edit';body.dispatchEvent(new w.Event('input',{bubbles:true}));
+ body.dispatchEvent(new w.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Escape'}));
+ check(!b.classList.contains('is-text-editing')&&d.activeElement!==body,'Escape exits editing');
+ gesture(b.querySelector('.frame-object-drag-handle'),40,0);check(b.style.left!==editingX&&body.textContent.includes('Saved edit'),'Text grip moves the block without losing its changes');
+ const list=d.getElementById('interaction-list'),lx=list.style.left;gesture(list.querySelector('.block-body'),40,0);check(list.style.left!==lx,'List blocks follow the same drag rule');
+ const controls=d.getElementById('interaction-button'),cx=controls.style.left;const button=controls.querySelector('button');if(button){gesture(button,40,0);check(controls.style.left===cx,'Interactive buttons do not start block dragging');}
+ const v=d.getElementById('infiniteCanvasViewport').getBoundingClientRect(),created=w.placePresetAtPointer('text',v.left+150,v.top+120);
+ check(created.classList.contains('is-text-editing')&&d.activeElement===created.querySelector('.block-body'),'Newly created text is immediately ready to type');
+ w.finishInfiniteTextEditing();w.selectBlock(created);w.deleteSelectedBlock();await new Promise(r=>setTimeout(r,20));check(!d.getElementById(created.id),'Selected text can be deleted after leaving edit mode');w.undo();await tick();check(!!d.getElementById(created.id),'Undo restores the deleted block');
+ w.saveState();w.openPage('home');w.openPage('interaction-test');await tick();check(d.getElementById('interaction-text').textContent.includes('Saved edit'),'Reopening preserves edited and moved text');
+ const legacy=d.querySelector('[data-frame-child-id="legacy-note"] .frame-item-text-content');for(let i=0;i<3;i++){gesture(grid);gesture(legacy);check(legacy.closest('.frame-item').classList.contains('is-text-editing')&&d.activeElement===legacy,'Older frame text resumes editing after clicking away '+i);}w.finishInfiniteTextEditing();
+ const card=d.querySelector('#interaction-page .block-page-card'),cr=card.getBoundingClientRect();gesture(card);check(w.getCurrentPageId()==='interaction-test','Single click selects a page card without navigating');mouse(card,'dblclick',cr.left+15,cr.top+15);await tick();check(w.getCurrentPageId()==='interaction-linked','Double-click opens the linked page');
+ status.textContent='All interaction checks passed';
+ }catch(e){status.textContent='FAILED';results.textContent+=e.stack;document.querySelector('details').open=true}};
+</script>

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Sanctum to ChatGPT</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#141319;color:#f3f0fb}*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px}main{width:100%;max-width:580px}header{display:flex;align-items:center;gap:14px;margin-bottom:36px}.mark{border:1px solid #776b95;width:42px;height:42px;display:grid;place-items:center;font:28px Georgia;color:#d6c7ff}.brand{font-size:20px;letter-spacing:.02em}.caption{font-size:14px;color:#b8b0c9;margin-top:3px}h1{font:normal 36px/1.15 Georgia,serif;margin:0 0 16px}p{line-height:1.6;color:#c9c2d6}section{border:1px solid #413a50;padding:24px;margin:28px 0;background:#1b1821}#status{font-weight:600;margin:0 0 8px;color:#eee8fb}#detail{margin:0;font-size:16px;overflow-wrap:anywhere}label{display:block;font-size:14px;margin:20px 0 8px}input{font:inherit;width:100%;padding:12px;border:1px solid #6a607b;border-radius:4px;background:#141319;color:inherit}button{font:600 16px system-ui;min-height:44px;padding:12px 20px;border-radius:5px;border:1px solid #c5b1ef;background:#c5b1ef;color:#21192f;cursor:pointer}button:disabled{opacity:.5;cursor:wait}button.secondary{background:transparent;color:#dfd2fc;border-color:#6a607b}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #f5d583;outline-offset:3px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}footer{font-size:14px;line-height:1.6;color:#aaa1bd}a{color:#d4baff}#manual[hidden],button[hidden]{display:none}
+</style></head><body><main>
+<header><span class="mark" aria-hidden="true">S</span><div><div class="brand">Sanctum</div><div class="caption">Your ChatGPT connection</div></div></header>
+<h1>Keep your vault within reach.</h1>
+<p>Open this tab on the computer running Sanctum. Once connected, use the Sanctum plugin in ChatGPT on your iPad or another device.</p>
+<section aria-live="polite"><p id="status">Ready to connect</p><p id="detail">Click Connect ChatGPT in Sanctum to connect this helper automatically.</p>
+<div id="manual" hidden><label for="code">Connection code from Sanctum</label><input id="code" type="password" autocomplete="off" spellcheck="false"><label for="port">Sanctum port</label><input id="port" type="number" min="1" max="65535" value="3005"></div>
+<div class="actions"><button id="connect">Connect Sanctum</button><button id="disconnect" class="secondary" hidden>Disconnect</button></div></section>
+<footer>Keep this tab and Sanctum open while connected. Your computer needs to stay awake.<br>No OpenAI API key is used. Your vault is searched only when you ask ChatGPT to use it.</footer>
+</main><script nonce="__NONCE__">
+(() => {
+  const SESSION_KEY='sanctum_chatgpt_connector_tab_v1';
+  const params=new URLSearchParams(location.hash.slice(1));
+  let token=params.get('connection')||'',port=params.get('port')||'3005',bridgeId='',active=false,heartbeat=null,controller=null,epoch=0,heartbeatBusy=false,ready=false;
+  history.replaceState(null,'',location.pathname);
+  function remember(value){try{value?sessionStorage.setItem(SESSION_KEY,JSON.stringify(value)):sessionStorage.removeItem(SESSION_KEY);}catch{}}
+  if(!params.has('connection')){try{const saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');if(saved){token=saved.token;port=saved.port;}}catch{}}
+  const valid=()=>/^[a-f0-9]{48}$/.test(token)&&/^\d{1,5}$/.test(port)&&Number(port)>0&&Number(port)<=65535;
+  const status=document.getElementById('status'),detail=document.getElementById('detail'),connect=document.getElementById('connect'),disconnect=document.getElementById('disconnect');
+  if(!token)document.getElementById('manual').hidden=false;
+  document.getElementById('port').value=port;
+  const sleep=ms=>new Promise(resolve=>{
+    const signal=controller?.signal;
+    if(signal?.aborted)return resolve();
+    const done=()=>{clearTimeout(timer);signal?.removeEventListener('abort',done);resolve();};
+    const timer=setTimeout(done,ms);signal?.addEventListener('abort',done,{once:true});
+  });
+  function show(title,text){status.textContent=title;detail.textContent=text;}
+  const transient=error=>!error.status||error.status>=500||[408,429].includes(error.status);
+  async function request(url,init,timeout=10000){
+    const parent=controller?.signal,request=new AbortController(),abort=()=>request.abort();
+    if(parent?.aborted)abort();else parent?.addEventListener('abort',abort,{once:true});
+    const timer=setTimeout(abort,timeout);
+    try{
+      const response=await fetch(url,{...init,signal:request.signal});
+      if(!response.headers.get('content-type')?.includes('application/json')){
+        throw Object.assign(new Error('Sign in with ChatGPT again, then reopen this connector from Sanctum.'),{status:response.status>=500?response.status:401});
+      }
+      const result=await response.json();
+      if(!response.ok)throw Object.assign(new Error(result.error||'Connection unavailable.'),{status:response.status});
+      return result;
+    }finally{clearTimeout(timer);parent?.removeEventListener('abort',abort);}
+  }
+  async function cloud(path,body={}){
+    return request('/bridge/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Sanctum-Connector':'browser'},body:JSON.stringify({bridgeId,...body})});
+  }
+  async function local(path,body={}){
+    return request('http://127.0.0.1:'+port+'/api/chatgpt/site/'+path,{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json','X-Sanctum-ChatGPT':'browser','X-Sanctum-Session':token},body:JSON.stringify(body)},path==='execute'?50000:10000);
+  }
+  // Retry transport/acknowledgement requests only. local('execute') is never
+  // passed here: its outcome is unknown after a lost reply and cannot replay.
+  async function recover(action,run,allowConflict=false){
+    let failures=0;
+    while(active&&run===epoch){
+      try{return await action();}
+      catch(error){
+        if(!active||run!==epoch)throw error;
+        if(!transient(error)&&!(allowConflict&&error.status===409))throw error;
+        show('Reconnecting automatically…','Keeping your connection. Waiting for Sanctum or the network to respond.');
+        await sleep(Math.min(5000,500*2**Math.min(failures++,4)));
+      }
+    }
+    throw new Error('Connection stopped.');
+  }
+  async function stop(text='Your vault is disconnected from this tab.'){
+    active=false;++epoch;clearInterval(heartbeat);heartbeat=null;remember(null);ready=false;
+    controller?.abort();controller=null;
+    if(bridgeId)void fetch('/bridge/disconnect',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Sanctum-Connector':'browser'},body:JSON.stringify({bridgeId})}).catch(()=>{});
+    bridgeId='';token='';connect.hidden=false;connect.disabled=false;disconnect.hidden=true;document.getElementById('manual').hidden=false;show('Disconnected',text);
+  }
+  async function beat(){
+    if(!active||heartbeatBusy)return;
+    const run=epoch;heartbeatBusy=true;
+    try{
+      try{
+        ready=!!(await local('status')).connected;
+      }catch(error){
+        ready=false;if(!transient(error))throw error;
+      }
+      if(!active||run!==epoch)return;
+      await cloud('heartbeat');
+      if(!active||run!==epoch)return;
+      if(ready)show('Connected to Sanctum','You can return to Sanctum or ChatGPT. Leave this helper tab open.');
+      else show('Waiting for Sanctum…','Your connection is saved. Keep your Sanctum tab open; it will reconnect automatically.');
+    }
+    catch(error){if(active&&run===epoch){if(transient(error))show('Reconnecting automatically…','Waiting for the network. Your connection is saved.');else await stop(error.message);}}
+    finally{heartbeatBusy=false;}
+  }
+  async function poll(run){
+    while(active&&run===epoch){
+      try{
+        if(!ready){await sleep(1500);continue;}
+        const payload=await recover(()=>cloud('poll'),run);
+        if(!active||run!==epoch)break;
+        if(payload.command){
+          let result;
+          try{result=await local('execute',{method:payload.command.method,args:payload.command.args});}
+          catch(error){
+            result={error:'Sanctum did not return a confirmed result. The outcome may be unknown. Read change history before retrying writes. '+error.message};
+            if([401,403].includes(error.status))throw error;
+          }
+          if(active&&run===epoch)await recover(()=>cloud('result',{id:payload.command.id,result}),run);
+        }else await sleep(1500);
+      }catch(error){if(active&&run===epoch)await stop(error.message);break;}
+    }
+  }
+  async function start(){
+    if(active||connect.disabled)return;
+    const run=++epoch;
+    connect.disabled=true;show('Connecting…','Checking the Sanctum vault on this computer.');
+    try{
+      token=document.getElementById('code').value.trim()||token;port=document.getElementById('port').value;
+      if(!valid())throw new Error('Click Connect ChatGPT in Sanctum, or paste its current connection code.');
+      controller=new AbortController();active=true;disconnect.hidden=false;connect.hidden=true;
+      bridgeId ||= crypto.randomUUID();remember({token,port});
+      await recover(async()=>{
+        if(!(await local('status')).connected)throw Object.assign(new Error('Waiting for the connected Sanctum tab.'),{status:503});
+      },run);
+      const paired=await recover(()=>cloud('connect'),run,true);
+      if(!active||run!==epoch)return;
+      bridgeId=paired.bridgeId;ready=true;remember({token,port});
+      document.getElementById('code').value='';document.getElementById('manual').hidden=true;
+      connect.hidden=true;disconnect.hidden=false;show('Connected to Sanctum','You can return to Sanctum or ChatGPT. Leave this helper tab open.');
+      heartbeat=setInterval(beat,4000);void poll(run);
+    }catch(error){if(run===epoch){await stop(error.message);document.getElementById('manual').hidden=false;}}
+  }
+  connect.onclick=start;
+  disconnect.onclick=()=>stop();
+  window.addEventListener('pagehide',()=>{
+    active=false;++epoch;clearInterval(heartbeat);controller?.abort();controller=null;connect.disabled=false;
+    if(bridgeId)void fetch('/bridge/disconnect',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Sanctum-Connector':'browser'},body:JSON.stringify({bridgeId})}).catch(()=>{});
+    bridgeId='';
+  });
+  window.addEventListener('pageshow',event=>{if(event.persisted&&valid())void start();});
+  // Only a code from Sanctum or this already-connected tab may auto-pair.
+  // A plain visit to the Site never enables access to a vault.
+  if(valid())void start();
+})();
+</script></body></html>

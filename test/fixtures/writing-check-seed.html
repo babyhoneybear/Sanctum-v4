@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Writing Check test vault</title>
+<style>body{max-width:650px;margin:80px auto;font:16px/1.6 system-ui}button{padding:12px}a{display:block;margin-top:20px}</style>
+<h1>Writing Check test vault</h1><p>Seeds sample documents and dictionary only on the isolated localhost:3024 test origin.</p>
+<button id="seed" disabled>Load writing test data</button><p id="status">Opening storage…</p><a href="/">Open Sanctum</a>
+<script src="/storage.js"></script><script>
+SanctumStorageReady.then(()=>{
+  const seed=document.getElementById('seed'),status=document.getElementById('status');
+  if(location.origin!=='http://localhost:3024'){status.textContent='Use the isolated localhost:3024 origin.';return;}
+  seed.disabled=false;status.textContent='Ready.';
+  seed.onclick=async()=>{
+    const page={id:'writing-demo',title:'A history of Kovaeth',layout:'document',parent:'home',category:'none',containerType:'page',tags:[]};
+    const data={sanctum_pages_registry:[page],sanctum_domains:[],sanctum_page_blocks:{home:[{id:'writing-link',type:'page',x:32,y:40,w:270,h:170,z:1,linkedPageId:page.id,pageCardTitle:page.title,pageCardLayout:page.layout}]},sanctum_documents:{'writing-demo':{sections:[{id:'chapter',title:'The first chapter',content:'<p>Kovaeth is a <strong>beutiful</strong> city. She <em>go</em> to the market yesterday.</p><p>🌙 Kovaeht remembers.</p>',meta:{}}],meta:{}}},sanctum_writing_dictionary_v1:[],sanctum_writing_settings_v1:{live:true,language:'en-US'},sanctumLexicon:[{id:'original',title:'Original Lexicon',shelf:'general',sections:[{id:'phrases',title:'Saved phrases',entries:[{id:'phrase',text:'A light above the cliffs.'}]}]}]};
+    Object.entries(data).forEach(([key,value])=>localStorage.setItem(key,JSON.stringify(value)));
+    await SanctumStorage.flush();status.textContent='Test data saved. Open Sanctum.';
+  };
+});
+</script></html>

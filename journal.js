@@ -26,13 +26,24 @@
     future: [],
     saveTimer: null,
     textCheckpointId: "",
-    resizeTimer: null,
     suppressSkimClick: false,
+    turnTimer: null,
+    focusPage: false,
     placementTool: "",
     placementPoint: { x: 160, y: 220 },
     pendingImagePoint: null,
     replaceImageId: "",
-    copiedElement: null
+    copiedElement: null,
+    selectedElementIds: [],
+    inkColor: "#352d26",
+    highlightColor: "#d5b85a",
+    inkWidth: 4,
+    highlightWidth: 30,
+    eraseHighlightsOnly: false,
+    lassoType: "freehand",
+    straightInk: false,
+    studyTape: false,
+    suppressEditorClick: false
   };
 
   function escapeMarkup(value) {
@@ -45,6 +56,10 @@
           '"': "&quot;",
           "'": "&#39;"
         })[char]);
+  }
+
+  function icon(name, fallback = "") {
+    return window.getUIIcon?.(name) || `<span aria-hidden="true">${fallback}</span>`;
   }
 
   function record(id = state.activeId) {
@@ -86,9 +101,9 @@
     state.saveTimer = setTimeout(saveImmediately, 100);
   }
 
-  function checkpoint() {
+  function checkpoint(savedSnapshot) {
     if (!state.journal) return;
-    const snapshot = JSON.stringify(state.journal);
+    const snapshot = savedSnapshot || JSON.stringify(state.journal);
     if (state.history[state.history.length - 1] !== snapshot) {
       state.history.push(snapshot);
       if (state.history.length > 30) state.history.shift();
@@ -128,6 +143,23 @@
     return getPage(pageId)?.elements?.find((element) => element.id === elementId) || null;
   }
 
+  function selectedElements() {
+    const ids = state.selectedElementIds.includes(state.selectedElementId) ? state.selectedElementIds : [state.selectedElementId];
+    return (getPage()?.elements || []).filter(element=>ids.includes(element.id));
+  }
+
+  function setSelection(ids = []) {
+    state.selectedElementIds = ids;
+    state.selectedElementId = ids[0] || "";
+  }
+
+  function inkMarkup(element) {
+    const points = element.points.map(p => ({ x: p.x * element.w, y: p.y * element.h }));
+    const d = points.map((p,i)=>`${i ? "L" : "M"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ") + (points.length===1 ? " l.01 0" : "");
+    const opacity = element.brush === "highlighter" ? .34 : element.brush === "pencil" ? .66 : 1;
+    return `<svg class="sj-ink-art" viewBox="0 0 ${element.w} ${element.h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="${element.color}" stroke-width="${element.strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/></svg>`;
+  }
+
   function leafCount() {
     return Math.ceil(((state.journal?.pages?.length || 1) + 1) / 2);
   }
@@ -161,7 +193,7 @@
   }
 
   function renderElement(element, editor = false) {
-    const selected = editor && state.selectedElementId === element.id;
+    const selected = editor && selectedElements().some(item=>item.id===element.id);
     const style = [
       `left:${element.x / 10}%`,
       `top:${element.y / 14}%`,
@@ -170,6 +202,10 @@
       `transform:rotate(${element.rotation}deg)`,
       `z-index:${element.z}`
     ].join(";");
+    if (element.type === "ink") {
+      return `<div class="sj-object sj-object-ink${selected ? " is-selected" : ""}" data-element-id="${escapeMarkup(element.id)}" data-drag-object style="${style}">
+        ${inkMarkup(element)}${editor ? objectHandles(element) : ""}</div>`;
+    }
     if (element.type === "image") {
       return `<div class="sj-object sj-object-image sj-image-shape-${element.cropShape || "original"} sj-image-frame-${element.frameStyle || "none"}${selected ? " is-selected" : ""}"
         data-element-id="${escapeMarkup(element.id)}" data-drag-object style="${style}">
@@ -181,8 +217,8 @@
     if (element.type === "shape") {
       return `<div class="sj-object sj-object-shape${selected ? " is-selected" : ""}"
         data-element-id="${escapeMarkup(element.id)}" data-drag-object style="${style}">
-        <div class="sj-shape-art sj-shape-${element.shape}"
-          style="--shape-fill:${element.fill};--shape-stroke:${element.stroke};--shape-stroke-width:${element.strokeWidth}px"></div>
+        ${element.shape === "arrow" ? `<svg class="sj-ink-art" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><path d="M2 15 H97 M83 3 L97 15 83 27" fill="none" stroke="${element.stroke}" stroke-width="${element.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/></svg>` : `<div class="sj-shape-art sj-shape-${element.shape}"
+          style="--shape-fill:${element.fill};--shape-stroke:${element.stroke};--shape-stroke-width:${element.strokeWidth}px"></div>`}
         ${editor ? objectHandles(element) : ""}
       </div>`;
     }
@@ -196,14 +232,15 @@
       </div>`;
     }
     if (element.type === "tape") {
-      return `<div class="sj-object sj-object-tape sj-tape-${element.pattern}${selected ? " is-selected" : ""}"
+      return `<div class="sj-object sj-object-tape sj-tape-${element.pattern}${element.study ? " is-study-tape" : ""}${element.revealed ? " is-revealed" : ""}${selected ? " is-selected" : ""}"
         data-element-id="${escapeMarkup(element.id)}" data-drag-object
         style="${style};--tape-color:${element.color};--tape-opacity:${element.opacity}">
+        ${editor && element.study ? `<button class="sj-tape-reveal" data-action="reveal-tape" data-id="${escapeMarkup(element.id)}" aria-label="${element.revealed ? "Hide" : "Reveal"} covered content">${icon(element.revealed ? "eye-off" : "eye", element.revealed ? "Hide" : "Reveal")}</button>` : ""}
         ${editor ? objectHandles(element) : ""}
       </div>`;
     }
     const textStyle = [
-      `font-size:${element.fontSize}px`,
+      `font-size:calc(${element.fontSize} * var(--sj-type-unit, 1px))`,
       `color:${element.color}`,
       `text-align:${element.align}`,
       `font-weight:${element.bold ? 700 : 400}`,
@@ -225,6 +262,7 @@
   }
 
   function objectHandles(element) {
+    if (selectedElements().length > 1) return "";
     return `
       <button class="sj-object-handle sj-object-rotate" data-rotate-object aria-label="Rotate ${element.type}">↻</button>
       <button class="sj-object-handle sj-object-resize" data-resize-object aria-label="Resize ${element.type}"></button>`;
@@ -245,6 +283,21 @@
     </section>`;
   }
 
+  // Fan at the outer edge, keeping every leaf attached to the binding.
+  function leafPose(index, spread = state.turned) {
+    const left = index < spread;
+    const depth = Math.min(5, left ? spread - index - 1 : index - spread);
+    return {
+      z: -depth * 1.2,
+      width: 1 + depth * .035,
+      angle: left ? -164 - depth * 3 : -16 + depth * 3
+    };
+  }
+
+  function leafTransform(pose) {
+    return `translateZ(${pose.z}px) rotateY(${pose.angle}deg) scaleX(${pose.width})`;
+  }
+
   function leafMarkup(index) {
     const frontIndex = index === 0 ? -1 : (index * 2) - 1;
     const backIndex = index * 2;
@@ -255,12 +308,10 @@
     const canBack = index === state.turned - 1 && state.turned > 1;
     const visibleLeft = index === state.turned - 1;
     const visibleRight = index === state.turned;
-    const depth = turned ? state.turned - index : index - state.turned;
-    const offset = Math.min(10, Math.max(0, depth)) * (turned ? -5 : 5);
+    const pose = leafPose(index);
     const z = turned ? index + 1 : (leafCount() * 3) - index;
-    const angle = turned ? -180 : 0;
     return `<div class="sj-leaf${turned ? " is-turned" : ""}${visibleLeft ? " is-visible-left" : ""}${visibleRight ? " is-visible-right" : ""}${canForward ? " can-forward" : ""}${canBack ? " can-back" : ""}"
-      data-leaf-index="${index}" data-offset="${offset}" style="--leaf-z:${z};--leaf-offset:${offset}px;--leaf-angle:${angle}deg">
+      data-leaf-index="${index}" style="--leaf-z:${z};transform:${leafTransform(pose)}">
       <div class="sj-leaf-face sj-leaf-front" data-page-id="${escapeMarkup(front?.id || "")}">
         ${pageMarkup(front, frontIndex, { side: "right", hidden: index !== state.turned })}
       </div>
@@ -293,6 +344,21 @@
     return /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#4b4036";
   }
 
+  function bookHeader(editing = false) {
+    return `<header class="sj-book-header">
+      <div class="sj-book-location"><button class="sj-round-btn" data-action="${editing ? "skim" : "back"}" aria-label="${editing ? "Return to book" : "Back to parent"}" title="${editing ? "Return to book" : "Back to parent"}">${icon("chevron-left", "‹")}</button>
+      <span>${state.journal.pages.length} pages</span></div>
+      <div class="sj-title-wrap"><h1>${escapeMarkup(state.journal.title)}</h1></div>
+      <div class="sj-header-actions">
+        <div class="sj-view-switch" aria-label="Journal mode">
+          <button data-action="skim" aria-pressed="${!editing}">${icon("book-open")}<span>Browse</span></button>
+          <button data-action="edit-visible" aria-pressed="${editing}">${icon("pencil")}<span>Edit</span></button>
+        </div>
+        <button class="sj-round-btn" data-action="overview" aria-label="Open page overview" title="All pages">${icon("layout-grid", "▦")}</button>
+      </div>
+    </header>`;
+  }
+
   function renderClosedCover(position = "front") {
     const root = shellRoot();
     if (!root || !state.journal) return;
@@ -302,11 +368,7 @@
     const isBack = position === "back";
     const cover = isBack ? state.journal.backCover : state.journal.cover;
     root.innerHTML = `<div class="sj-shell sj-skim sj-cover-mode" data-mode="skim" data-book-state="${position}">
-      <header class="sj-book-rail">
-        <button class="sj-round-btn" data-action="back" aria-label="Back to parent">‹</button>
-        <span>${isBack ? "End of journal" : `${state.journal.pages.length} pages`}</span>
-        <button class="sj-round-btn" data-action="overview" aria-label="Open page overview">▦</button>
-      </header>
+      ${bookHeader()}
       <main class="sj-cover-stage">
         <div class="sj-closed-book${isBack ? " is-back-cover" : ""}" style="--journal-cover:${cover.color}">
           <span class="sj-cover-spine" aria-hidden="true"></span>
@@ -317,9 +379,9 @@
         </div>
       </main>
       <footer class="sj-skim-footer">
-        <button class="sj-nav-btn" data-action="${isBack ? "back-cover-pages" : "previous"}" ${isBack ? "" : "disabled"} aria-label="Previous">←</button>
+        <button class="sj-nav-btn" data-action="${isBack ? "back-cover-pages" : "previous"}" ${isBack ? "" : "disabled"} aria-label="Previous">${icon("chevron-left", "←")}</button>
         <span>${isBack ? "Back cover" : "Front cover"}</span>
-        <button class="sj-nav-btn" data-action="${isBack ? "next" : "open-cover"}" ${isBack ? "disabled" : ""} aria-label="Next">→</button>
+        <button class="sj-nav-btn" data-action="${isBack ? "next" : "open-cover"}" ${isBack ? "disabled" : ""} aria-label="Next">${icon("chevron-right", "→")}</button>
       </footer>
     </div>`;
   }
@@ -327,7 +389,10 @@
   function revealPagesFromCover(fromBack = false) {
     if (state.gesture) return;
     const cover = document.querySelector(".sj-closed-book");
+    const operation = { type: "cover-open" };
+    state.gesture = operation;
     const done = () => {
+      if (state.gesture !== operation || !state.activeId) return;
       state.bookState = "open";
       state.turned = fromBack ? maxTurned() : 1;
       state.gesture = null;
@@ -337,9 +402,8 @@
       done();
       return;
     }
-    state.gesture = { type: "cover-open" };
     cover.classList.add(fromBack ? "is-opening-back" : "is-opening");
-    setTimeout(done, 460);
+    state.turnTimer = setTimeout(done, 460);
   }
 
   function renderSkim() {
@@ -362,30 +426,29 @@
       : `${visiblePages[0] + 1}`;
 
     root.innerHTML = `<div class="sj-shell sj-skim" data-mode="skim" data-book-state="open">
-      <header class="sj-book-rail">
-        <button class="sj-round-btn" data-action="back" aria-label="Back to parent">‹</button>
-        <span>${counter} / ${state.journal.pages.length}</span>
-        <button class="sj-round-btn" data-action="overview" aria-label="Open page overview">▦</button>
-      </header>
+      ${bookHeader()}
       <main class="sj-skim-stage">
         <div class="sj-book-shadow" aria-hidden="true"></div>
         <div class="sj-book sj-book-physical">
-          <div class="sj-book-cover" aria-hidden="true"></div>
-          ${Array.from({ length: leafCount() }, (_, index) => leafMarkup(index)).join("")}
+          <div class="sj-book-cover" style="--journal-cover:${coverColor()}" aria-hidden="true"></div>
+          ${Array.from({ length: leafCount() }, (_, index) => index)
+            .filter((index) => index >= state.turned - 6 && index <= state.turned + 5)
+            .map(leafMarkup).join("")}
           <div class="sj-spine" aria-hidden="true"></div>
           <button class="sj-page-hit-target is-left" data-skim-side="left"
             data-page-id="${escapeMarkup(state.journal.pages[leftIndex]?.id || "")}"
             aria-label="Open page ${leftIndex + 1}"></button>
-          ${rightIndex >= 0 ? `<button class="sj-page-hit-target is-right" data-skim-side="right"
+          <button class="sj-page-hit-target is-right" data-skim-side="right" ${rightIndex < 0 ? "hidden" : ""}
             data-page-id="${escapeMarkup(state.journal.pages[rightIndex]?.id || "")}"
-            aria-label="Open page ${rightIndex + 1}"></button>` : ""}
+            aria-label="Open page ${rightIndex + 1}"></button>
         </div>
       </main>
+      <p class="sj-browse-hint">Drag to turn · Tap a page to edit</p>
       <footer class="sj-skim-footer">
-        <button class="sj-nav-btn" data-action="previous" ${canBack ? "" : "disabled"} aria-label="Previous page">←</button>
-        <span>${counter} / ${state.journal.pages.length}</span>
-        <button class="sj-nav-btn" data-action="next" ${canForward ? "" : "disabled"} aria-label="Next page">→</button>
-        <button class="sj-add-page-fab" data-action="add-page" aria-label="Add page">＋</button>
+        <button class="sj-nav-btn" data-action="previous" ${canBack ? "" : "disabled"} aria-label="Previous page" title="Previous page">${icon("chevron-left", "←")}</button>
+        <span data-spread-counter aria-live="polite" aria-atomic="true">${counter} / ${state.journal.pages.length}</span>
+        <button class="sj-nav-btn" data-action="next" ${canForward ? "" : "disabled"} aria-label="Next page" title="Next page">${icon("chevron-right", "→")}</button>
+        <button class="sj-add-page-fab" data-action="add-page" aria-label="Add page" title="Add page">${icon("plus", "＋")}</button>
       </footer>
     </div>`;
   }
@@ -477,8 +540,60 @@
   function toolButton(tool, icon, label) {
     const active = state.activeTool === tool || (tool === "photo" && state.activeTool === "photo");
     return `<button class="sj-tool-button${active ? " is-active" : ""}" data-tool="${tool}" data-label="${label}" title="${label}" aria-label="${label}" aria-pressed="${active}">
-      <span class="sj-tool-icon" aria-hidden="true">${icon}</span>
+      <span class="sj-tool-icon" aria-hidden="true">${icon}</span><span class="sj-tool-label">${label}</span>
     </button>`;
+  }
+
+  function writingIcon(name) {
+    const paths = {
+      pen: '<path d="m4 20 3-10 7-7 7 7-7 7-10 3Zm0 0 7-7m-4-3 7 7M14 3l7 7"/><circle cx="12" cy="12" r="1.5"/>',
+      lasso: '<path d="M8 16c-3-1-5-3-5-6 0-4 4-7 9-7s9 3 9 7-4 7-9 7H8c-2 0-3 1-3 2s1 2 3 2 3-1 3-3c0-2-1-3-3-2Z"/>',
+      eraser: '<path d="m4 12 9-9 8 8-9 9H8l-4-4a3 3 0 0 1 0-4ZM8 8l8 8M12 20h9"/>',
+      select: '<path d="m5 3 14 9-7 1-3 7-4-17Z"/>'
+    };
+    return paths[name] ? `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>` : icon(name);
+  }
+
+  function editorToolbar() {
+    const action = (name, glyph, label, disabled=false) => `<button data-action="${name}" aria-label="${label}" title="${label}" ${disabled ? "disabled" : ""}>${icon(glyph,label)}</button>`;
+    return `<div class="sj-editor-tools" role="toolbar" aria-label="Journal editor tools">
+      <div class="sj-tool-group">${action("undo","undo-2","Undo",!state.history.length)}${action("redo","redo-2","Redo",!state.future.length)}</div>
+      <div class="sj-tool-group">${[["select","select","Select"],["lasso","lasso","Lasso"],["pen","pen","Pen"],["pencil","pencil","Pencil"],["highlighter","highlighter","Highlight"],["eraser","eraser","Erase"]].map(([tool,glyph,label])=>toolButton(tool,writingIcon(glyph),label)).join("")}</div>
+      <div class="sj-tool-group">${[["text","type","Text"],["photo","image","Photo"],["shape","shapes","Shapes"],["note","sticky-note","Note"],["sticker","sticker","Stickers"],["tape","rectangle-horizontal","Tape"]].map(([tool,glyph,label])=>toolButton(tool,icon(glyph),label)).join("")}</div>
+      <div class="sj-tool-group">${action("paper-panel","palette","Paper")}${action("add-page-panel","file-plus-2","Add page")}${action("page-menu","ellipsis","Page options")}</div>
+    </div><div class="sj-tool-settings" aria-label="Active tool settings">${activeToolSettings()}</div>`;
+  }
+
+  function activeToolSettings() {
+    const tool = state.activeTool;
+    if (["pen","pencil","highlighter"].includes(tool)) {
+      const highlight = tool === "highlighter";
+      const color = highlight ? state.highlightColor : state.inkColor;
+      const width = highlight ? state.highlightWidth : state.inkWidth;
+      return `<span class="sj-setting-title">${choiceLabel(tool)}</span><div class="sj-ink-colors">${["#352d26","#77846b","#738ea9","#b77b73","#d5b85a"].map(value=>`<button data-action="ink-preset" data-color="${value}" style="--swatch:${value}" aria-label="Ink ${value}" aria-pressed="${color===value}"></button>`).join("")}</div>
+        <label class="sj-custom-ink" title="Custom ink color"><input type="color" data-action="ink-color" value="${color}" aria-label="Custom ink color"></label>
+        <label>Width <input type="range" data-action="ink-width" min="${highlight ? 12 : 1}" max="${highlight ? 64 : 14}" step="1" value="${width}" aria-label="Stroke width"></label>
+        <button data-action="straight-ink" aria-pressed="${state.straightInk}">Straight line</button>`;
+    }
+    if (tool === "eraser") return `<span class="sj-setting-title">Stroke eraser</span><label><input type="checkbox" data-action="erase-highlights" ${state.eraseHighlightsOnly ? "checked" : ""}> Highlights only</label><span class="sj-setting-hint">Drag over ink to erase it</span>`;
+    const selected = selectedElements();
+    if (selected.length > 1) return `<span class="sj-setting-title">${selected.length} selected</span><label>Color <input type="color" data-action="selection-color" value="#738ea9" aria-label="Selection color"></label>
+      <button data-action="copy-elements">Copy</button><button data-action="duplicate-element">Duplicate</button><button data-action="layer-back">Send back</button><button data-action="layer-front">Bring forward</button><button data-action="delete-element">Delete</button><button data-action="clear-selection">Deselect</button>`;
+    if (selected.length === 1) return contextualTools();
+    if (tool === "lasso") return `<span class="sj-setting-title">Lasso</span><button data-action="lasso-freehand" aria-pressed="${state.lassoType==="freehand"}">Freehand</button><button data-action="lasso-rectangle" aria-pressed="${state.lassoType==="rectangle"}">Rectangle</button><span class="sj-setting-hint">Enclose items to move or resize them together</span>`;
+    return `<span class="sj-setting-title">${state.placementTool ? "Place " + state.placementTool : choiceLabel(tool)}</span><span class="sj-setting-hint">${state.placementTool ? "Click the page to place · Esc to cancel" : state.panel ? "Choose an item from the open palette" : "Click an item to edit · Shift-click to select several"}</span>${state.copiedElement ? '<button data-action="paste-elements">Paste</button>' : ""}`;
+  }
+
+  function refreshEditorSettings() {
+    const row = document.querySelector(".sj-tool-settings");
+    if (row) row.innerHTML = activeToolSettings();
+  }
+
+  function groupMarkup() {
+    const items = selectedElements();
+    if (items.length < 2) return "";
+    const b = Data.selectionBounds(items);
+    return `<div class="sj-group-selection" data-group-move style="left:${b.x/10}%;top:${b.y/14}%;width:${b.w/10}%;height:${b.h/14}%" aria-label="Selected items"><button data-group-resize aria-label="Resize selected items"></button></div>`;
   }
 
   function contextualTools() {
@@ -497,19 +612,22 @@
         <button class="${element.bold ? "is-active" : ""}" data-action="toggle-bold" title="Bold"><strong>B</strong></button>
         <button class="${element.italic ? "is-active" : ""}" data-action="toggle-italic" title="Italic"><em>I</em></button>
         <button data-action="align" title="Text alignment">${element.align === "left" ? "Left" : element.align === "center" ? "Center" : "Right"}</button>
-        <label class="sj-color-swatch" title="Text color"><input type="color" value="${element.color}" data-action="text-color"></label>`;
+        <label class="sj-color-swatch" title="Text color"><input type="color" value="${element.color}" data-action="text-color" aria-label="Text color"></label>
+        <label>Fill <input type="color" value="${element.background || "#e8d9ad"}" data-action="text-background" aria-label="Text box fill"></label><button data-action="clear-text-background" title="Remove text box fill">No fill</button>`;
     } else if (element.type === "image") {
       specific = `<button data-action="toggle-fit">${element.fit === "contain" ? "Fill frame" : "Fit photo"}</button>
-        <button data-action="replace-photo">Add another</button>`;
+        <button data-action="open-image-shape">Crop shape</button><button data-action="open-image-frame">Frame</button><button data-action="replace-photo">Replace</button>`;
     } else if (element.type === "shape") {
       specific = `<label class="sj-compact-field"><span>Fill</span><input type="color" value="${element.fill}" data-action="shape-fill"></label>
         <label class="sj-compact-field"><span>Border</span><input type="color" value="${element.stroke}" data-action="shape-stroke"></label>
         <label class="sj-compact-field sj-number-field"><span>Width</span><input type="number" min="0" max="24" value="${element.strokeWidth}" data-action="shape-width"></label>`;
+    } else if (element.type === "ink") {
+      specific = `<span>${choiceLabel(element.brush)} stroke</span><label>Color <input type="color" data-action="selection-color" value="${element.color}" aria-label="Selection color"></label>`;
     } else if (element.type === "sticker") {
       specific = `<label class="sj-compact-field"><span>Color</span><input type="color" value="${element.color}" data-action="sticker-color"></label>`;
     } else if (element.type === "tape") {
       specific = `<label class="sj-compact-field"><span>Color</span><input type="color" value="${element.color}" data-action="tape-color"></label>
-        <button data-action="cycle-tape-pattern">Pattern: ${choiceLabel(element.pattern)}</button>`;
+        <button data-action="cycle-tape-pattern">Pattern: ${choiceLabel(element.pattern)}</button>${element.study ? `<button data-action="reveal-tape" data-id="${escapeMarkup(element.id)}">${element.revealed ? "Hide" : "Reveal"} answer</button>` : ""}`;
     }
 
     return `<div class="sj-context-toolbar" aria-label="Selected item controls">
@@ -543,11 +661,12 @@
     }
     if (state.panel === "shapes") {
       return `<aside class="sj-dock-popover sj-shape-panel"><header><div><h2>Shapes</h2><p>Pick a shape to add</p></div>${close}</header>
-        <div class="sj-element-grid">${["rectangle", "ellipse", "triangle", "diamond", "line"].map((shape) => `<button data-action="add-shape" data-shape="${shape}">
-          <span class="sj-shape-sample sj-shape-${shape}"></span><small>${choiceLabel(shape)}</small></button>`).join("")}</div></aside>`;
+        <div class="sj-element-grid">${["rectangle", "ellipse", "triangle", "diamond", "line", "arrow"].map((shape) => `<button data-action="add-shape" data-shape="${shape}">
+          <span class="sj-shape-sample sj-shape-${shape}">${shape === "arrow" ? icon("arrow-right","→") : ""}</span><small>${choiceLabel(shape)}</small></button>`).join("")}</div></aside>`;
     }
     if (state.panel === "tape") {
       return `<aside class="sj-dock-popover"><header><div><h2>Tape</h2><p>Layer it over photos and notes</p></div>${close}</header>
+        <div class="sj-tape-mode"><button data-action="tape-decorative" aria-pressed="${!state.studyTape}">Decorative</button><button data-action="tape-study" aria-pressed="${state.studyTape}">Hide / reveal</button></div>
         <div class="sj-tape-options">${["solid", "stripe", "grid", "dots"].map((pattern) => `<button class="sj-tape-choice sj-tape-${pattern}" data-action="set-tape-pattern" data-pattern="${pattern}" aria-pressed="${state.tapePreset === pattern}"><span></span>${choiceLabel(pattern)}</button>`).join("")}</div>
         <div class="sj-tape-colors">${["#d6b887", "#c8b8a6", "#a9b69e", "#aeb9c9", "#d9a6a0"].map((color) => `<button data-action="add-tape" data-color="${color}" style="--swatch:${color}" aria-label="Add tape in ${color}"></button>`).join("")}</div></aside>`;
     }
@@ -656,18 +775,41 @@
     const coverPage = isCoverPage(page);
     const surfaceClass = coverPage ? "sj-cover-canvas" : `sj-paper-${page.paper}`;
     const surfaceStyle = coverPage ? ` style="--journal-cover:${page.color}"` : "";
+    const partnerIndex = index % 2 === 0 ? index + 1 : index - 1;
+    const partner = !coverPage && state.journal.pages[partnerIndex];
+    const showSpread = !coverPage && !state.focusPage;
+    const neighbor = showSpread ? `<div class="sj-editor-neighbor sj-paper-${partner?.paper || page.paper}">
+      ${partner ? `<div class="sj-paper-grain" aria-hidden="true"></div>
+      ${partner.elements.map((element) => renderElement(element, false)).join("")}
+      <span class="sj-page-number">${partnerIndex + 1}</span>
+      <button class="sj-neighbor-target" data-action="edit-partner" data-page-id="${escapeMarkup(partner.id)}" aria-label="Edit page ${partnerIndex + 1}"></button>` : ""}
+    </div>` : "";
     syncJournalDockState(true);
     root.innerHTML = `<div class="sj-shell sj-editor" data-mode="edit">
+      ${bookHeader(true)}
+      ${editorToolbar()}
       ${editorPanel()}
-      <main class="sj-editor-stage" data-drop-zone>
-        <div class="sj-flat-page ${surfaceClass}" data-editor-page data-page-id="${escapeMarkup(page.id)}"${surfaceStyle}>
+      <main class="sj-editor-stage${showSpread ? " sj-spread-stage" : ""}" data-drop-zone>
+        <div class="sj-edit-surface${showSpread ? " is-spread" : ""}${index % 2 === 1 ? " is-right-active" : ""}">
+        ${showSpread && index % 2 === 1 ? neighbor : ""}
+        <div class="sj-flat-page ${surfaceClass}" data-editor-page data-edit-tool="${state.activeTool}" data-page-id="${escapeMarkup(page.id)}"${surfaceStyle}>
           <div class="sj-paper-grain" aria-hidden="true"></div>
           ${page.elements.map((element) => renderElement(element, true)).join("")}
+          <svg class="sj-gesture-preview" viewBox="0 0 1000 1400" preserveAspectRatio="none" aria-hidden="true"></svg>
+          ${groupMarkup()}
           ${placementGhostMarkup()}
           ${page.elements.length ? "" : `<div class="sj-empty-page"><span>${coverPage ? "Design your cover." : "Make this page yours."}</span><small>Add text, photos, shapes, or tape.</small></div>`}
           ${coverPage ? "" : `<span class="sj-page-number">${index + 1}</span>`}
         </div>
+        ${showSpread && index % 2 === 0 ? neighbor : ""}
+        </div>
       </main>
+      <footer class="sj-edit-footer">
+        <button class="sj-nav-btn" data-action="edit-previous" ${coverPage || index === 0 ? "disabled" : ""} aria-label="Edit previous page">${icon("chevron-left", "←")}</button>
+        <span>${coverPage ? (page.side === "back" ? "Back cover" : "Front cover") : `Editing page ${index + 1} / ${state.journal.pages.length}`}</span>
+        <button class="sj-nav-btn" data-action="edit-next" ${coverPage || index === state.journal.pages.length - 1 ? "disabled" : ""} aria-label="Edit next page">${icon("chevron-right", "→")}</button>
+        ${coverPage ? "" : `<button class="sj-focus-toggle" data-action="focus-page" aria-pressed="${state.focusPage}">${state.focusPage ? "Show spread" : "Focus page"}</button>`}
+      </footer>
       <input id="sj-photo-input" type="file" accept="image/*" multiple hidden>
     </div>`;
 
@@ -701,12 +843,12 @@
     syncJournalDockState(false);
     root.innerHTML = `<div class="sj-shell sj-overview" data-mode="overview">
       <header class="sj-editor-header">
-        <button class="sj-round-btn" data-action="close-overview" aria-label="Close page overview">‹</button>
+        <button class="sj-round-btn" data-action="close-overview" aria-label="Close page overview">${icon("chevron-left", "‹")}</button>
         <div class="sj-title-wrap">
           <h1>All pages</h1>
           <p>Open, duplicate, delete, or change the order</p>
         </div>
-        <button class="sj-round-btn" data-action="add-page" aria-label="Add page">＋</button>
+        <button class="sj-round-btn" data-action="add-page" aria-label="Add page">${icon("plus", "＋")}</button>
       </header>
       <main class="sj-overview-grid">
         ${state.journal.pages.map(overviewThumbnail).join("")}
@@ -721,34 +863,124 @@
     else renderSkim();
   }
 
-  function openEditor(pageId) {
+  function openEditor(pageId, preserveTool = false) {
     const page = getPage(pageId);
     if (!page) return;
+    cancelBookMotion();
     window.closeSidebar?.();
     window.clearCanvasSelection?.();
     if (isCoverPage(page)) state.bookState = page.side;
     else state.bookState = "open";
     state.editPageId = pageId;
-    state.selectedElementId = "";
-    state.activeTool = "select";
+    if (!isCoverPage(page)) state.turned = turnedForPage(getPageIndex(pageId));
+    setSelection();
+    if (!preserveTool || !["pen","pencil","highlighter","eraser","lasso"].includes(state.activeTool)) state.activeTool = "select";
     state.panel = "";
     state.placementTool = "";
     state.mode = "edit";
     renderEditor();
   }
 
-  function finishLeafTurn(leaf, direction) {
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const targetAngle = direction > 0 ? -180 : 0;
-    const offset = Number(leaf.dataset.offset) || 0;
-    leaf.classList.add("is-animating");
-    leaf.style.transform = `translateX(${offset}px) rotateY(${targetAngle}deg)`;
-    const done = () => {
-      state.turned = clampTurned(state.turned + direction);
-      state.gesture = null;
-      renderSkim();
+  function cancelBookMotion() {
+    clearTimeout(state.turnTimer);
+    if(state.gesture?.type === "group") state.journal=Data.normalizeJournal(JSON.parse(state.gesture.before));
+    state.gesture = null;
+  }
+
+  function prepareBookTurn(leaf, direction) {
+    const book = document.querySelector(".sj-book-physical");
+    const next = clampTurned(state.turned + direction);
+    if (book) {
+      // Mount the next far edge behind the stack before it is revealed. Keep
+      // the working set bounded, without replacing any visible page nodes.
+      const edge = direction > 0 ? next + 5 : next - 6;
+      if (edge >= 0 && edge < leafCount() && !book.querySelector(`[data-leaf-index="${edge}"]`)) {
+        book.insertAdjacentHTML("beforeend", leafMarkup(edge));
+      }
+      book.classList.add("is-turning");
+    }
+    return {
+      book,
+      leaves: book ? Array.from(book.querySelectorAll(".sj-leaf")) : [leaf],
+      from: state.turned,
+      to: next
     };
-    setTimeout(done, reduceMotion ? 20 : 520);
+  }
+
+  function positionBookTurn(turn, progress, dragging = false) {
+    for (const sheet of turn.leaves) {
+      const index = Number(sheet.dataset.leafIndex);
+      const start = leafPose(Number.isFinite(index) ? index : turn.from, turn.from);
+      const end = leafPose(Number.isFinite(index) ? index : turn.from, turn.to);
+      if (dragging) sheet.classList.add("is-stack-dragging");
+      else sheet.classList.remove("is-stack-dragging");
+      sheet.style.transform = leafTransform({
+        z: start.z + (end.z - start.z) * progress,
+        width: start.width + (end.width - start.width) * progress,
+        angle: start.angle + (end.angle - start.angle) * progress
+      });
+    }
+  }
+
+  function syncMountedSpread(book) {
+    for (const sheet of book.querySelectorAll(".sj-leaf")) {
+      const index = Number(sheet.dataset.leafIndex);
+      if (index < state.turned - 6 || index > state.turned + 5) {
+        sheet.remove();
+        continue;
+      }
+      const left = index === state.turned - 1;
+      const right = index === state.turned;
+      sheet.classList.remove("is-animating", "is-dragging", "is-stack-dragging");
+      sheet.classList.toggle("is-turned", index < state.turned);
+      sheet.classList.toggle("is-visible-left", left);
+      sheet.classList.toggle("is-visible-right", right);
+      sheet.classList.toggle("can-back", left && state.turned > 1);
+      sheet.classList.toggle("can-forward", right && state.turned < maxTurned());
+      sheet.style.setProperty("--leaf-z", String(index < state.turned ? index + 1 : leafCount() * 3 - index));
+      for (const [face, visible] of [["back", left], ["front", right]]) {
+        const page = sheet.querySelector(`.sj-leaf-${face} .sj-book-page[data-page-id]`);
+        if (!page) continue;
+        page.setAttribute("aria-hidden", String(!visible));
+        page.setAttribute("aria-label", `Page ${Number(page.dataset.pageIndex) + 1}. Tap to edit.`);
+      }
+    }
+    const leftIndex = state.turned * 2 - 2;
+    const rightIndex = leftIndex + 1;
+    for (const side of ["left", "right"]) {
+      const index = side === "left" ? leftIndex : rightIndex;
+      const target = book.querySelector(`[data-skim-side="${side}"]`);
+      const page = state.journal.pages[index];
+      target.hidden = !page;
+      target.dataset.pageId = page?.id || "";
+      target.setAttribute("aria-label", `Open page ${index + 1}`);
+    }
+    const counter = rightIndex < state.journal.pages.length ? `${leftIndex + 1}–${rightIndex + 1}` : String(leftIndex + 1);
+    document.querySelector("[data-spread-counter]").textContent = `${counter} / ${state.journal.pages.length}`;
+    book.classList.remove("is-turning");
+  }
+
+  function finishLeafTurn(leaf, direction, commit = true, turn = prepareBookTurn(leaf, direction)) {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const next = commit ? turn.to : turn.from;
+    const operation = { type: "settling" };
+    state.gesture = operation;
+    leaf.classList.add("is-animating");
+    positionBookTurn(turn, commit ? 1 : 0);
+    const done = () => {
+      leaf.removeEventListener?.("transitionend", onEnd);
+      if (state.gesture !== operation || !state.activeId || state.mode !== "skim") return;
+      clearTimeout(state.turnTimer);
+      state.turned = next;
+      state.gesture = null;
+      if (turn.book) syncMountedSpread(turn.book);
+      else renderSkim();
+    };
+    const onEnd = (event) => {
+      if (event.target === leaf && event.propertyName === "transform") done();
+    };
+    leaf.addEventListener?.("transitionend", onEnd);
+    state.turnTimer = setTimeout(done, reduceMotion ? 0 : 600);
   }
 
   function navigate(direction) {
@@ -783,7 +1015,9 @@
     finishLeafTurn(leaf, direction);
   }
 
-  function addPage(afterId = state.editPageId || state.journal.pages.at(-1)?.id) {
+  function addPage(afterId = state.mode === "skim"
+    ? state.journal.pages[Math.min(state.turned * 2 - 1, state.journal.pages.length - 1)]?.id
+    : state.editPageId || state.journal.pages.at(-1)?.id) {
     checkpoint();
     const result = Data.addPage(state.journal, afterId, { paper: getPage(afterId)?.paper || "warm" });
     state.journal = result.journal;
@@ -791,7 +1025,7 @@
     saveImmediately();
     if (state.mode === "skim") {
       state.bookState = "open";
-      state.turned = turnedForPage(state.journal.pages.length - 1);
+      state.turned = turnedForPage(getPageIndex(result.page.id));
       renderSkim();
     } else {
       state.mode = "edit";
@@ -883,8 +1117,8 @@
       strokeWidth: 3,
       x: 260,
       y: 360,
-      w: shape === "line" ? 500 : 360,
-      h: shape === "line" ? 80 : 300
+      w: ["line","arrow"].includes(shape) ? 500 : 360,
+      h: ["line","arrow"].includes(shape) ? 80 : 300
     });
     if (!element) return;
     state.shapePreset = shape;
@@ -917,6 +1151,7 @@
   function addTape(color = "#d6b887") {
     const element = insertElement({
       type: "tape",
+      study: state.studyTape,
       pattern: state.tapePreset,
       color,
       opacity: 0.82,
@@ -934,10 +1169,11 @@
 
   function removeElement() {
     const page = getPage();
-    if (!page || !state.selectedElementId) return;
+    const ids = selectedElements().map(item=>item.id);
+    if (!page || !ids.length) return;
     checkpoint();
-    page.elements = page.elements.filter((element) => element.id !== state.selectedElementId);
-    state.selectedElementId = "";
+    page.elements = page.elements.filter((element) => !ids.includes(element.id));
+    setSelection();
     page.updatedAt = Date.now();
     scheduleSave();
     renderEditor();
@@ -945,30 +1181,33 @@
 
   function duplicateElement() {
     const page = getPage();
-    const element = getElement();
-    if (!page || !element) return;
+    const elements = selectedElements();
+    if (!page || !elements.length) return;
     checkpoint();
     const highest = page.elements.reduce((max, item) => Math.max(max, item.z), 0);
-    const copy = Data.normalizeElement({
+    const bounds = Data.selectionBounds(elements);
+    const dx = Math.max(0, Math.min(36, 1000 - bounds.x - bounds.w));
+    const dy = Math.max(0, Math.min(36, 1400 - bounds.y - bounds.h));
+    const copies = elements.map((element,i) => Data.normalizeElement({
       ...element,
       id: Data.createId(`journal-${element.type}`),
-      x: element.x + 36,
-      y: element.y + 36,
-      z: highest + 1
-    });
-    page.elements.push(copy);
-    state.selectedElementId = copy.id;
+      x: element.x + dx,
+      y: element.y + dy,
+      z: highest + i + 1
+    }));
+    page.elements.push(...copies);
+    setSelection(copies.map(item=>item.id));
     scheduleSave();
     renderEditor();
   }
 
   function layerElement(direction) {
     const page = getPage();
-    const element = getElement();
-    if (!page || !element) return;
+    const elements = selectedElements().sort((a,b)=>a.z-b.z);
+    if (!page || !elements.length) return;
     checkpoint();
-    const values = page.elements.map((item) => item.z);
-    element.z = direction > 0 ? Math.max(...values, 0) + 1 : Math.max(0, Math.min(...values, 1) - 1);
+    const rest = page.elements.filter(item=>!elements.includes(item)).sort((a,b)=>a.z-b.z);
+    (direction > 0 ? [...rest,...elements] : [...elements,...rest]).forEach((item,i)=>{item.z=i+1;});
     scheduleSave();
     renderEditor();
   }
@@ -997,9 +1236,9 @@
   }
 
   function copySelectedElement() {
-    const element = getElement();
-    if (!element) return false;
-    state.copiedElement = JSON.parse(JSON.stringify(element));
+    const elements = selectedElements();
+    if (!elements.length) return false;
+    state.copiedElement = JSON.parse(JSON.stringify(elements));
     refreshJournalDock();
     window.showAppToast?.("Item copied.", "info");
     return true;
@@ -1009,26 +1248,24 @@
     const page = getPage();
     if (!page || !state.copiedElement) return null;
     checkpoint();
-    const copy = Data.normalizeElement({
-      ...state.copiedElement,
-      id: Data.createId("journal-element"),
-      x: Math.min(960, state.copiedElement.x + 28),
-      y: Math.min(1360, state.copiedElement.y + 28),
-      z: Math.max(0, ...page.elements.map((item) => item.z)) + 1
-    });
-    page.elements.push(copy);
-    state.selectedElementId = copy.id;
-    state.copiedElement = JSON.parse(JSON.stringify(copy));
+    const elements = Array.isArray(state.copiedElement) ? state.copiedElement : [state.copiedElement];
+    const bounds=Data.selectionBounds(elements),z=Math.max(0,...page.elements.map(item=>item.z));
+    const dx=Math.max(0,Math.min(28,1000-bounds.x-bounds.w)),dy=Math.max(0,Math.min(28,1400-bounds.y-bounds.h));
+    const copies=elements.map((element,i)=>Data.normalizeElement({...element,id:Data.createId("journal-element"),x:element.x+dx,y:element.y+dy,z:z+i+1}));
+    page.elements.push(...copies);
+    setSelection(copies.map(item=>item.id));
+    state.copiedElement = JSON.parse(JSON.stringify(copies));
     saveImmediately();
     renderEditor();
-    return copy;
+    return copies[0];
   }
 
   function startJournalPlacement(preset = "text") {
     const tool = preset === "image" ? "image" : preset === "text" ? "text" : "";
     if (!tool || state.mode !== "edit") return;
     state.placementTool = state.placementTool === tool ? "" : tool;
-    state.selectedElementId = "";
+    state.activeTool = state.placementTool ? (tool === "image" ? "photo" : "text") : "select";
+    setSelection();
     state.panel = "";
     state.placementPoint = tool === "image" ? { x: 230, y: 350 } : { x: 160, y: 220 };
     renderEditor();
@@ -1215,8 +1452,19 @@
 
   function handleTool(tool) {
     if (!tool) return;
+    if (state.gesture) return;
     state.activeTool = tool;
-    state.selectedElementId = "";
+    setSelection();
+    state.placementTool = "";
+    if (tool === "text") { startJournalPlacement("text"); return; }
+    if (tool === "note") {
+      const note = insertElement({ type: "text", text: "A little note…", x: 220, y: 320, w: 390, h: 300,
+        background: "#e8d9ad", color: "#352d26", font: "hand", fontSize: 18, padding: 12, radius: 3 });
+      state.activeTool = "select";
+      state.textCheckpointId = `focus-${note.id}`;
+      renderEditor();
+      return;
+    }
     if (tool === "photo") {
       state.panel = "";
       renderEditor();
@@ -1229,9 +1477,30 @@
 
   function handleAction(action, target) {
     if (!action) return;
+    if (action === "copy-elements") {copySelectedElement();return;}
+    if (action === "paste-elements") {pasteSelectedElement();return;}
+    if (action === "clear-text-background") {checkpoint();changeSelected({background:""});renderEditor();return;}
+    if (action === "ink-preset") {
+      if (state.activeTool === "highlighter") state.highlightColor = target.dataset.color;
+      else state.inkColor = target.dataset.color;
+      refreshEditorSettings();
+      return;
+    }
+    if (action === "straight-ink") { state.straightInk = !state.straightInk; refreshEditorSettings(); return; }
+    if (action === "lasso-freehand" || action === "lasso-rectangle") { state.lassoType = action.slice(6); refreshEditorSettings(); return; }
+    if (action === "clear-selection") { setSelection(); renderEditor(); return; }
+    if (action === "tape-study" || action === "tape-decorative") { state.studyTape = action === "tape-study"; renderEditor(); return; }
+    if (action === "reveal-tape") {
+      const tape = getElement(target.dataset.id);
+      if (!tape?.study) return;
+      checkpoint(); tape.revealed = !tape.revealed; saveImmediately(); renderEditor(); return;
+    }
     if (action === "back") {
       window.openPage?.(record().parent || "home");
     } else if (action === "skim") {
+      if (state.mode === "skim") return;
+      cancelBookMotion();
+      saveImmediately();
       const currentPage = getPage();
       const index = Math.max(0, getPageIndex());
       state.turned = turnedForPage(index);
@@ -1241,6 +1510,17 @@
       state.bookState = isCoverPage(currentPage) ? currentPage.side : "open";
       state.mode = "skim";
       renderSkim();
+    } else if (action === "edit-visible") {
+      if (state.mode !== "edit") toggleJournalEditorMode();
+    } else if (action === "edit-partner") {
+      saveImmediately();
+      openEditor(target.dataset.pageId, true);
+    } else if (action === "focus-page") {
+      state.focusPage = !state.focusPage;
+      renderEditor();
+    } else if (action === "edit-previous" || action === "edit-next") {
+      const page = state.journal.pages[getPageIndex() + (action === "edit-next" ? 1 : -1)];
+      if (page) openEditor(page.id, true);
     } else if (action === "previous") {
       navigate(-1);
     } else if (action === "next") {
@@ -1254,6 +1534,7 @@
     } else if (action === "edit-back-cover") {
       openEditor(state.journal.backCover.id);
     } else if (action === "overview") {
+      cancelBookMotion();
       state.modeBeforeOverview = state.mode;
       state.panel = "";
       renderOverview();
@@ -1484,6 +1765,7 @@
   function onClick(event) {
     if (!state.activeId) return;
     if (state.mode === "skim") {
+      if (state.gesture || state.suppressSkimClick) return;
       const page = event.target.closest(".sj-page-hit-target[data-page-id], .sj-book-page[data-page-id]");
       if (page) {
         if (!state.suppressSkimClick) openEditor(page.dataset.pageId);
@@ -1501,8 +1783,10 @@
       return;
     }
     if (state.mode === "edit") {
+      if (state.suppressEditorClick) return;
       const object = event.target.closest("[data-element-id]");
       const editorPage = event.target.closest("[data-editor-page]");
+      if (editorPage && ["pen","pencil","highlighter","eraser","lasso"].includes(state.activeTool)) return;
       if (editorPage && state.placementTool) {
         const rect = editorPage.getBoundingClientRect();
         const x = Math.max(0, Math.min(920, (event.clientX - rect.left) / rect.width * 1000));
@@ -1525,12 +1809,13 @@
         return;
       }
       if (object && state.selectedElementId !== object.dataset.elementId) {
-        state.selectedElementId = object.dataset.elementId;
+        setSelection([object.dataset.elementId]);
         state.activeTool = "select";
         state.panel = "";
         renderEditor();
       } else if (!object && editorPage) {
-        state.selectedElementId = "";
+        if(event.target.closest("[data-group-move]")) return;
+        setSelection();
         renderEditor();
       }
     }
@@ -1539,6 +1824,19 @@
   function onChange(event) {
     if (!state.activeId) return;
     const action = event.target.dataset.action;
+    if (action === "ink-color" || action === "ink-width") {
+      const highlight = state.activeTool === "highlighter";
+      if (action === "ink-color" && /^#[0-9a-f]{6}$/i.test(event.target.value)) state[highlight ? "highlightColor" : "inkColor"] = event.target.value;
+      if (action === "ink-width") state[highlight ? "highlightWidth" : "inkWidth"] = Math.max(highlight ? 12 : 1, Math.min(highlight ? 64 : 14, Number(event.target.value) || 4));
+      refreshEditorSettings(); return;
+    }
+    if (action === "erase-highlights") { state.eraseHighlightsOnly = event.target.checked; return; }
+    if (action === "selection-color") {
+      if (!/^#[0-9a-f]{6}$/i.test(event.target.value)) return;
+      checkpoint();
+      selectedElements().forEach(element=>{ if(element.type!=="image") element[element.type==="shape" ? "fill" : "color"] = event.target.value; });
+      saveImmediately(); renderEditor(); return;
+    }
     if (event.target.id === "sj-photo-input") {
       addPhotos(event.target.files);
       return;
@@ -1561,9 +1859,9 @@
       checkpoint();
       changeSelected({ fontSize: Number(event.target.value) });
       renderEditor();
-    } else if (action === "text-color") {
+    } else if (action === "text-color" || action === "text-background") {
       checkpoint();
-      changeSelected({ color: event.target.value });
+      changeSelected(action === "text-color" ? { color: event.target.value } : {background:event.target.value});
       renderEditor();
     } else if (action === "shape-fill" || action === "shape-stroke" || action === "shape-width") {
       checkpoint();
@@ -1596,11 +1894,125 @@
     }
   }
 
+  function pagePoint(event, rect) {
+    return { x: Math.max(0,Math.min(1000,(event.clientX-rect.left)/rect.width*1000)),
+      y: Math.max(0,Math.min(1400,(event.clientY-rect.top)/rect.height*1400)), pressure: event.pressure || .5 };
+  }
+
+  function beginPageTool(event, page) {
+    if (state.gesture || (event.button !== undefined && event.button !== 0)) return;
+    event.preventDefault();
+    const rect = page.getBoundingClientRect();
+    const point = pagePoint(event,rect);
+    state.gesture = { type: "page-tool", tool: state.activeTool, pointerId: event.pointerId, pageId: state.editPageId,
+      rect, captureTarget: page, points: [point], erased: new Set(), preview: page.querySelector?.(".sj-gesture-preview") };
+    page.setPointerCapture?.(event.pointerId);
+    updatePageTool(event);
+  }
+
+  function lassoPolygon(gesture) {
+    if (state.lassoType === "freehand") return gesture.points;
+    const a=gesture.points[0],b=gesture.points.at(-1);
+    return [a,{x:b.x,y:a.y},b,{x:a.x,y:b.y}];
+  }
+
+  function updatePageTool(event) {
+    const g=state.gesture;
+    const events=event.getCoalescedEvents?.() || [event];
+    for (const sample of events.length ? events : [event]) {
+      const point=pagePoint(sample,g.rect), previous=g.points.at(-1);
+      if (Math.hypot(point.x-previous.x,point.y-previous.y)>.8 && g.points.length<12000) g.points.push(point);
+      if (g.tool === "eraser") {
+        // Interpolate the eraser sweep so fast pointer moves don't skip strokes.
+        const distance=Math.hypot(point.x-previous.x,point.y-previous.y);
+        const steps=Math.max(1,Math.ceil(distance/8));
+        for(let i=0;i<=steps;i++) {
+          const p={x:previous.x+(point.x-previous.x)*i/steps,y:previous.y+(point.y-previous.y)*i/steps};
+          getPage().elements.forEach(element=>{
+            if ((!state.eraseHighlightsOnly || element.brush==="highlighter") && Data.inkHit(element,p,14)) {
+              g.erased.add(element.id);
+              const node=g.captureTarget.querySelector?.(`[data-element-id="${CSS.escape(element.id)}"]`);
+              if(node) node.style.visibility="hidden";
+            }
+          });
+        }
+      }
+    }
+    if (!g.preview) return;
+    const highlight=g.tool==="highlighter";
+    const points=g.tool==="lasso" ? lassoPolygon(g) : state.straightInk ? [g.points[0],g.points.at(-1)] : g.points;
+    const d=points.map((p,i)=>`${i ? "L" : "M"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ") + (points.length===1 ? " l.01 0" : "");
+    if (g.tool==="lasso") g.preview.innerHTML=`<path d="${d} Z" fill="#738ea918" stroke="#738ea9" stroke-width="3" stroke-dasharray="10 7"/>`;
+    else if(g.tool!=="eraser") g.preview.innerHTML=`<path d="${d}" fill="none" stroke="${highlight ? state.highlightColor : state.inkColor}" stroke-width="${highlight ? state.highlightWidth : state.inkWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${highlight ? .34 : g.tool==="pencil" ? .66 : 1}"/>`;
+  }
+
+  function finishPageTool(event, g) {
+    if (event.type !== "pointercancel") updatePageTool(event);
+    state.gesture=null;
+    state.suppressEditorClick=true;
+    setTimeout(()=>{state.suppressEditorClick=false;},180);
+    g.captureTarget.releasePointerCapture?.(event.pointerId);
+    if (event.type !== "pointercancel" && g.pageId === state.editPageId) {
+      if (g.tool==="lasso") {
+        setSelection(Data.selectInPolygon(getPage().elements,lassoPolygon(g)));
+        if(state.selectedElementId) state.activeTool="select";
+      } else if (g.tool==="eraser") {
+        if(g.erased.size) { checkpoint(); getPage().elements=getPage().elements.filter(item=>!g.erased.has(item.id)); }
+      } else {
+        const stroke=Data.inkFromPoints(state.straightInk ? [g.points[0],g.points.at(-1)] : g.points, {
+          brush:g.tool,color:g.tool==="highlighter" ? state.highlightColor : state.inkColor,
+          strokeWidth:g.tool==="highlighter" ? state.highlightWidth : state.inkWidth,
+          z:Math.max(0,...getPage().elements.map(item=>item.z))+1
+        });
+        if(stroke) {checkpoint();getPage().elements.push(stroke);}
+      }
+      getPage().updatedAt=Date.now();
+      state.journal.updatedAt=Date.now();
+      saveImmediately();
+    }
+    renderEditor();
+  }
+
+  function beginGroupGesture(event, target, resize) {
+    if (state.gesture || (event.button !== undefined && event.button !== 0)) return;
+    const page=document.querySelector("[data-editor-page]");
+    const elements=selectedElements();
+    if(!page || elements.length<2) return;
+    event.preventDefault();
+    const rect=page.getBoundingClientRect();
+    state.gesture={ type: "group", pointerId:event.pointerId, rect, start:pagePoint(event,rect),resize,
+      bounds:Data.selectionBounds(elements), originals:JSON.parse(JSON.stringify(elements)),before:JSON.stringify(state.journal),captureTarget:target,moved:false };
+    target.setPointerCapture?.(event.pointerId);
+  }
+
+  function updateGroupGesture(event, g) {
+    const p=pagePoint(event,g.rect), b=g.bounds;
+    const dx=Math.max(-b.x,Math.min(1000-b.x-b.w,p.x-g.start.x));
+    const dy=Math.max(-b.y,Math.min(1400-b.y-b.h,p.y-g.start.y));
+    const maxScale=Math.min((1000-b.x)/b.w,(1400-b.y)/b.h);
+    const minScale=Math.max(...g.originals.map(e=>Math.max(40/e.w,40/e.h)));
+    const scale=Math.max(Math.min(minScale,1),Math.min(maxScale,1+Math.max((p.x-g.start.x)/b.w,(p.y-g.start.y)/b.h)));
+    g.moved ||= Math.hypot(p.x-g.start.x,p.y-g.start.y)>1;
+    for(const original of g.originals) {
+      const element=getElement(original.id);
+      if(g.resize) {
+        Object.assign(element,{x:b.x+(original.x-b.x)*scale,y:b.y+(original.y-b.y)*scale,w:original.w*scale,h:original.h*scale});
+        if(element.type==="text") element.fontSize=Math.max(Data.MIN_TEXT_SIZE,Math.min(Data.MAX_TEXT_SIZE,original.fontSize*scale));
+        if(element.type==="ink") element.strokeWidth=original.strokeWidth*scale;
+      } else { element.x=original.x+dx;element.y=original.y+dy; }
+      const node=document.querySelector(`[data-editor-page] [data-element-id="${CSS.escape(element.id)}"]`);
+      if(node) {node.style.left=`${element.x/10}%`;node.style.top=`${element.y/14}%`;node.style.width=`${element.w/10}%`;node.style.height=`${element.h/14}%`;
+        const text=node.querySelector(".sj-text-content");if(text) text.style.fontSize=`calc(${element.fontSize} * var(--sj-type-unit,1px))`;}
+    }
+    const next=Data.selectionBounds(selectedElements()),box=document.querySelector(".sj-group-selection");
+    if(box) {box.style.left=`${next.x/10}%`;box.style.top=`${next.y/14}%`;box.style.width=`${next.w/10}%`;box.style.height=`${next.h/14}%`;}
+  }
+
   function beginEditorGesture(event, kind, object) {
     const page = document.querySelector("[data-editor-page]");
     const element = getElement(object.dataset.elementId);
     if (!page || !element) return;
-    const editingText = kind === "move" && event.target.closest?.('[contenteditable="true"]');
+    const editingText = kind === "move" && !event.altKey && event.target.closest?.('[contenteditable="true"]');
     if (!editingText) event.preventDefault();
     event.stopPropagation();
     if (state.selectedElementId !== element.id) {
@@ -1608,7 +2020,11 @@
       document.querySelectorAll(".sj-object.is-selected").forEach((item) => item.classList.remove("is-selected"));
       object.classList.add("is-selected");
       syncJournalDockState(true);
+      refreshEditorSettings();
     }
+    // Let the browser keep the caret and native text selection. Re-rendering on
+    // pointerup used to discard focus before the user could type.
+    if (editingText) return;
     checkpoint();
     const rect = page.getBoundingClientRect();
     const objectRect = object.getBoundingClientRect();
@@ -1631,12 +2047,6 @@
 
   function beginSkimGesture(event, leaf, captureTarget = leaf) {
     if ((event.button !== undefined && event.button !== 0) || state.gesture) return;
-    const direction = leaf.classList.contains("can-forward")
-      ? 1
-      : leaf.classList.contains("can-back")
-        ? -1
-        : 0;
-    if (!direction) return;
     const face = event.target.closest(".sj-leaf-face");
     event.preventDefault();
     state.gesture = {
@@ -1644,10 +2054,13 @@
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      direction,
+      direction: captureTarget.dataset.skimSide === "left" ? -1 : 1,
       pageId: captureTarget.dataset.pageId || face?.dataset.pageId || "",
       leaf,
-      offset: Number(leaf.dataset.offset) || 0,
+      captureTarget,
+      lastX: event.clientX,
+      lastTime: event.timeStamp || 0,
+      velocity: 0,
       moved: false,
       progress: 0
     };
@@ -1657,6 +2070,21 @@
   function onPointerDown(event) {
     if (!state.activeId) return;
     if (state.mode === "edit" && state.placementTool) return;
+    if (state.mode === "edit") {
+      if (event.target.closest("[data-action]")) return;
+      const group=event.target.closest("[data-group-move]");
+      if(group) {beginGroupGesture(event,group,!!event.target.closest("[data-group-resize]"));return;}
+      const page=event.target.closest("[data-editor-page]");
+      if(page && ["pen","pencil","highlighter","eraser","lasso"].includes(state.activeTool)) {beginPageTool(event,page);return;}
+      const object=event.target.closest("[data-element-id]");
+      if(page && object && event.shiftKey) {
+        event.preventDefault();
+        const ids=selectedElements().map(item=>item.id),id=object.dataset.elementId;
+        setSelection(ids.includes(id) ? ids.filter(value=>value!==id) : [...ids,id]);
+        state.suppressEditorClick=true;setTimeout(()=>{state.suppressEditorClick=false;},180);
+        renderEditor();return;
+      }
+    }
     const editorObject = event.target.closest("[data-element-id]");
     if (state.mode === "edit" && editorObject) {
       if (event.target.closest("[data-resize-object]")) beginEditorGesture(event, "resize", editorObject);
@@ -1668,7 +2096,7 @@
     const leaf = hitTarget
       ? document.querySelector(hitTarget.dataset.skimSide === "left" ? ".sj-leaf.can-back" : ".sj-leaf.can-forward")
       : event.target.closest(".sj-leaf.can-forward, .sj-leaf.can-back");
-    if (state.mode === "skim" && leaf) beginSkimGesture(event, leaf, hitTarget || leaf);
+    if (state.mode === "skim" && state.bookState === "open" && (leaf || hitTarget)) beginSkimGesture(event, leaf, hitTarget || leaf);
   }
 
   function onPointerMove(event) {
@@ -1687,21 +2115,32 @@
       return;
     }
     if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.type === "page-tool") {event.preventDefault();updatePageTool(event);return;}
+    if (gesture.type === "group") {event.preventDefault();updateGroupGesture(event,gesture);return;}
     if (gesture.type === "skim") {
       const dx = event.clientX - gesture.startX;
       const dy = event.clientY - gesture.startY;
-      if (Math.hypot(dx, dy) > 7) gesture.moved = true;
+      if (!gesture.moved && Math.hypot(dx, dy) > 8) {
+        gesture.moved = true;
+        gesture.horizontal = Math.abs(dx) > Math.abs(dy);
+        gesture.direction = dx < 0 ? 1 : -1;
+        gesture.leaf = document.querySelector(gesture.direction > 0 ? ".sj-leaf.can-forward" : ".sj-leaf.can-back");
+        if (gesture.horizontal && gesture.leaf) gesture.turn = prepareBookTurn(gesture.leaf, gesture.direction);
+      }
       if (!gesture.moved) return;
+      if (!gesture.horizontal) return;
       event.preventDefault();
-      const bookWidth = gesture.leaf.closest(".sj-book")?.getBoundingClientRect().width || 720;
+      const bookWidth = gesture.captureTarget.closest(".sj-book")?.getBoundingClientRect?.().width || 720;
       const width = Math.max(180, bookWidth / 2);
       const signed = gesture.direction > 0 ? -dx : dx;
       gesture.progress = Math.max(0, Math.min(1, signed / width));
-      const angle = gesture.direction > 0
-        ? -180 * gesture.progress
-        : -180 + (180 * gesture.progress);
+      const elapsed = (event.timeStamp || 0) - gesture.lastTime;
+      if (elapsed > 0) gesture.velocity = (event.clientX - gesture.lastX) * -gesture.direction / elapsed;
+      gesture.lastX = event.clientX;
+      gesture.lastTime = event.timeStamp || 0;
+      if (!gesture.leaf) return;
       gesture.leaf.classList.add("is-dragging");
-      gesture.leaf.style.transform = `translateX(${gesture.offset}px) rotateY(${angle}deg)`;
+      positionBookTurn(gesture.turn, gesture.progress, true);
       gesture.leaf.style.setProperty("--flip-shadow", String(Math.sin(gesture.progress * Math.PI) * 0.52));
       return;
     }
@@ -1740,27 +2179,32 @@
   function onPointerUp(event) {
     const gesture = state.gesture;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.type === "page-tool") {finishPageTool(event,gesture);return;}
+    if (gesture.type === "group") {
+      state.gesture=null;
+      gesture.captureTarget.releasePointerCapture?.(event.pointerId);
+      if(event.type==="pointercancel" || !gesture.moved) state.journal=Data.normalizeJournal(JSON.parse(gesture.before));
+      else {checkpoint(gesture.before);saveImmediately();}
+      state.suppressEditorClick=true;setTimeout(()=>{state.suppressEditorClick=false;},180);
+      renderEditor();return;
+    }
     if (gesture.type === "skim") {
-      gesture.leaf.classList.remove("is-dragging");
-      gesture.leaf.style.removeProperty("--flip-shadow");
-      if (!gesture.moved) {
+      gesture.leaf?.classList.remove("is-dragging");
+      gesture.leaf?.style.removeProperty("--flip-shadow");
+      const cancelled = event.type === "pointercancel";
+      if (!gesture.moved && !cancelled) {
         state.gesture = null;
         if (gesture.pageId) openEditor(gesture.pageId);
-      } else if (gesture.progress > 0.27) {
-        state.suppressSkimClick = true;
-        setTimeout(() => { state.suppressSkimClick = false; }, 80);
-        finishLeafTurn(gesture.leaf, gesture.direction);
       } else {
         state.suppressSkimClick = true;
-        setTimeout(() => { state.suppressSkimClick = false; }, 80);
-        const startAngle = gesture.direction > 0 ? 0 : -180;
-        gesture.leaf.classList.add("is-animating");
-        gesture.leaf.style.transform = `translateX(${gesture.offset}px) rotateY(${startAngle}deg)`;
-        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        setTimeout(() => {
+        setTimeout(() => { state.suppressSkimClick = false; }, 180);
+        const recent = (event.timeStamp || 0) - gesture.lastTime < 120;
+        const commit = !cancelled && gesture.horizontal && (gesture.progress > 0.3 || (gesture.progress > 0.06 && recent && gesture.velocity > 0.55));
+        if (gesture.leaf) finishLeafTurn(gesture.leaf, gesture.direction, commit, gesture.turn);
+        else {
           state.gesture = null;
-          renderSkim();
-        }, reduceMotion ? 20 : 360);
+          if (commit) navigate(gesture.direction);
+        }
       }
       return;
     }
@@ -1776,8 +2220,15 @@
   }
 
   function onKeyDown(event) {
-    if (!state.activeId) return;
+    if (!state.activeId || event.defaultPrevented) return;
     const editable = event.target.closest?.('[contenteditable="true"], input, select, textarea');
+    if (state.gesture) {
+      if(event.key === "Escape") {
+        const gesture=state.gesture;
+        if(gesture.type==="page-tool" || gesture.type==="group") onPointerUp({type:"pointercancel",pointerId:gesture.pointerId});
+      }
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
       restoreSnapshot(event.shiftKey ? state.future : state.history, event.shiftKey ? state.history : state.future);
@@ -1789,17 +2240,22 @@
       return;
     }
     if (editable) return;
+    if (state.mode === "edit" && (event.ctrlKey || event.metaKey)) {
+      const key=event.key.toLowerCase();
+      if(key==="c" && state.selectedElementId) {event.preventDefault();event.stopImmediatePropagation?.();copySelectedElement();return;}
+      if(key==="v" && state.copiedElement) {event.preventDefault();event.stopImmediatePropagation?.();pasteSelectedElement();return;}
+      if(key==="d" && state.selectedElementId) {event.preventDefault();duplicateElement();return;}
+    }
     if (state.mode === "skim" && event.key === "ArrowLeft") {
       event.preventDefault();
       navigate(-1);
     } else if (state.mode === "skim" && event.key === "ArrowRight") {
       event.preventDefault();
       navigate(1);
-    } else if (state.mode === "skim" && event.key === "Enter") {
+    } else if (state.mode === "skim" && event.key === "Enter" && !event.target.closest?.("button")) {
       event.preventDefault();
-      const rightIndex = (state.turned * 2) - 1;
-      const leftIndex = (state.turned * 2) - 2;
-      openEditor(state.journal.pages[rightIndex]?.id || state.journal.pages[leftIndex]?.id);
+      if (state.bookState === "front" || state.bookState === "back") revealPagesFromCover(state.bookState === "back");
+      else toggleJournalEditorMode();
     } else if (state.mode === "edit" && (event.key === "Delete" || event.key === "Backspace") && state.selectedElementId) {
       event.preventDefault();
       removeElement();
@@ -1813,7 +2269,7 @@
         state.mode = state.modeBeforeOverview === "edit" ? "edit" : "skim";
         renderCurrent();
       } else if (state.mode === "edit" && state.selectedElementId) {
-        state.selectedElementId = "";
+        setSelection();
         renderEditor();
       } else if (state.mode === "edit") {
         handleAction("skim");
@@ -1860,8 +2316,8 @@
   }
 
   function render(id) {
+    cancelBookMotion();
     clearTimeout(state.saveTimer);
-    clearTimeout(state.resizeTimer);
     state.activeId = id;
     state.gesture = null;
     state.suppressSkimClick = false;
@@ -1902,6 +2358,7 @@
   }
 
   function close() {
+    cancelBookMotion();
     clearTimeout(state.saveTimer);
     saveImmediately();
     const pageContent = document.getElementById("pageContent");
@@ -1933,11 +2390,6 @@
   document.addEventListener("drop", onDrop);
   document.addEventListener("dragover", onDragOver);
   document.addEventListener("paste", onPaste);
-  window.addEventListener("resize", () => {
-    if (!state.activeId) return;
-    clearTimeout(state.resizeTimer);
-    state.resizeTimer = setTimeout(renderCurrent, 120);
-  });
   window.addEventListener("pagehide", () => {
     saveImmediately();
     window.SanctumStorage?.flush?.();

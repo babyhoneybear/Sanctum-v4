@@ -1,0 +1,68 @@
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const express = require('express');
+const {chromium} = require('playwright');
+
+(async () => {
+  const app = express(), root = path.resolve(__dirname,'..');
+  let origin, browser;
+  app.get('/test/fixtures/music-seed.html', (_req,res)=>res.type('html').send(fs.readFileSync(path.join(root,'test/fixtures/music-seed.html'),'utf8').replaceAll('http://localhost:3025',origin)));
+  app.use(express.static(root));
+  const server = app.listen(0,'127.0.0.1');
+  try {
+    await new Promise(resolve=>server.listening ? resolve() : server.once('listening',resolve));
+    origin = `http://127.0.0.1:${server.address().port}`;
+    browser = await chromium.launch({channel:'msedge',headless:true});
+    const page = await browser.newPage({viewport:{width:1440,height:1000}}), errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await page.goto(`${origin}/test/fixtures/music-seed.html`);
+    await page.getByRole('button',{name:'Load music test data',exact:true}).click();
+    await page.getByText('Saved. Open Sanctum.',{exact:true}).waitFor();
+    await page.getByRole('link',{name:'Open Sanctum',exact:true}).click();
+    await page.waitForFunction(()=>window.SanctumProjectUI && window.SanctumStorage?.ready);
+    await page.locator('#grid').getByText('Beneath the Veins',{exact:true}).click();
+    const badge=page.getByRole('button',{name:'Open project organization: Beneath the Veins',exact:true});
+    await badge.waitFor(); await badge.click();
+    const dialog=page.getByRole('dialog',{name:'Page organization',exact:true});
+    await dialog.waitFor();
+    assert.equal(await dialog.getByRole('combobox',{name:'Page role',exact:true}).inputValue(),'project');
+    await dialog.getByRole('group',{name:'Pages inside',exact:true}).getByRole('button',{name:'Chapter One Page',exact:true}).waitFor();
+    assert.equal(await dialog.getByText('Daily Practice',{exact:true}).count(),0);
+    await dialog.getByRole('searchbox',{name:'Find pages inside',exact:true}).fill('missing');
+    await dialog.getByText('No pages found.',{exact:true}).waitFor();
+    await dialog.getByRole('searchbox',{name:'Find pages inside',exact:true}).fill('');
+    const before=await page.evaluate(()=>structuredClone(userPages.find(p=>p.id==='music-novel')));
+    await dialog.getByRole('combobox',{name:'Page role',exact:true}).selectOption('page');
+    await page.waitForFunction(()=>userPages.find(p=>p.id==='music-novel').organizationRole==='page');
+    assert.equal(await badge.count(),0);
+    await dialog.getByRole('combobox',{name:'Page role',exact:true}).selectOption('project');
+    await badge.waitFor();
+    const after=await page.evaluate(()=>structuredClone(userPages.find(p=>p.id==='music-novel')));
+    for (const field of ['id','parent','containerType','layout','databaseRowRef']) assert.deepEqual(after[field],before[field]);
+    await dialog.getByRole('button',{name:'Close page organization',exact:true}).click();
+    await page.locator('#breadcrumbBar').getByText('Writing',{exact:true}).click();
+    await page.getByRole('button',{name:'Writing',exact:true}).waitFor();
+    await page.reload(); await page.waitForFunction(()=>window.SanctumProjectUI);
+    assert.equal(await page.evaluate(()=>userPages.find(p=>p.id==='music-novel').organizationRole),'project');
+    await page.evaluate(()=>openPage('music-novel'));
+    await badge.waitFor(); await badge.click();
+    await dialog.getByRole('group',{name:'Pages inside',exact:true}).getByRole('button',{name:'Chapter One Page',exact:true}).click();
+    await page.getByRole('button',{name:'Open project organization: Beneath the Veins',exact:true}).waitFor();
+    assert.equal(await page.evaluate(()=>currentPageId),'music-chapter');
+    await page.locator('#moreBtn').click(); await page.getByRole('button',{name:'Page organization',exact:true}).click();
+    await dialog.getByRole('button',{name:'Beneath the Veins',exact:true}).click();
+    assert.equal(await dialog.getByRole('combobox',{name:'Page role',exact:true}).inputValue(),'project');
+    // Failure must restore the original role rather than leave a temporary project in memory.
+    await page.evaluate(()=>{window.projectCheckSave=window.saveSanctumRegistry;window.saveSanctumRegistry=()=>false;});
+    await dialog.getByRole('combobox',{name:'Page role',exact:true}).selectOption('page');
+    await dialog.getByRole('status').getByText('Could not save the role. Please try again.',{exact:true}).waitFor();
+    assert.equal(await dialog.getByRole('combobox',{name:'Page role',exact:true}).inputValue(),'project');
+    await page.evaluate(()=>{window.saveSanctumRegistry=window.projectCheckSave;});
+    await dialog.getByRole('button',{name:'Close page organization',exact:true}).click(); await badge.click();
+    await page.screenshot({path:path.join(__dirname,'../artifacts/project-organization.jpg')});
+    assert.deepEqual(errors,[]);
+    console.log('PASS: project badge, contents/search, database role changes, persistence after source sync/reload, navigation, and failed-save rollback.');
+  } finally {await browser?.close(); await new Promise(resolve=>server.close(resolve));}
+})().catch(error=>{console.error(error);process.exitCode=1;});

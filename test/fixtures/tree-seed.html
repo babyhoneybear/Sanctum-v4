@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Relationship tree test vault</title>
+<style>body{max-width:650px;margin:80px auto;background:#eee9dd;color:#302d26;font:16px/1.6 system-ui}button{padding:12px 20px}a{display:block;margin-top:20px}</style>
+<h1>Relationship tree test vault</h1><p>Seeds fictional people and two linked homepage views on the isolated localhost:3023 test origin.</p><button id="seed" disabled>Load tree test data</button><p id="status">Opening test storage…</p><a href="/">Open Sanctum</a>
+<script src="../../storage.js"></script><script>
+SanctumStorageReady.then(()=>{
+  const seed=document.getElementById('seed'),status=document.getElementById('status');
+  if(location.origin!=='http://localhost:3023'){status.textContent='Use localhost:3023 only.';return;}seed.disabled=false;status.textContent='Ready.';
+  seed.onclick=async()=>{
+    const page=(id,title,layout,parent='home')=>({id,title,layout,parent,category:'none',containerType:'page',summary:'',tags:[],openBehavior:'open'});
+    const pages=[page('tree-family','The Vale family','sheet','tree-home'),{...page('tree-home','A story of the coast','board-canvas'),containerType:'project'},
+      {...page('tree-extra','Rowan · the traveller','board-canvas','tree-home'),category:'character'},
+      {...page('tree-parent','Willow · the navigator','board-canvas','tree-home'),category:'character'},
+      {...page('tree-school','School','board-canvas'),containerType:'project'},
+      {...page('tree-other-person','Rowan from another project','document','tree-school'),category:'character'}];
+    const source={kind:'page',pageId:'tree-family'};
+    const properties=[{id:'name',type:'title',name:'Name'},{id:'parents',type:'relation',name:'Parents',treeKind:'parent',relationTarget:source},{id:'partners',type:'relation',name:'Partners',treeKind:'partner',relationTarget:source},{id:'friends',type:'relation',name:'Friends',treeKind:'friend',relationTarget:source},{id:'born',type:'text',name:'Born'},{id:'died',type:'text',name:'Died'}];
+    const data=[['mara','Mara Vale','1871','1938',[],['oren']],['oren','Oren Vale','1868','1933',[],[]],['iris','Iris Vale','1896','',['mara','oren'],['theo']],['theo','Theo Ash','1894','',[],[]],['silas','Silas Vale','1901','',['mara','oren'],[]],['nell','Nell Ash','1920','',['iris','theo'],[]],['finn','Finn Vale','1927','',['silas'],[]]];
+    const rows=data.map((r,i)=>({id:r[0],values:{name:r[1],born:r[2],died:r[3],parents:JSON.stringify(r[4]),partners:JSON.stringify(r[5]),friends:r[0]==='silas'?'["theo"]':''},icon:i===0?'/assets/worldbuilding/culture.jpg':i===2?'/assets/worldbuilding/nature.jpg':''}));
+    const embed=(id,x,y,view='tree')=>({id,type:'calendar',x,y,w:880,h:470,z:1,calendarView:view,dbSourceKind:'page',dbSourcePageId:'tree-family',dbViewTitle:view==='table'?'The same people · Table':'The Vale family',dbProperties:'[]',dbRows:'[]'});
+    const blocks={home:pages.map((p,i)=>({id:`tree-card-${i}`,type:'page',x:32+i*280,y:60,w:250,h:170,z:1,linkedPageId:p.id,linkedPageType:'page',pageCardTitle:p.title,pageCardLayout:p.layout})),'tree-home':[embed('compact-family',32,40),embed('story-connections',950,40),embed('people-table',32,570,'table')]};
+    blocks['tree-extra']=[{id:'rowan-parents',type:'connections',connectionPropertyId:'parents',connectionSourcePageId:'tree-extra',titleHTML:'Parents',x:32,y:40,w:430,h:200,z:1}];
+    for(const [key,value] of Object.entries({sanctum_pages_registry:pages,sanctum_domains:[],sanctum_page_blocks:blocks,sanctum_page_props_v1:{'tree-extra':{properties:[{id:'parents',label:'Parents',type:'relation',linkedPageIds:['tree-parent']}]}},sanctum_page_databases:{'tree-family':{title:'The Vale family',view:'tree',properties,rows}},sanctum_relationship_trees_v1:{sources:{},views:{'block:tree-home:compact-family':{height:280},'block:tree-home:story-connections':{enabled:['family','friend'],height:380}}}}))localStorage.setItem(key,JSON.stringify(value));
+    await SanctumStorage.flush();status.textContent='Test data saved. Open Sanctum.';
+  };
+});
+</script></html>

@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Timeline test vault</title>
+<style>body{max-width:650px;margin:80px auto;background:#eee9dd;color:#302d26;font:16px/1.6 system-ui}button{padding:12px 20px}a{display:block;margin-top:20px}</style>
+<h1>Timeline test vault</h1><p>Creates a small, illustrated timeline and two linked homepage views on the isolated localhost:3023 test origin. Does not touch the normal Sanctum vault.</p>
+<button id="seed" disabled>Load timeline test data</button><p id="status" role="status">Opening test storage…</p><a href="/">Open Sanctum</a>
+<script src="../../storage.js"></script><script>
+SanctumStorageReady.then(()=>{
+  const seed = document.getElementById('seed'), status = document.getElementById('status');
+  if(location.origin !== 'http://localhost:3023') {status.textContent='Use the separate localhost:3023 test origin.';return;}
+  seed.disabled=false;status.textContent='Ready.';
+  seed.onclick=async()=>{
+    const page=(id,title,layout,parent='home')=>({id,title,layout,parent,category:'none',containerType:'page',summary:'',tags:[],openBehavior:'open'});
+    const pages=[page('timeline-demo','A coastal history','sheet'),page('timeline-home','The North Coast','board-canvas'),page('timeline-plans','Seasonal plans','sheet'),page('timeline-fantasy','The ages of Lumen','sheet')];
+    const properties=[{id:'name',name:'Event',type:'title'},{id:'when',name:'When',type:'text'},{id:'until',name:'Until',type:'text'},{id:'details',name:'Details',type:'text'},{id:'track',name:'Track',type:'text'},{id:'image',name:'Image',type:'text'}];
+    const data=[['2100','A settlement by the sea','The first families make a home along the northern shore.','culture','Origins',''],['2150','The watchtower rises','A light above the cliffs becomes a landmark for returning ships.','castle','The city','2151'],['2152','Letters from abroad','New routes bring unfamiliar stories, languages, and ideas.','desk','Everyday life',''],['2152','The winter gardens','A quiet corner of the old grounds is opened to the town.','nature','Everyday life','2154'],['2158','A new chapter','The coastline changes. Its stories travel with the people who leave.','scenes','The city','']];
+    const rows=data.map((d,i)=>({id:`moment-${i}`,color:'#a46b50',values:{name:d[1],when:d[0],until:d[5],details:d[2],image:`/assets/worldbuilding/${d[3]}.jpg`,track:d[4]}}));
+    rows.push({id:'undated',values:{name:'A story still being found',details:'Keep this moment until its date is known.'}});
+    const db={title:'A coastal history',view:'timeline',properties,rows};
+    const plans={title:'Seasonal plans',view:'timeline',properties:[{id:'name',name:'Event',type:'title'},{id:'date',name:'Date',type:'date'},{id:'details',name:'Details',type:'text'}],rows:[{id:'exam',values:{name:'Language assessment',date:'2026-10-12',details:'Review the first three units.'}},{id:'project',values:{name:'Autumn project',date:JSON.stringify({start:'2026-09-22',end:'2026-11-05'}),details:'A little work each week.'}}]};
+    const fantasy={title:'The ages of Lumen',view:'timeline',properties,rows:[{id:'dawn',values:{name:'The lantern is lit',when:'2-01-10 Dawn',details:'The first record of the new era.'}},{id:'crossing',values:{name:'The crossing',when:'3-02-01 Dawn',until:'3-02-20 Dawn'}}]};
+    const embed=(id,x,y,view='timeline')=>({id,type:'calendar',x,y,w:1060,h:650,z:1,calendarView:view,dbSourceKind:'page',dbSourcePageId:'timeline-demo',dbViewTitle:view==='table'?'The same events · Table':'A coastal history',dbProperties:'[]',dbRows:'[]'});
+    const blocks={home:pages.map((p,i)=>({id:`card-${i}`,type:'page',x:32+i*255,y:60,w:230,h:170,z:1,linkedPageId:p.id,linkedPageType:'page',pageCardTitle:p.title,pageCardLayout:p.layout})), 'timeline-home':[embed('linked-timeline',32,40),embed('linked-table',32,780,'table')]};
+    const prefs={sources:{'page:timeline-fantasy':{calendar:{kind:'custom',name:'Lumen calendar',months:[{name:'Ember',days:20},{name:'Tide',days:24},{name:'Veil',days:18}],hours:28,yearZero:true,eras:[{name:'Dawn',offset:0},{name:'Ash',offset:100}]}}},views:{'page:timeline-demo':{theme:'inherit',spacing:'time'},'page:timeline-plans':{style:'spans',theme:'paper'},'page:timeline-fantasy':{style:'spans',theme:'ink'},'block:timeline-home:linked-timeline':{theme:'paper'}}};
+    for(const [key,value] of Object.entries({sanctum_pages_registry:pages,sanctum_domains:[],sanctum_page_blocks:blocks,sanctum_page_databases:{'timeline-demo':db,'timeline-plans':plans,'timeline-fantasy':fantasy},sanctum_timelines_v1:prefs}))localStorage.setItem(key,JSON.stringify(value));
+    await SanctumStorage.flush(); status.textContent='Test data saved. Open Sanctum.';
+  };
+});
+</script></html>

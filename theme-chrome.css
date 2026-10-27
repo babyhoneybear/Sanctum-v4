@@ -1,0 +1,197 @@
+/* Application controls use the resolved theme. Content palettes remain local. */
+:root[data-theme] .doc-sidebar,
+:root[data-theme] .doc-inspector {
+  background: var(--sidebar-bg);
+  color: var(--text-main);
+  border-color: var(--panel-border);
+}
+:root[data-theme] .doc-sidebar-header,
+:root[data-theme] .doc-inspector-header,
+.doc-inspector-footer {
+  background: transparent;
+  border-color: var(--panel-border);
+}
+.doc-inspector-textarea { background: var(--field-bg); border-color: var(--panel-border-strong); }
+.doc-inspector-group + .doc-inspector-group { border-color: var(--panel-border); }
+.app-toast,
+.soundbar-bar,
+.soundbar-panel,
+.assistant-drawer-right,
+.assistant-drawer-right.open,
+.assistant-profile-modal {
+  background: var(--panel-bg);
+  color: var(--text-main);
+  border-color: var(--panel-border-strong);
+  box-shadow: 0 12px 36px var(--shadow-strong);
+}
+.soundbar-tabs, .assistant-profile-tabs,
+.assistant-drawer-top, .assistant-mode-switcher,
+.assistant-composer, .assistant-profile-footer {
+  border-color: var(--panel-border);
+}
+.soundbar-cover, .soundbar-cover.has-track,
+.topbar-ask-btn, .assistant-drawer-avatar,
+.assistant-drawer-top, .assistant-mode-switcher,
+.assistant-composer, .assistant-profile-footer,
+.assistant-profile-portrait, .assistant-profile-toggle,
+.assistant-profile-memory-item, .assistant-personality-card {
+  background: var(--panel-bg-raised);
+  color: var(--text-main);
+  border-color: var(--panel-border-strong);
+}
+.soundbar-track-name, .assistant-drawer-name,
+.assistant-empty-title, .assistant-profile-header h2,
+.assistant-profile-field-title, .assistant-profile-field > span,
+.assistant-personality-card strong, .assistant-profile-toggle strong,
+.assistant-profile-memory-text, .assistant-message-text strong {
+  color: var(--text-main);
+}
+.soundbar-track-meta, .soundbar-btn, .soundbar-volume-icon, .soundbar-expand-btn,
+.assistant-drawer-role, .assistant-drawer-subtitle, .assistant-drawer-close,
+.assistant-empty p, .assistant-mode-option, .assistant-message-time,
+.assistant-profile-close, .assistant-profile-tabs button, .assistant-profile-help,
+.assistant-personality-description, .assistant-personality-card small,
+.assistant-profile-toggle small, .assistant-profile-field > span small,
+.assistant-profile-memory-meta, .assistant-profile-memory-empty,
+.assistant-profile-memory-item button, .assistant-profile-footer .is-secondary {
+  color: var(--muted2);
+}
+.soundbar-btn:hover, .topbar-ask-btn:hover, .topbar-ask-btn.active,
+.assistant-drawer-close:hover, .assistant-mode-option:hover,
+.assistant-profile-close:hover, .assistant-profile-memory-item button:hover,
+.assistant-profile-inline-actions button:hover, .assistant-profile-memory-add button:hover,
+.assistant-personality-card:hover, .assistant-starters button:hover {
+  color: var(--text-main);
+  background: var(--surface-bg-hover);
+  border-color: var(--panel-border-strong);
+}
+.soundbar-play-btn, .assistant-composer-send, .assistant-composer-send:hover,
+.assistant-profile-footer .is-primary, .assistant-db-transaction-apply {
+  color: var(--on-accent);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+}
+.soundbar-play-btn { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent); }
+.soundbar-play-btn:hover, .assistant-db-transaction-apply:hover {
+  color: var(--on-accent);
+  background: var(--accent-solid-hover);
+  border-color: var(--accent-solid-hover);
+}
+.soundbar-volume, .assistant-profile-toggle input,
+.assistant-db-proposal-operation-choice > input { accent-color: var(--accent); }
+.soundbar-progress-wrap { background: var(--panel-border); }
+.soundbar-progress-bar, .assistant-drawer-role::before,
+.assistant-drawer-presence, .assistant-thinking .assistant-thinking-orb { background: var(--accent); }
+.assistant-drawer-presence { border-color: var(--panel-bg-raised); }
+.soundbar-tab.active, .assistant-profile-tabs button.active { border-color: var(--accent); }
+.assistant-profile-tabs button:hover, .assistant-profile-tabs button.active { color: var(--text-main); }
+.assistant-empty-kicker, .assistant-profile-kicker { color: var(--accent-brown); }
+.assistant-profile-overlay { background: var(--overlay-bg); }
+.assistant-mode-option.selected, .assistant-personality-card.selected {
+  color: var(--text-main);
+  background: var(--subtle-fill-hover);
+  border-color: var(--accent);
+}
+.assistant-message-text, .assistant-message.user .assistant-message-text,
+.assistant-starters button, .assistant-thinking,
+.assistant-profile-inline-actions button, .assistant-profile-memory-add button {
+  color: var(--text-main);
+  background: var(--panel-bg-raised);
+  border-color: var(--panel-border-strong);
+}
+.assistant-message.user .assistant-message-text {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+}
+.assistant-thinking .assistant-thinking-copy { color: var(--muted); }
+.assistant-composer-row, .assistant-profile-field input,
+.assistant-profile-field select, .assistant-profile-memory-add input {
+  color: var(--text-main);
+  background: var(--field-bg);
+  border-color: var(--panel-border-strong);
+}
+.assistant-composer-row .assistant-composer-input { color: var(--text-main); }
+.assistant-composer-row:focus-within, .assistant-profile-field input:focus,
+.assistant-profile-field select:focus, .assistant-profile-memory-add input:focus { border-color: var(--accent); }
+.assistant-composer-row .assistant-composer-input::placeholder,
+.assistant-db-proposal-question textarea.assistant-db-proposal-input::placeholder { color: var(--muted3); }
+.assistant-profile-footer .is-secondary { border-color: var(--panel-border-strong); }
+.assistant-db-proposal, .assistant-db-proposal-details-body,
+.assistant-db-proposal-operation.selected {
+  background: var(--panel-bg);
+  border-color: var(--panel-border);
+}
+.assistant-db-proposal-details, .assistant-db-proposal-operation,
+.assistant-db-transaction-apply-row, .assistant-db-proposal-footer { border-color: var(--panel-border); }
+.assistant-db-proposal-title, .assistant-db-proposal-operation-title { color: var(--text-main); }
+.assistant-db-proposal-kicker, .assistant-db-proposal-readonly,
+.assistant-db-proposal-details-label, .assistant-db-operation-details > summary,
+.assistant-db-proposal-footer, .assistant-db-proposal-question-help { color: var(--muted2); }
+.assistant-db-proposal-details > summary, .assistant-db-proposal-icon,
+.assistant-db-proposal-prepare {
+  color: var(--muted);
+  background: var(--panel-bg-raised);
+  border-color: var(--panel-border-strong);
+}
+.assistant-db-proposal-details > summary:hover, .assistant-db-proposal-prepare:hover {
+  background: var(--surface-bg-hover);
+  border-color: var(--panel-border-strong);
+}
+
+/* Graph colors still come from its saved node/connection palette. */
+.relationship-graph-modal {
+  --relationship-graph-bg: var(--mainpage-bg);
+  --relationship-graph-panel: var(--panel-bg);
+  --rg-text: var(--text-main);
+  --rg-muted: var(--muted2);
+  color-scheme: inherit;
+  border-color: var(--panel-border-strong);
+}
+.relationship-graph-head, .relationship-graph-side, .rg-panel-section,
+.relationship-graph-segment, .rg-panel-toggle, .rg-reset-layout,
+.rg-map-controls .rg-pause { border-color: var(--panel-border); }
+.relationship-graph-field select, .relationship-graph-field select option,
+.rg-graph-search {
+  background: var(--field-bg);
+  color: var(--text-main);
+  border-color: var(--panel-border-strong);
+  color-scheme: inherit;
+}
+.relationship-graph-segment { background: var(--subtle-fill); }
+.relationship-graph-segment button.active,
+.rg-map-controls button:hover, .rg-search-results button:hover, .rg-connections button:hover {
+  background: var(--subtle-fill-hover);
+  color: var(--text-main);
+}
+.relationship-graph-close, .rg-panel-toggle, .rg-fit-button, .relationship-graph-toggle,
+.relationship-graph-controls, .rg-reset-layout, .rg-map-controls button,
+.rg-search-results button, .rg-connections button { color: var(--text-main); }
+.rg-graph-search::placeholder, .rg-zoom-value, .rg-search-summary,
+.rg-search-results small, .rg-connections small, .rg-connections-heading { color: var(--muted2); }
+.relationship-graph-toggle input { accent-color: var(--accent); }
+.relationship-graph-hint, .rg-map-controls, .rg-search-results {
+  background: var(--panel-bg);
+  color: var(--muted);
+  border-color: var(--panel-border-strong);
+}
+.rg-explore-node, .relationship-graph-open-node {
+  background: var(--subtle-fill);
+  color: var(--text-main);
+  border-color: var(--panel-border-strong);
+}
+.relationship-graph-node-title { fill: var(--rg-text); }
+.relationship-graph-node.is-selected .relationship-graph-node-title,
+.relationship-graph-node.is-search-match .relationship-graph-node-title,
+.relationship-graph-node:hover .relationship-graph-node-title,
+.relationship-graph-node:focus-visible .relationship-graph-node-title { fill: var(--rg-text); }
+.relationship-graph-modal :is(button,input,select):focus-visible { outline-color: var(--accent); }
+
+/* Black keeps sidebars close to the page, with contrast reserved for controls. */
+:root[data-theme="black"] :is(.assistant-drawer-right, .assistant-drawer-right.open,
+  .knowledge-drawer, .settings-left, .doc-sidebar, .doc-inspector) {
+  background: var(--sidebar-bg);
+}
+:root[data-theme="black"] :is(.assistant-drawer-top, .assistant-mode-switcher,
+  .assistant-composer, .knowledge-drawer-header) { background: var(--topbar); }
+:root[data-theme="black"] .relationship-graph-side {
+  background: color-mix(in srgb, var(--sidebar-bg) 94%, var(--relationship-graph-panel));
+}

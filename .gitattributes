@@ -1,0 +1,23 @@
+# WordNet uses byte offsets and the writing assets have pinned checksums.
+# Preserve their original bytes even when core.autocrlf is enabled on Windows.
+/assets/writing/** -text linguist-vendored whitespace=-blank-at-eol
+/assets/writing/*.dat binary
+/assets/writing/wordnet/data.* binary
+/assets/writing/wordnet/index.* binary
+/assets/writing/context/vectors.bin binary
+/assets/writing/context/vocabulary.json binary linguist-generated
+
+# Bundled and generated code is available locally without dominating reviews.
+/assets/html-to-image.js -text -diff linguist-vendored
+/assets/ui-icon-paths.js -text -diff linguist-generated
+/assets/page-symbol-paths.js -text -diff linguist-generated
+
+# Media is stored without text/line-ending conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mp3 binary
+*.bin binary
+
+# Shell build helpers must also work after a Windows checkout.
+*.sh text eol=lf

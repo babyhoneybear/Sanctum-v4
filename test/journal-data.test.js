@@ -13,6 +13,32 @@ const {
   updatePage,
   updateElement
 } = require("../journal-data.js");
+const { inkFromPoints, inkHit, selectInPolygon } = require('../journal-data.js');
+
+test('ink survives save normalization and invalid points cannot inject SVG markup',()=>{
+  const ink=inkFromPoints([{x:2,y:3,pressure:.8},{x:999,y:1399,pressure:.3}],{brush:'pencil',strokeWidth:5,color:'#123456'});
+  assert.deepEqual(normalizeElement(JSON.parse(JSON.stringify(ink))),ink);
+  assert.ok(ink.x>=0 && ink.y>=0 && ink.x+ink.w<=1000 && ink.y+ink.h<=1400);
+  assert.equal(normalizeElement({type:'ink',points:[{x:'<svg>',y:1}]}),null);
+  const dirty=normalizeElement({...ink,color:'" onload="bad',points:[{x:NaN,y:0},{x:Infinity,y:0},{x:.5,y:.5}]});
+  assert.equal(dirty.points.length,1);assert.equal(dirty.color,'#352d26');
+});
+
+test('eraser tests the stroke itself, including dots and rotated strokes',()=>{
+  const stroke=inkFromPoints([{x:100,y:100},{x:300,y:300}],{strokeWidth:4});
+  assert.ok(inkHit(stroke,{x:200,y:200}));assert.equal(inkHit(stroke,{x:100,y:300}),false);
+  const rotated={...stroke,rotation:90};
+  assert.ok(inkHit(rotated,{x:100,y:300}));
+  assert.ok(inkHit(inkFromPoints([{x:500,y:600}],{strokeWidth:2}),{x:500,y:600}));
+});
+
+test('lasso requires enclosed items and accounts for rotation',()=>{
+  const small=normalizeElement({type:'shape',id:'small',x:100,y:100,w:100,h:100,rotation:45});
+  const background=normalizeElement({type:'image',id:'background',x:0,y:0,w:500,h:500});
+  const polygon=[{x:70,y:70},{x:230,y:70},{x:230,y:230},{x:70,y:230}];
+  assert.deepEqual(selectInPolygon([small,background],polygon),['small']);
+  assert.deepEqual(selectInPolygon([small],[{x:100,y:100},{x:200,y:100},{x:200,y:200},{x:100,y:200}]),[]);
+});
 
 test("new journal text uses the compact canvas-scale default", () => {
   const text = normalizeElement({ type: "text" });

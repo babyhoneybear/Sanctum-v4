@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Frame drag interaction check</title>
+<style>body{margin:0;background:#171717;color:#eee;font:13px system-ui}nav{padding:10px;display:flex;gap:10px}button{padding:6px 10px}pre{margin:8px 12px;white-space:pre-wrap}iframe{width:100%;height:calc(100vh - 140px);border:0}</style>
+<nav><button id="reset" disabled>Reset sample</button><button id="run" disabled>Run interaction checks</button><button id="undo" disabled>Undo</button><button id="redo" disabled>Redo</button><button id="reopen" disabled>Reopen saved sample</button></nav><pre id="report">Loading isolated sample vault on port 3037…</pre><iframe id="app" title="Frame test canvas"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Only use isolated port 3037');
+const frame=document.getElementById('app'),report=document.getElementById('report');let w;
+frame.src='/';
+frame.onload=async()=>{
+ w=frame.contentWindow;await w.SanctumStorageReady;
+ if(!w.SanctumChatGPTConnection)await new Promise(resolve=>w.addEventListener('sanctum:scripts-ready',resolve,{once:true}));
+ if(!w.buildBlockFromData){report.textContent='FAIL canvas did not load';return;}
+ w.document.body.classList.add('editing');
+ const style=w.document.createElement('style');style.textContent='#sidebar,#tabBar,.soundbar,.assistant-panel{display:none!important}#mainPane{margin-left:0!important}';w.document.head.appendChild(style);
+ for(const id of ['reset','run','undo','redo','reopen'])document.getElementById(id).disabled=false;
+ report.textContent='Ready. Sample vault only. '+JSON.stringify(summary());
+};
+const summary=()=>w.serializeBlocks().map(b=>({id:b.id,type:b.type,body:b.bodyHTML,items:b.containerItems?.map(i=>({id:i.id,type:i.type,title:i.pageCardTitle,body:i.bodyHTML}))}));
+function reset(){
+ if(!w.userPages.some(p=>p.id==='frame-drag-sample'))w.SanctumAssistantPageRegistryStore.create({pageId:'frame-drag-sample',title:'Frame drag sample',parentId:'home',layout:'board-canvas'});
+ w.openPage('frame-drag-sample');w.document.body.classList.add('editing');w.stopPlacing(true);w.clearGrid();
+ const samples=[{id:'frame-source',type:'container',x:48,y:24,w:360,h:420,z:1,containerTitle:'Quick links',containerItems:[{id:'sample-text',type:'text',bodyHTML:'<b>Quick links</b>'},{id:'sample-map',type:'page',linkedPageId:'test-map-reference',pageCardTitle:'Map',pageCardIcon:'📄',pageCardSummary:'Keep this link and its styling',appearance:'{}',textColor:'rgb(230, 190, 100)'},{id:'sample-image',type:'image',bodyHTML:'<img alt="Sample landscape" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22300%22 height=%22100%22%3E%3Crect width=%22300%22 height=%22100%22 fill=%22%23557c67%22/%3E%3C/svg%3E">'}]},
+ {id:'frame-target',type:'container',x:456,y:24,w:360,h:420,z:1,containerTitle:'Another frame',containerItems:[{id:'target-text',type:'text',bodyHTML:'Notes and ideas'}]}];
+ samples.forEach(b=>w.document.getElementById('grid').appendChild(w.buildBlockFromData(b)));w.saveState();report.textContent='Sample reset. Drag the grip beside Map or Quick links.';
+}
+function mouse(type,target,x,y){target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,view:w,button:0,buttons:type==='mouseup'||type==='click'?0:1,clientX:x,clientY:y}));}
+function drag(item,x,y){
+ const handle=item.querySelector('.frame-item-drag-handle'),r=item.getBoundingClientRect();const sx=r.left+3,sy=r.top+8;
+ mouse('mousedown',handle,sx,sy);mouse('mousemove',w.document,x,y);mouse('mouseup',w.document,x,y);mouse('click',w.document.elementFromPoint(x,y)||w.document.body,x,y);
+}
+function check(ok,message){if(!ok)throw Error(message);report.textContent+='\nPASS '+message;}
+document.getElementById('reset').onclick=reset;
+document.getElementById('undo').onclick=()=>{w.undo();report.textContent='Undo: '+JSON.stringify(summary());};
+document.getElementById('redo').onclick=()=>{w.redo();report.textContent='Redo: '+JSON.stringify(summary());};
+document.getElementById('reopen').onclick=()=>frame.contentWindow.location.reload();
+document.getElementById('run').onclick=()=>{
+ reset();report.textContent='Checking frame gestures with the real canvas handlers…';
+ try{
+ const doc=w.document,source=doc.getElementById('frame-source'),target=doc.getElementById('frame-target');
+ const editable=doc.querySelector('[data-frame-child-id="sample-text"] .frame-item-text-content');
+ w.startPlacingPreset('text');let er=editable.getBoundingClientRect();mouse('mousedown',editable,er.left+5,er.top+5);mouse('mouseup',editable,er.left+5,er.top+5);
+ check(doc.querySelectorAll('#grid>.block:not(.ghost)').length===2,'Clicking existing frame text cancels placement without creating a blank block');
+ const item=doc.querySelector('[data-frame-child-id="sample-map"]');const before=JSON.stringify(w.serializeFrameItemElement(item));
+ w.startPlacingPreset('text');const count=doc.querySelectorAll('#grid>.block:not(.ghost)').length;
+ let r=doc.querySelector('[data-frame-child-id="sample-text"]').getBoundingClientRect();drag(item,r.left+1,r.top+1);
+ check(doc.querySelectorAll('#grid>.block:not(.ghost)').length===count,'Dragging while placement is armed creates no blank block');
+ check(source.querySelector('.container-items').firstElementChild===item,'Map can be reordered before text in its frame');
+ check(JSON.stringify(w.serializeFrameItemElement(item))===before,'Reordering preserves the linked page and styling');
+ r=target.getBoundingClientRect();drag(item,r.left+100,r.top+90);
+ check(item.closest('.block')===target,'Map moves to another frame');
+ const grid=w.getGridInteractionRect();drag(item,Math.min(grid.right-60,r.right+140),r.top+100);
+ const out=doc.querySelector('#grid>.block[data-type="page"]');
+ check(!!out&&out.dataset.linkedPageId==='test-map-reference'&&out.querySelector('.page-card-title').textContent==='Map','Moving out creates the original linked page card');
+ check(!doc.querySelector('[data-frame-child-id="sample-map"]'),'Moving out removes the source item exactly once');
+ w.undo();check(!!doc.querySelector('#frame-target [data-frame-child-id="sample-map"]')&&!doc.querySelector('#grid>.block[data-type="page"]'),'Undo restores the item inside its prior frame');
+ w.redo();check(!!doc.querySelector('#grid>.block[data-type="page"]'),'Redo restores the moved card');
+ const image=doc.querySelector('[data-frame-child-id="sample-image"]');r=doc.getElementById('frame-target').getBoundingClientRect();drag(image,r.left+80,r.top+160);
+ check(image.closest('.block')===doc.getElementById('frame-target')&&!!image.querySelector('img'),'Image moves between frames with its artwork');
+ const text=doc.querySelector('[data-frame-child-id="sample-text"]');r=text.getBoundingClientRect();const handle=text.querySelector('.frame-item-drag-handle');mouse('mousedown',handle,r.left+2,r.top+5);mouse('mouseup',w.document,r.left+2,r.top+5);
+ check(text.closest('.block')===doc.getElementById('frame-source'),'Clicking a grip without dragging does not move the item');
+ check(w.getPageBlocks('frame-drag-sample').some(b=>b.type==='page'&&b.linkedPageId==='test-map-reference'),'The moved card is saved in sample storage');
+ const typing=doc.querySelector('#frame-source .frame-typing-placeholder');
+ typing.classList.add('selected');
+ check(!!typing&&w.getComputedStyle(typing.querySelector('.frame-item-drag-handle')).display==='none'&&w.getComputedStyle(typing.querySelector('.frame-item-delete')).display==='none','Empty typing prompt has no move or delete controls');
+ typing.classList.remove('selected');
+ const blocksBefore=doc.querySelectorAll('#grid>.block:not(.ghost)').length;
+ check(w.placeFrameItemOnGrid(typing,grid.left+850,grid.top+130)===null&&doc.querySelectorAll('#grid>.block:not(.ghost)').length===blocksBefore,'Empty typing prompt cannot create a blank canvas box');
+ const body=text.querySelector('.frame-item-text-content').innerHTML;
+ drag(text,Math.min(grid.right-60,grid.left+850),grid.top+180);
+ const movedText=Array.from(doc.querySelectorAll('#grid>.block[data-type="text"]')).find(b=>b.querySelector('.block-body')?.innerHTML===body);
+ check(!!movedText&&!doc.querySelector('[data-frame-child-id="sample-text"]'),'Dragging actual text out retains its exact content');
+ const remove=doc.querySelector('[data-frame-child-id="target-text"] .frame-item-delete');r=remove.getBoundingClientRect();
+ mouse('mousedown',remove,r.left+2,r.top+2);mouse('mouseup',remove,r.left+2,r.top+2);mouse('click',remove,r.left+2,r.top+2);
+ check(!doc.querySelector('[data-frame-child-id="target-text"]')&&!w.getPageBlocks('frame-drag-sample').some(b=>b.containerItems?.some(i=>i.id==='target-text')),'Delete removes a real item from the frame and saved data, even just after a drag');
+ w.undo();check(!!doc.querySelector('[data-frame-child-id="target-text"]'),'Undo restores a deleted frame item');
+ report.textContent+='\nALL CHECKS PASSED';
+ }catch(error){report.textContent+='\nFAIL '+error.stack;}
+};
+</script></html>

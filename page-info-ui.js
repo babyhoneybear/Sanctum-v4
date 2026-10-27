@@ -274,7 +274,7 @@
 			case "layout":
 				return record.layout || "";
 			case "category":
-				return record.category || "";
+				return window.SanctumCustomTypes?.label(record.category) || record.category || "";
 			case "createdAt":
 				return formatUpdatedAt(record.createdAt);
 			case "updatedAt":
@@ -513,7 +513,7 @@
 			const visibleItems = items.slice(0, 3).map((record) => {
 				const meta = record.type === "domain"
 					? "Domain"
-					: (record.category && record.category !== "none" ? record.category : (record.layout || "Page"));
+					: (record.category && record.category !== "none" ? (window.SanctumCustomTypes?.label(record.category) || record.category) : (record.layout || "Page"));
 				return `
 					<button
 						class="knowledge-calendar-event"
@@ -665,7 +665,7 @@
 			if (!edge || edge.type === "contains" || edge.type === "backlink") return;
 			const fromId = edge.from || "";
 			const toId = edge.to || "";
-			const typeLabel = getConnectionTypeLabel(edge.type);
+            const typeLabel = edge.type === "relation" && edge.label ? edge.label : getConnectionTypeLabel(edge.type);
 			const count = Number(edge.count || 1) || 1;
 
 			if (edge.type === "database-row" || fromId.startsWith("dbrow:") || toId.startsWith("dbrow:")) {
@@ -798,7 +798,7 @@
 		const chips = [];
 		if (record.type === "domain") chips.push("Domain");
 		if (record.layout) chips.push(`Layout: ${record.layout}`);
-		if (record.category && record.category !== "none") chips.push(`Category: ${record.category}`);
+		if (record.category && record.category !== "none") chips.push(`Category: ${window.SanctumCustomTypes?.label(record.category) || record.category}`);
 		if (record.containerType) chips.push(`Container: ${record.containerType}`);
 		if (!chips.length) chips.push("Page");
 
@@ -930,7 +930,7 @@
 
 		const tableBody = filtered.length
 			? filtered.map((record) => {
-					const typeLabel = record.type === "domain" ? "Domain" : (record.category && record.category !== "none" ? record.category : "Page");
+					const typeLabel = record.type === "domain" ? "Domain" : (record.category && record.category !== "none" ? (window.SanctumCustomTypes?.label(record.category) || record.category) : "Page");
 					const cells = columns.map((key) => {
 						if (key === "type") return `<span class="knowledge-view-cell">${escapeHTML(typeLabel)}</span>`;
 						return `<span class="knowledge-view-cell">${escapeHTML(getRecordValue(record, key, pageMap) || "-")}</span>`;

@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Character sheet test vault</title>
+<h1>Character sheet test vault</h1><button id="seed" disabled>Load fictional character</button><p id="status">Opening test storage…</p><a href="/">Open Sanctum</a>
+<script src="../../storage.js"></script><script src="../../character-sheet-data.js"></script><script>
+SanctumStorageReady.then(()=>{const seed=document.getElementById('seed'),status=document.getElementById('status');if(location.origin!=='http://localhost:3023')return;seed.disabled=false;status.textContent='Ready';seed.onclick=async()=>{
+const M=SanctumCharacterSheetData,id='tree-extra';
+const page=(id,title,category='none',parent='story')=>({id,title,category,parent,layout:'board-canvas',containerType:'page'});
+const pages=[{...page('story','The glass coast','none','home'),containerType:'project'},page(id,'Iris Vale','character'),page('mara','Mara Vale','character'),page('wards','Warding'),page('adept','Adept','none','wards'),page('shield','Glass shield','spell'),page('town','Harbour of mirrors','location')];
+const props={[id]:M.ensure(),wards:{properties:[{id:'proficiency-levels',type:'relation',relationKind:'proficiency-levels',label:'Proficiency levels',linkedPageIds:['adept'],cumulative:true}]},shield:{properties:[{id:'requirements',type:'relation',relationKind:'spell-requirements',label:'Requirements',linkedPageIds:['adept']} ]}};
+M.field(props[id],'parents').linkedPageIds=['mara'];M.field(props[id],'home').linkedPageIds=['town'];M.field(props[id],'magic').linkedPageIds=['wards'];M.field(props[id],'magic').linkLevels={wards:'adept'};M.field(props[id],'born').value='1896';M.field(props[id],'occupation').value='Keeper of the harbour lights';M.field(props[id],'portrait').value='/assets/worldbuilding/culture.jpg';
+const blocks={[id]:M.build(id),home:pages.slice(0,2).map((p,i)=>({id:'card-'+p.id,type:'page',linkedPageId:p.id,linkedPageType:'page',pageCardTitle:p.title,x:48+i*300,y:48,w:264,h:168,z:1}))};
+for(const [key,value] of Object.entries({sanctum_pages_registry:pages,sanctum_domains:[],sanctum_page_blocks:blocks,sanctum_page_props_v1:props,sanctum_page_databases:{},sanctum_relationship_trees_v1:{}}))localStorage.setItem(key,JSON.stringify(value));await SanctumStorage.flush();status.textContent='Saved. Open Sanctum.';
+};});</script></html>

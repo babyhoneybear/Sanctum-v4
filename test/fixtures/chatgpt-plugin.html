@@ -1,0 +1,145 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sanctum ChatGPT database checks</title>
+<style>body{font:15px/1.6 system-ui;background:#171717;color:#eee;margin:24px}button{padding:8px 16px}pre{white-space:pre-wrap}iframe{width:100%;height:600px;border:1px solid #555}</style></head><body>
+<h1>ChatGPT database integration checks</h1><p>Sample vault on port 3037. This fixture refuses to run on the normal vault origin.</p>
+<button id="run" disabled>Run database checks</button> <button id="runPages" disabled>Run page checks</button> <button id="connect">Connect this sample vault to MCP</button><pre id="results">Loading sample Sanctum…</pre>
+<img id="capture" alt="Captured sample database" style="display:none;max-width:100%"><a id="downloadCapture" hidden download="sanctum-visual-check.jpg">Download captured sample image</a>
+<iframe id="app" title="Sample Sanctum"></iframe>
+<script>
+const output=document.getElementById('results'),frame=document.getElementById('app');
+const report=message=>{output.textContent+='\n'+message;};
+if(location.port!=='3037')throw new Error('Use the isolated port 3037.');
+{
+  const pages=JSON.parse(localStorage.getItem('sanctum_pages_registry')||'[]');
+  const samples=[
+    {id:'plugin-visual-life',title:'Life',parent:'home',layout:'board-canvas',containerType:'page',category:'none'},
+    {id:'plugin-visual-story',title:'Story',parent:'home',layout:'board-canvas',containerType:'page',category:'none'}
+  ];
+  for(const page of samples)if(!pages.some(item=>item.id===page.id))pages.push(page);
+  localStorage.setItem('sanctum_pages_registry',JSON.stringify(pages));
+}
+frame.src='/';
+function ready(){return frame.contentWindow.SanctumChatGPTConnection;}
+frame.addEventListener('load',()=>{const poll=setInterval(()=>{if(ready()){clearInterval(poll);output.textContent='Ready. Sample vault only.';document.getElementById('run').disabled=false;document.getElementById('runPages').disabled=false;}},100);});
+document.getElementById('runPages').onclick=async()=>{
+  const api=ready().service; output.textContent='Page design checks. Sample vault only.';
+  const check=(condition,message)=>{if(!condition)throw new Error(message);report('PASS '+message);};
+  try {
+    const plan=api.planPage({request:{pages:[{key:'hub',mode:'create',target:{pageId:'home'},title:'Places & Nations test '+Date.now(),
+      settings:{showHeader:true,headerSrc:'assets/worldbuilding/hero.jpg',headerSize:'lg',heroOverlay:true,showTitle:false,showIcon:false,heroOverlayTitle:'Places & Nations',heroOverlaySubtitle:'Lands, cities, borders, and the people who call them home.',theme:'dark',fontPreset:'playfair'},
+      blocks:[
+        {kind:'heading',text:'At a glance',position:{x:24,y:24,width:288,height:72},style:{appearance:{fontSize:24}}},
+        {kind:'text',text:'A world divided by land and lineage. Each nation shaped by its people, its gods, and the cost of survival.',position:{x:24,y:120,width:288,height:168},style:{appearance:{fontSize:16,lineHeight:1.5}}},
+        {kind:'heading',text:'The nations',position:{x:336,y:24,width:432,height:72}},
+        {kind:'image',image:'assets/worldbuilding/nature.jpg',alt:'Sample landscape artwork',position:{x:792,y:24,width:360,height:600},crop:'portrait',style:{appearance:{brightness:85,saturation:55}}},
+        {kind:'heading',text:'Notes & ideas',position:{x:24,y:336,width:288,height:72}},
+        {kind:'list',items:['Decide on the borders','Name the major rivers','Work out travel times'],position:{x:24,y:432,width:288,height:192}},
+        {kind:'divider',position:{x:24,y:648,width:1128,height:24}},
+        {kind:'text',text:'Different lands. Same roots.',position:{x:336,y:480,width:432,height:96},style:{appearance:{italic:true,textAlign:'center',fontSize:22}}}
+      ]},
+      {key:'nation',mode:'create',parentKey:'hub',title:'Solvenne',summary:'Faith. Power. Presence.',blocks:[{kind:'heading',text:'Solvenne'},{kind:'text',text:'An editable native child page.'}]}
+    ]}});
+    const created=await api.applyPage({planId:plan.planId}),hub=created.pages.find(page=>page.key==='hub').pageId,nation=created.pages.find(page=>page.key==='nation').pageId;
+    check(created.status==='applied'&&frame.contentWindow.userPages.find(page=>page.id===nation).parent===hub,'Native dashboard and child page created at the exact location');
+    const before=api.readPage({target:{pageId:hub}});
+    check(before.settings.headerSrc==='assets/worldbuilding/hero.jpg'&&before.blocks.length===8,'Reader returns the banner, styling and editable blocks');
+    const card=api.planPage({request:{pages:[{mode:'update',target:{pageId:hub},expectedVersion:before.version,blocks:[{key:'card',kind:'page-link',link:{pageId:nation},cardView:'gallery',image:'assets/worldbuilding/castle.jpg',position:{x:336,y:120,width:432,height:312},style:{borderColor:'#39413b',radius:4}}]}]}});
+    const cardResult=await api.applyPage({planId:card.planId});
+    const layout=await api.layout({target:{pageId:hub}});
+    check(layout.blocks.length===9&&layout.overlaps.length===0,'Three-column page design renders without overlaps');
+    const node=frame.contentWindow.document.getElementById(card.pages[0].blocks[0].blockId);
+    check(node.dataset.linkedPageId===nation&&node.querySelector('.page-card-image').src.includes('castle.jpg'),'Image card links to the real child page');
+    const shot=await api.screenshot({target:{pageId:hub},includeHeader:true,region:{width:1200,height:1100}});
+    const capture=document.getElementById('capture');capture.src='data:'+shot.image.mimeType+';base64,'+shot.image.data;capture.style.display='block';
+    check(!shot.blank,'Whole-page image includes the banner and composed layout');
+    const beforeFailure=api.readPage({target:{pageId:hub}});
+    const overlapping=api.planPage({request:{pages:[{mode:'update',target:{pageId:hub},expectedVersion:beforeFailure.version,blocks:[{kind:'text',text:'This would cover the heading',position:{x:24,y:24,width:288,height:72}}]}]}});
+    let overlapRefused=false;try{await api.applyPage({planId:overlapping.planId});}catch(error){overlapRefused=/overlap/.test(error.message);}
+    check(overlapRefused&&api.readPage({target:{pageId:hub}}).version===beforeFailure.version,'Native overlap failure rolls back without changing the page');
+    await api.undo({changeId:cardResult.changeId});check(api.readPage({target:{pageId:hub}}).blocks.length===8,'Undo restores the page before the card was added');
+    await api.undo({changeId:created.changeId});check(!frame.contentWindow.userPages.some(page=>page.id===hub||page.id===nation),'Undo removes only the generated dashboard and child');
+    report('ALL PAGE CHECKS PASSED');
+  }catch(error){report('FAIL '+error.stack);}
+};
+document.getElementById('connect').onclick=async()=>{try{await ready().toggle();report('Connection: '+ready().connected);}catch(error){report('FAIL '+error.message);}};
+document.getElementById('run').onclick=async()=>{
+  const api=ready()?.service;if(!api)return report('Wait for Sanctum to load.');
+  function check(condition,message){if(!condition)throw new Error(message);report('PASS '+message);}
+  try{
+    for(const [pageId,title] of [['plugin-visual-life','Visual Life'],['plugin-visual-story','Visual Story']]){
+      if(!frame.contentWindow.userPages.some(page=>page.id===pageId))frame.contentWindow.SanctumAssistantPageRegistryStore.create({pageId,title,parentId:'home',layout:'board-canvas'});
+    }
+    const beforeBlocks=frame.contentWindow.readAllPageBlocks();
+    if(!beforeBlocks['plugin-visual-life']?.some(block=>block.id==='visual-tall-text')){
+      beforeBlocks['plugin-visual-life']=[...(beforeBlocks['plugin-visual-life']||[]),{id:'visual-tall-text',type:'text',x:48,y:48,w:960,h:0,z:1,bodyHTML:Array.from({length:45},(_,i)=>'Existing page content '+(i+1)).join('<br>')}];
+      frame.contentWindow.SanctumAssistantPageBlockStore.write(beforeBlocks);
+    }
+    const title='Meals '+Date.now();
+    const plan=api.plan({request:{mode:'create',target:{pageId:'plugin-visual-life'},title,
+      properties:[{id:'cost',name:'Cost',type:'number',headerColor:'sage-green'},
+        {id:'category',name:'Category',type:'select',selectOptions:[{name:'Lunch',color:'sage-green'}]}],
+      rows:[{values:{name:'Soup',cost:12,category:'Lunch'}}],
+      views:[{page:{pageId:'plugin-visual-life'},title:'Lunches',view:'table',filters:[{propertyId:'category',mode:'equals',value:'Lunch'}]}]}});
+    const applied=await api.apply({planId:plan.planId});
+    check(applied.status==='applied','Created database through native stores');
+    let inspection=api.inspect({target:{pageId:plan.source.pageId}});
+    check(inspection.database.rows.length===1&&inspection.database.rows[0].values.cost==='12','Native numeric values and row pages persist');
+    check(inspection.views.length===1,'Linked view uses the canonical database');
+    check(inspection.database.properties.find(p=>p.id==='category').selectOptions[0].color==='sage-green','Option color survives native normalization');
+    frame.contentWindow.openPage('plugin-visual-life');
+    check(frame.contentWindow.document.querySelectorAll('.block[data-type="calendar"]').length>=1,'Linked view renders in the real board');
+    const existingText=frame.contentWindow.document.getElementById('visual-tall-text').getBoundingClientRect();
+    const firstView=frame.contentWindow.document.getElementById(plan.linkedViews[0].blockId).getBoundingClientRect();
+    check(firstView.top>=existingText.bottom+40,'Placement clears the rendered height of existing content');
+    inspection=api.inspect({target:{pageId:plan.source.pageId}});
+    const edit=api.plan({request:{mode:'update',target:{pageId:plan.source.pageId},expectedVersion:inspection.version,
+      rows:[{id:inspection.database.rows[0].id,values:{cost:15}}]}});
+    const changed=await api.apply({planId:edit.planId});
+    check(api.inspect({target:{pageId:plan.source.pageId}}).database.rows[0].values.cost==='15','Updates an existing native database row');
+    await api.undo({changeId:changed.changeId});
+    check(api.inspect({target:{pageId:plan.source.pageId}}).database.rows[0].values.cost==='12','Undo restores prior values');
+    const beforeAdd=api.inspect({target:{pageId:plan.source.pageId}});
+    const add=api.plan({request:{mode:'update',target:{pageId:plan.source.pageId},expectedVersion:beforeAdd.version,
+      rows:[{values:{name:'Salad',cost:6,category:'Lunch'}}]}});
+    const added=await api.apply({planId:add.planId});
+    const addedRows=api.inspect({target:{pageId:plan.source.pageId}}).database.rows;
+    check(addedRows.length===2&&frame.contentWindow.userPages.some(p=>p.id===addedRows[1].pageId),'Adds an entry and row page to an existing visible database');
+    await api.undo({changeId:added.changeId});
+    const beforeViews=api.inspect({target:{pageId:plan.source.pageId}});
+    const multiple=api.plan({request:{mode:'update',target:{pageId:plan.source.pageId},expectedVersion:beforeViews.version,
+      views:[{page:{pageId:'plugin-visual-life'},title:'Second table',view:'table'},{page:{pageId:'plugin-visual-life'},title:'Third table',view:'table'}]}});
+    const multipleReceipt=await api.apply({planId:multiple.planId});
+    const measured=await api.layout({target:{pageId:'plugin-visual-life'}});
+    check(multipleReceipt.layoutVerification.placements.every(item=>item.clear),'Multiple new views are verified after each render');
+    check(measured.overlaps.length===0,'Measured native blocks do not overlap');
+    const beforeArrange=api.readPage({target:{pageId:'plugin-visual-life'}});
+    const arrange=api.planPage({request:{pages:[{mode:'update',target:{pageId:'plugin-visual-life'},expectedVersion:beforeArrange.version,blocks:[{blockId:plan.linkedViews[0].blockId,position:{x:72,width:936},style:{borderColor:'#778877'}}]}]}});
+    const arranged=await api.applyPage({planId:arrange.planId});
+    check(frame.contentWindow.document.getElementById(plan.linkedViews[0].blockId).style.left==='72px'&&api.inspect({target:{pageId:plan.source.pageId}}).database.rows[0].values.cost==='12','Page tools arrange an existing database view while preserving its rows');
+    await api.undo({changeId:arranged.changeId});
+    const shot=await api.screenshot({target:{pageId:'plugin-visual-life',blockId:plan.linkedViews[0].blockId},region:{width:1000,height:500}});
+    const capture=document.getElementById('capture'),download=document.getElementById('downloadCapture');
+    capture.src='data:'+shot.image.mimeType+';base64,'+shot.image.data;capture.style.display='block';download.href=capture.src;download.hidden=false;
+    check(shot.image.mimeType==='image/jpeg'&&shot.image.data.startsWith('/9j/')&&!shot.blank,'Screenshot returns nonblank JPEG pixels from the requested block');
+    const fullPageShot=await api.screenshot({target:{pageId:plan.source.pageId}});
+    check(!fullPageShot.blank,'Full database page returns a visible image');
+    await api.undo({changeId:multipleReceipt.changeId});
+    const current=api.inspect({target:{pageId:plan.source.pageId}});
+    const budget=api.plan({request:{mode:'create',target:{pageId:'plugin-visual-life'},title:'Budget '+Date.now(),
+      properties:[{id:'budget',name:'Budget',type:'number'},
+        {id:'meals',name:'Meals',type:'relation',relationTarget:{kind:'page',pageId:plan.source.pageId,blockId:''}},
+        {id:'total',name:'Total',type:'rollup',summaryConfig:{relationPropertyId:'meals',mode:'sum',targetPropertyId:'cost'}},
+        {id:'remaining',name:'Remaining',type:'formula',formulaConfig:{mode:'simple',simpleType:'subtract',leftPropertyId:'budget',rightPropertyId:'total'}}],
+      rows:[{values:{name:'Week',budget:20,meals:[current.database.rows[0].id]}}],
+      views:[{page:{pageId:'plugin-visual-life'},title:'Budget',view:'table'}]}});
+    const budgetReceipt=await api.apply({planId:budget.planId});
+    const budgetEl=frame.contentWindow.document.getElementById(budget.linkedViews[0].blockId);
+    check(budgetEl.querySelector('[data-db-prop-id="total"]').textContent.trim()==='12','Native rollup calculates linked spending');
+    check(budgetEl.querySelector('[data-db-prop-id="remaining"]').textContent.trim()==='8','Native formula calculates the remaining budget');
+    await api.undo({changeId:budgetReceipt.changeId});
+    // Visiting a generated database can normalize defaults; undo must be safe.
+    await api.undo({changeId:applied.changeId});
+    check(!frame.contentWindow.userPages.some(p=>p.id===plan.source.pageId),'Creation undo removes only generated pages');
+    report('ALL CHECKS PASSED');
+  }catch(error){report('FAIL '+error.stack);}
+};
+</script></body></html>

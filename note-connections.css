@@ -1,0 +1,48 @@
+.note-connection-dialog {
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(660px, calc(100vh - 48px));
+  box-sizing: border-box;
+  padding: 24px;
+  border: 1px solid var(--border, #665c51);
+  border-radius: 16px;
+  background: var(--bg, #24211e);
+  color: var(--text-main, #eee7df);
+  font: 14px/1.5 system-ui, sans-serif;
+}
+.note-connection-dialog::backdrop { background: #0008; }
+.note-connection-dialog h2 { margin: 0; font-size: 20px; }
+.note-connection-dialog p { opacity: .8; }
+.note-connection-dialog input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+.note-connection-results { max-height: 360px; overflow-y: auto; }
+.note-connection-dialog button {
+  border: 1px solid var(--border, #665c51);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.note-connection-results button {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  width: 100%;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.note-connection-results button span { font-size: 12px; opacity: .7; }
+.note-connection-results button:disabled { opacity: .55; cursor: default; }
+.note-connection-results button:not(:disabled):hover { background: #8882; }
+.note-connection-dialog form { margin-top: 16px; text-align: right; }
+.note-linked-context-row { flex-wrap: wrap; gap: 6px; }

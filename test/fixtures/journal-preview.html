@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Journal interaction preview · Sanctum</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Waiting+for+the+Sunrise&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/journal-scrapbook.css">
+<link rel="stylesheet" href="/ui-icons.css">
+<style>
+  * { box-sizing:border-box; } body { display:block; margin:0; background:var(--mainpage-bg); font-family:system-ui; }
+  #pageCanvas { height:calc(100dvh - 34px); padding:0; }
+  .preview-note { height:34px; padding:10px 16px; color:#a7a196; font:10px/14px system-ui; display:flex; justify-content:space-between; }
+</style>
+<div class="preview-note"><span>Sanctum · Journal interaction preview</span><span>Sample pages · changes stay in this preview</span></div>
+<div id="pageCanvas" class="page-canvas"><div id="grid"></div><div id="pageContent"></div></div>
+<script src="/journal-data.js"></script>
+<script src="/assets/ui-icon-paths.js"></script>
+<script src="/ui-icons.js"></script>
+<script>
+  // Isolated in-memory data: never reads or writes the user's vault.
+  const Data = window.SanctumJournalData;
+  window.userPages = [{ id:'journal-preview', title:'Little moments', layout:'journal' }];
+  const sample = Data.createJournal({ id:'journal-preview', title:'Little moments', pageCount:12 });
+  const text = (value,x,y,w,h,size=22,color='#50493f',font='serif') => ({ type:'text',text:value,x,y,w,h,fontSize:size*.64,color,font,z:3 });
+  const shape = (x,y,w,h,fill) => ({ type:'shape',shape:'rectangle',x,y,w,h,fill,stroke:fill,strokeWidth:0,z:1 });
+  const palettes = ['#c4cbbf','#bac6d1','#dccab1','#cabfc8','#b6c4bc','#d4c8b4'];
+  const titles = ['A slower kind of Sunday','Things to hold onto','Out of the ordinary','A little room to grow','Collected along the way','The days in between'];
+  sample.pages = sample.pages.map((page,index) => {
+    const spread = Math.floor(index/2);
+    const color = palettes[spread];
+    page.paper = 'plain';
+    page.elements = (index%2 === 0 ? [
+      text(`FIELD NOTES  /  0${spread+1}`,95,90,810,70,12,'#8b7860','sans'),
+      text(titles[spread],95,215,810,270,40),
+      shape(95,570,810,490,color),
+      {type:'tape',x:375,y:540,w:250,h:60,color:'#c9b996',opacity:.75,rotation:-4,z:4},
+      text('Small things.\nA long walk.\nTime to notice.',165,650,670,290,28,'#38463f','hand'),
+      text('A page for whatever comes next.',95,1170,810,100,17,'#8b7860')
+    ] : [
+      text('TODAY, I NOTICED',110,100,780,80,12,'#8b7860','sans'),
+      shape(110,270,780,440,'#e8dfcd'),
+      text('The light through the window.\nA conversation that stayed with me.\nSomething worth remembering.',165,330,660,310,23),
+      {type:'tape',x:375,y:240,w:250,h:60,color,opacity:.8,rotation:3,z:4},
+      text('Leave a little space\nfor the unexpected.',110,880,780,220,32,'#64705b','hand'),
+      {type:'sticker',variant:'sparkles',x:730,y:1110,w:100,h:100,color:'#ad936c',z:4}
+    ]).map(element => Data.normalizeElement({
+      ...element,
+      // Keep the sample collage compact on the larger sheet. Typography uses
+      // the shared page scale, so it stays consistent when opened for editing.
+      x: 110 + element.x * .78,
+      y: 120 + element.y * .78,
+      w: element.w * .78,
+      h: element.h * .78
+    }));
+    return page;
+  });
+  const memory = { sanctum_journals_v1: { 'journal-preview':sample } };
+  window.readStorageJSON = (key,fallback) => memory[key] ?? fallback;
+  window.writeStorageJSON = (key,value) => { memory[key] = structuredClone(value); return true; };
+</script>
+<script src="/journal.js"></script>
+<script>renderJournalPage('journal-preview');</script>
+</html>

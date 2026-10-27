@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8"><title>Infinite canvas regression checks</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 100px)}pre{white-space:pre-wrap}</style>
+<nav><button id="run" disabled>Check infinite canvas</button><span id="status">Loading</span><details><summary>Results</summary><pre id="results"></pre></details></nav><iframe id="app" title="Isolated canvas"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('app'),run=document.getElementById('run'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';
+const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r)));
+const wait=()=>new Promise(r=>setTimeout(r,220));
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n'};
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(r=>w.addEventListener('sanctum:scripts-ready',r,{once:true}));run.disabled=false;status.textContent='Ready'};
+run.onclick=async()=>{results.textContent='';status.textContent='Checking';try{
+ w.stopPlacing(true);w.openPage('home');
+ if(!w.userPages.some(p=>p.id==='canvas-regression'))w.SanctumAssistantPageRegistryStore.create({pageId:'canvas-regression',title:'Canvas interaction check',parentId:'home',layout:'infinite-canvas'});
+ const original=[{id:'canvas-a',type:'text',x:800,y:600,w:300,h:150,bodyHTML:'First reference'},{id:'canvas-b',type:'text',x:1700,y:900,w:300,h:150,bodyHTML:'Second reference'}];
+ w.setPageBlocks('canvas-regression',original);w.openPage('canvas-regression');await tick();
+ const d=w.document,grid=d.getElementById('grid'),viewport=d.getElementById('infiniteCanvasViewport'),stage=d.getElementById('infiniteCanvasStage');
+ d.querySelector('[data-infinite-canvas-action="fit"]').click();await tick();
+ let m=w.getCanvasLayoutMetrics(),v=viewport.getBoundingClientRect();
+ check(v.bottom<=w.innerHeight+1,'Viewport stays within the window');
+ check(Math.abs(stage.getBoundingClientRect().width-m.logicalWidth*m.scale)<2,'Stage follows zoom scale');
+ check(Math.abs(grid.getBoundingClientRect().height-m.logicalHeight*m.scale)<2,'Placement grid fills the logical canvas');
+ check(['canvas-a','canvas-b'].every(id=>{const r=d.getElementById(id).getBoundingClientRect();return r.left>=v.left&&r.right<=v.right&&r.top>=v.top&&r.bottom<=v.bottom}),'Fit shows the actual content');
+ const mouse=(target,type,x,y,extra={})=>target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,...extra}));
+ const addAt=(x,y)=>{const old=grid.querySelectorAll('.block:not(.ghost)').length;d.getElementById('toolText').click();mouse(grid,'mousemove',x,y);const hit=d.elementFromPoint(x,y);check(hit===grid||hit?.closest('#grid')===grid,'Blank canvas point reaches the placement grid');mouse(hit,'mousedown',x,y);mouse(d,'mouseup',x,y);return grid.querySelectorAll('.block:not(.ghost)').length===old+1};
+ check(addAt(v.left+120,v.bottom-100),'Add text in previously dead lower canvas area');
+ w.stopPlacing(true);d.activeElement?.blur();
+ const positions=JSON.stringify(w.serializeBlocks());const oldLeft=viewport.scrollLeft;
+ d.dispatchEvent(new w.KeyboardEvent('keydown',{bubbles:true,cancelable:true,code:'Space',key:' '}));
+ const a=d.getElementById('canvas-a'),r=a.getBoundingClientRect();mouse(a,'mousedown',r.left+20,r.top+20);mouse(d,'mousemove',r.left-50,r.top+20);mouse(d,'mouseup',r.left-50,r.top+20);
+ d.dispatchEvent(new w.KeyboardEvent('keyup',{bubbles:true,code:'Space',key:' '}));
+ check(viewport.scrollLeft>oldLeft&&JSON.stringify(w.serializeBlocks())===positions,'Space-drag over a card pans without moving content');
+ const before=w.getCanvasLayoutMetrics(),px=v.left+400,py=v.top+200,worldX=(px-before.stageRect.left)/before.scale,worldY=(py-before.stageRect.top)/before.scale;
+ viewport.dispatchEvent(new w.WheelEvent('wheel',{bubbles:true,cancelable:true,ctrlKey:true,deltaY:-100,clientX:px,clientY:py}));
+ const after=w.getCanvasLayoutMetrics();check(Math.abs((px-after.stageRect.left)/after.scale-worldX)<2&&Math.abs((py-after.stageRect.top)/after.scale-worldY)<2,'Pointer stays anchored during wheel zoom');
+ // Zoom far out; blank screen edges must still accept items.
+ for(let i=0;i<24;i++)d.querySelector('[data-infinite-canvas-action="zoom-out"]').click();await tick();
+ v=viewport.getBoundingClientRect();check(addAt(v.left+100,v.bottom-100),'Placement also works at minimum zoom');
+ w.stopPlacing(true);w.saveState();await wait();const saved=w.getPageBlocks('canvas-regression');
+ w.openPage('home');w.openPage('canvas-regression');await tick();check(w.serializeBlocks().length===saved.length,'New items survive reopening');
+ check(original.every(b=>w.getPageBlocks('canvas-regression').some(s=>s.id===b.id&&s.bodyHTML===b.bodyHTML&&s.x===b.x&&s.y===b.y)),'Original content and positions remain intact');
+ w.undo();w.redo();await tick();check(w.serializeBlocks().length===saved.length,'Undo and Redo retain the added items');
+ d.querySelector('[data-infinite-canvas-action="fit"]').click();status.textContent='All canvas checks passed';
+}catch(e){status.textContent='FAILED';results.textContent+=e.stack;document.querySelector('details').open=true}};
+</script>

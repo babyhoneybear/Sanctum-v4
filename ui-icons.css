@@ -1,0 +1,112 @@
+/* Shared action icon geometry; colors continue to come from each workspace theme. */
+.ui-icon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  pointer-events: none;
+}
+.ui-icon * { pointer-events: none; }
+:is(.icon-btn, .dock-btn, .doc-tool-btn, .soundbar-btn, .nav-history-btn, .split-header-btn, .infinite-canvas-toolbar-btn)[data-ui-icon] {
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn[data-ui-icon] {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border-radius: 6px;
+}
+.icon-btn[data-ui-icon]:hover { background: var(--icon-hover); }
+:is(button[data-ui-icon], .nav-item, .topbar-dropdown-btn):focus-visible {
+  outline: 2px solid var(--accent, #a78b71);
+  outline-offset: 2px;
+}
+.edit-dock .dock-btn[data-label] {
+  flex: 0 0 46px;
+  width: 46px;
+  min-height: 42px;
+  gap: 5px;
+  border-radius: 5px;
+}
+.edit-dock .dock-btn[data-label]::after { font-size: 8px; letter-spacing: 0; }
+.edit-dock .dock-divider { flex-shrink: 0; }
+.edit-dock .dock-btn .ui-icon { width: 20px; height: 20px; }
+.nav-item .ui-icon, .bottom-icon .ui-icon { width: 19px; height: 19px; }
+.sidebar-nav .nav-item { display: flex; align-items: center; gap: 10px; }
+.nav-item > [data-ui-icon] { display: inline-flex; color: var(--muted2); }
+.bottom-icon { display: inline-flex; align-items: center; }
+:is(.section-arrow, .section-menu, .section-add) .ui-icon { width: 14px; height: 14px; }
+.nav-history-btn .ui-icon { width: 15px; height: 15px; }
+.tab-close .ui-icon { width: 12px; height: 12px; }
+.tab-new-btn .ui-icon { width: 15px; height: 15px; }
+.topbar-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+}
+.topbar-dropdown-icon { display: inline-flex; width: 18px; flex: 0 0 18px; color: var(--muted); }
+.topbar-dropdown-icon .ui-icon { width: 18px; height: 18px; }
+.topbar-dropdown-btn > .topbar-dropdown-icon:first-child { flex: 0 0 18px; }
+.topbar-dropdown-text { flex: 1; }
+.topbar-dropdown-submenu-arrow .ui-icon { width: 13px; height: 13px; }
+.topbar-dropdown-btn.danger .topbar-dropdown-icon { color: inherit; }
+.icon-with-label { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.icon-with-label .ui-icon { width: 17px; height: 17px; }
+.relationship-graph-actions button, .rg-map-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.relationship-graph-overlay button .ui-icon { width: 17px; height: 17px; }
+.notes-editor-tool-btn .ui-icon { width: 18px; height: 18px; }
+.page-database-toolbar-btn { display: inline-flex; align-items: center; gap: 5px; }
+.page-database-toolbar-btn .ui-icon, .page-database-settings-btn .ui-icon { width: 16px; height: 16px; }
+#bookmarkBtn.bookmarked .ui-icon { fill: currentColor; fill-opacity: .18; }
+
+/* Document controls include dynamic menus as well as the fixed toolbar. */
+:is(.doc-tool-btn, .doc-find-btn, .doc-submenu-new, .doc-lexicon-footer-btn,
+  .doc-lexicon-control-btn, .doc-inspector-action-btn, .doc-export-btn, .doc-link-btn,
+  .doc-kit-btn, #docLexiconSaveSelection, .doc-color-more) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+:is(.doc-insert-item, .doc-format-item, .doc-list-item, .doc-lexicon-entry-popup-item) {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+:is(.doc-tool-btn, .doc-find-btn, .doc-insert-item, .doc-format-item, .doc-list-item,
+  .doc-submenu-new, .doc-lexicon-footer-btn, .doc-lexicon-control-btn,
+  .doc-inspector-action-btn, .doc-export-btn, .doc-link-btn, .doc-kit-btn,
+  #docLexiconSaveSelection, .doc-color-more, .thread-picker-item,
+  .doc-lexicon-entry-popup-item) .ui-icon { width: 17px; height: 17px; }
+.doc-tool-btn { min-height: 30px; flex-shrink: 0; }
+.doc-color-wrap .doc-tool-btn { position: relative; padding-bottom: 8px; }
+.doc-color-preview { pointer-events: none; }
+.doc-submenu-arrow { margin-left: auto; }
+.doc-submenu-arrow .ui-icon { width: 12px; height: 12px; }
+.doc-section-indicator .ui-icon { width: 12px; height: 12px; }
+.ann-sticky-drag .ui-icon { width: 14px; height: 14px; }
+:is(.doc-color-more-btn, .doc-color-back-btn) .ui-icon { width: 15px; height: 15px; }
+.doc-format-menu, .doc-list-menu { left: auto; right: 0; }
+.doc-format-wrap .doc-submenu { left: auto; right: 0; top: calc(100% + 4px); }
+:is(.doc-suggest-btn, .doc-section-delete, .doc-img-ctrl, .ann-tool-btn,
+  .ann-sticky-close, .doc-thread-toggle, .doc-thread-delete, .doc-lexicon-browser-menu,
+  .doc-lexicon-entry-menu, .doc-submenu-edit, .doc-kit-close, #threadTipRemove) {
+  display: inline-flex; align-items: center; justify-content: center;
+}
+:is(.doc-section-delete, .doc-img-ctrl, .doc-thread-toggle, .doc-thread-delete,
+  .doc-lexicon-browser-menu, .doc-lexicon-entry-menu, .doc-submenu-edit,
+  .doc-section-status-icon, .slash-icon) .ui-icon { width: 16px; height: 16px; }
+:is(.doc-suggest-btn, .ann-sticky-close, #threadTipRemove) .ui-icon { width: 13px; height: 13px; }
+.doc-lexicon-entry-popup-item .ui-icon { flex-shrink: 0; }
+:is(.pin-panel-close, .pin-nav-btn, .quick-note-close, .assistant-profile-close,
+  .page-database-date-nav, .page-calendar-nav-btn, .page-database-row-menu-trigger,
+  .page-database-board-card-menu, .page-database-gallery-card-menu,
+  .page-database-automation-icon-btn) .ui-icon { width: 16px; height: 16px; }

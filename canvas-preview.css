@@ -1,0 +1,20 @@
+.block[data-type="canvas-preview"] { min-width:288px;min-height:240px;padding:0;overflow:visible;border:1px solid var(--surface-border-strong,#45413b);border-radius:6px;background:var(--panel-bg,#191919); }
+.canvas-preview-shell { display:flex;flex-direction:column;height:100%;min-height:0;color:var(--text-main,#e3ddd2);font:12px/1.4 system-ui;overflow:hidden;border-radius:inherit; }
+.canvas-preview-header { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid var(--surface-border,#36322e);cursor:grab; }
+.canvas-preview-header strong { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500; }
+.canvas-preview-header>div,.canvas-preview-shell footer>div { display:flex;align-items:center;gap:5px;flex-shrink:0; }
+.canvas-preview-shell button { background:transparent;border:1px solid transparent;border-radius:4px;color:inherit;font:inherit;padding:4px 7px;cursor:pointer; }
+.canvas-preview-shell button:hover { background:var(--surface-bg-raised,#292723);border-color:var(--surface-border,#45413b); }
+.canvas-preview-shell button:disabled { opacity:.4;cursor:default; }
+.canvas-preview-header .ui-icon { width:15px;height:15px; }
+.canvas-preview-surface { flex:1;min-height:100px;cursor:grab;touch-action:none;outline:none; }
+.canvas-preview-surface:focus-visible { box-shadow:inset 0 0 0 2px var(--accent,#b5a185); }
+.canvas-preview-surface.is-panning { cursor:grabbing; }
+.canvas-preview-shell footer { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 9px;border-top:1px solid var(--surface-border,#36322e);font-size:11px; }
+.canvas-preview-shell footer>span { color:var(--muted2,#b6afa5); }
+.canvas-preview-shell output { min-width:35px;text-align:center;font-size:10px; }
+.canvas-preview-picker { padding:10px 12px;border-bottom:1px solid var(--surface-border,#36322e); }
+.canvas-preview-picker[hidden] { display:none; }
+.canvas-preview-picker label { display:flex;align-items:center;gap:12px; }
+.canvas-preview-picker select { min-width:0;flex:1;background:var(--field-bg,#20201e);color:inherit;border:1px solid var(--surface-border-strong,#555);padding:6px;border-radius:3px;font:inherit; }
+@media (max-width:600px) { .canvas-preview-shell footer>span { display:none; }.canvas-preview-shell footer { justify-content:flex-end; } }

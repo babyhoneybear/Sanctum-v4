@@ -28,6 +28,7 @@
       const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       all[pageId] = lines;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      window.dispatchEvent(new CustomEvent("sanctum:canvas-content-updated", { detail: { pageId } }));
     } catch {}
   }
 
@@ -427,6 +428,10 @@
   function renderLines(pageId) {
     const grid = document.getElementById("grid");
     if (!grid) return;
+    if (!isInfiniteCanvasActive() || pageId !== window.getCurrentPageId?.()) {
+      grid.querySelector(".canvas-lines-layer")?.remove();
+      return;
+    }
 
     const svg = ensureSvgLayer(grid);
     syncSvgSize(svg, grid);
@@ -685,6 +690,7 @@
         } else {
           deactivateLineTool();
           ensureLineToolbar().hidden = true;
+          document.getElementById("grid")?.querySelector(".canvas-lines-layer")?.remove();
         }
       });
       observer.observe(boardSurface, { attributes: true, attributeFilter: ["class"] });

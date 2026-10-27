@@ -21,6 +21,10 @@
   let pendingWrites = new Map();
   let pendingDeletes = new Set();
   let clearPending = false;
+  let activeFlush = null;
+  let retryDelay = 1000;
+  let saveError = '';
+  let saveState = 'saved';
   let ready = false;
   let storageMode = 'initializing';
   let initializationError = '';
@@ -44,45 +48,72 @@
     return storageMode === 'localstorage-fallback' ? readLegacyNativeEntries() : cache;
   }
 
-  function scheduleFlush() {
-    if (flushTimer) return;
-    flushTimer = setTimeout(async () => {
+  function publishSaveState(state, error = '') {
+    saveState = state;
+    saveError = error;
+    window.dispatchEvent(new CustomEvent('sanctum-storage-status', { detail: { state, error } }));
+  }
+
+  function hasPendingChanges() {
+    return clearPending || pendingWrites.size > 0 || pendingDeletes.size > 0;
+  }
+
+  function scheduleFlush(delay = 40) {
+    // Keep failures visible until the queued work really commits.
+    if (!saveError) publishSaveState('saving');
+    if (flushTimer || activeFlush) return;
+    flushTimer = setTimeout(() => {
       flushTimer = null;
-      if (!db) return;
+      void forceFlush();
+    }, delay);
+  }
+
+  async function drainWrites() {
+    while (hasPendingChanges()) {
+      const batch = { clear: clearPending, writes: pendingWrites, deletes: pendingDeletes };
+      clearPending = false;
+      pendingWrites = new Map();
+      pendingDeletes = new Set();
       try {
-        if (clearPending) {
-          await new Promise((resolve, reject) => {
-            const tx = db.transaction([STORE_NAME, BLOB_STORE_NAME], 'readwrite');
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error || new Error('IndexedDB clear failed'));
-            tx.objectStore(STORE_NAME).clear();
-            tx.objectStore(BLOB_STORE_NAME).clear();
-          });
-          clearPending = false;
-          pendingWrites.clear();
-          pendingDeletes.clear();
-          return;
-        }
-
-        if (!pendingWrites.size && !pendingDeletes.size) return;
-
-        const writes = Array.from(pendingWrites.entries());
-        const deletes = Array.from(pendingDeletes.values());
-        pendingWrites.clear();
-        pendingDeletes.clear();
-
         await new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const tx = db.transaction(batch.clear ? [STORE_NAME, BLOB_STORE_NAME] : STORE_NAME, 'readwrite');
           tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
-          const store = tx.objectStore(STORE_NAME);
-          writes.forEach(([key, value]) => store.put(value, key));
-          deletes.forEach((key) => store.delete(key));
+          tx.onabort = tx.onerror = () => reject(tx.error || new Error('IndexedDB save failed'));
+          try {
+            const store = tx.objectStore(STORE_NAME);
+            if (batch.clear) {
+              store.clear();
+              tx.objectStore(BLOB_STORE_NAME).clear();
+            }
+            batch.writes.forEach((value, key) => store.put(value, key));
+            batch.deletes.forEach((key) => store.delete(key));
+          } catch (error) {
+            // A synchronous enqueue error must not commit earlier requests
+            // from the same batch (especially a clear followed by writes).
+            tx.abort();
+            reject(error);
+          }
         });
       } catch (err) {
-        console.warn('Sanctum storage flush failed', err);
+        // A newer clear supersedes the failed batch. Otherwise restore only
+        // operations not superseded by a newer edit or deletion.
+        if (!clearPending) {
+          clearPending = batch.clear;
+          batch.writes.forEach((value, key) => {
+            if (!pendingWrites.has(key) && !pendingDeletes.has(key)) pendingWrites.set(key, value);
+          });
+          batch.deletes.forEach((key) => {
+            if (!pendingWrites.has(key) && !pendingDeletes.has(key)) pendingDeletes.add(key);
+          });
+        }
+        publishSaveState('error', String(err?.message || err));
+        console.warn('Sanctum save failed; changes are retained for retry.', err);
+        return false;
       }
-    }, 40);
+    }
+    retryDelay = 1000;
+    publishSaveState('saved');
+    return true;
   }
 
   function patchLocalStorage() {
@@ -327,46 +358,31 @@
     return total;
   }
 
-  async function forceFlush() {
-    if (!db) return;
+  function forceFlush() {
     if (flushTimer) {
       clearTimeout(flushTimer);
       flushTimer = null;
     }
-    try {
-      if (clearPending) {
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction([STORE_NAME, BLOB_STORE_NAME], 'readwrite');
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error || new Error('IndexedDB clear failed'));
-          tx.objectStore(STORE_NAME).clear();
-          tx.objectStore(BLOB_STORE_NAME).clear();
-        });
-        clearPending = false;
-        pendingWrites.clear();
-        pendingDeletes.clear();
-        return;
+    if (activeFlush) return activeFlush;
+    if (!db) return Promise.resolve(storageMode === 'localstorage-fallback');
+    if (!hasPendingChanges()) return Promise.resolve(true);
+    if (!saveError) publishSaveState('saving');
+    // All callers share one drain, including edits arriving during a commit.
+    activeFlush = drainWrites().finally(() => {
+      activeFlush = null;
+      if (hasPendingChanges()) {
+        scheduleFlush(retryDelay);
+        retryDelay = Math.min(30000, retryDelay * 2);
       }
-      if (!pendingWrites.size && !pendingDeletes.size) return;
-      const writes = Array.from(pendingWrites.entries());
-      const deletes = Array.from(pendingDeletes.values());
-      pendingWrites.clear();
-      pendingDeletes.clear();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
-        const store = tx.objectStore(STORE_NAME);
-        writes.forEach(([key, value]) => store.put(value, key));
-        deletes.forEach((key) => store.delete(key));
-      });
-    } catch (err) {
-      console.warn('Sanctum storage force flush failed', err);
-    }
+    });
+    return activeFlush;
   }
 
   window.SanctumStorage = {
     get ready() { return ready; },
+    get saveState() { return saveState; },
+    get saveError() { return saveError; },
+    get hasPendingChanges() { return !!activeFlush || !!hasPendingChanges(); },
     get mode() { return storageMode; },
     get initializationError() { return initializationError; },
     readJSON,

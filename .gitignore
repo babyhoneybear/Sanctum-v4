@@ -1,4 +1,26 @@
+# Installed dependencies and private local runtimes/connections
 node_modules/
+.local-tools/
+
+# Credentials; keep the blank configuration template in version control
 .env
-recovery/
+.env.*
+!.env.example
 .claude/settings.local.json
+
+# Generated captures, downloads, exports, and personal recovery copies
+/artifacts/
+/mockups/
+/recovery/
+/.retired-map-maker-2026-10-02/
+/coverage/
+*.log
+
+# Connector build output (its source and migration files are tracked)
+/chatgpt-plugin/dist/
+/chatgpt-plugin/site.tar.gz
+/chatgpt-plugin/.sites-runtime/
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

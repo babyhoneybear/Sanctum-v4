@@ -7,6 +7,8 @@ const TABLE_COLUMN_MIN_WIDTH = 72;
 const TABLE_COLUMN_RESIZE_HIT_WIDTH = 10;
 
 let activeBlock = null;
+let activeBlockDidDrag = false;
+let infiniteTextEditingBlock = null;
 let mode = null; // "move" | "resize"
 let offsetX = 0, offsetY = 0;
 let startX = 0, startY = 0;
@@ -20,6 +22,9 @@ let activeFrameDragSourceBlock = null;
 let activeFrameDragGhost = null;
 let activeFrameDragOffsetX = 0;
 let activeFrameDragOffsetY = 0;
+let activeFrameDragStartX = 0;
+let activeFrameDragStartY = 0;
+let suppressFrameDragClickUntil = 0;
 let activeFrameCarryItems = [];
 let activeFrameCarryStartX = 0;
 let activeFrameCarryStartY = 0;
@@ -864,7 +869,7 @@ function getFrameDraggableType(node) {
   if (!node) return "";
   if (node.classList?.contains("frame-item")) {
     const type = node.dataset.frameChildType || node.dataset.type || "";
-    return ["text", "image", "button", "page", "domain", "divider", "divider-vertical", "divider-updown", "divider-dashed"].includes(type) ? type : "";
+    return ["text", "image", "table", "button", "page", "domain", "weblink", "divider", "divider-vertical", "divider-updown", "divider-dashed"].includes(type) ? type : "";
   }
   return getFrameDropTypeForBlock(node);
 }
@@ -1017,6 +1022,8 @@ function clearFrameItemDragState() {
   activeFrameDragGhost = null;
   activeFrameDragOffsetX = 0;
   activeFrameDragOffsetY = 0;
+  activeFrameDragStartX = 0;
+  activeFrameDragStartY = 0;
 }
 
 // Kill native HTML drag always (prevents 🚫 ghost)
@@ -1025,16 +1032,74 @@ document.addEventListener("dragstart", (e) => {
   if (e.target.closest(".block")) e.preventDefault();
 });
 
+function finishInfiniteTextEditing() {
+  const block = infiniteTextEditingBlock;
+  infiniteTextEditingBlock = null;
+  block?.classList.remove("is-text-editing");
+  if (block?.contains(document.activeElement)) document.activeElement.blur();
+}
+
+function beginInfiniteTextEditing(block, editable = block?.querySelector('.frame-item-text-content, .block-body')) {
+  if (!window.isInfiniteCanvasPage?.() || !block || !["text", "list"].includes(block.dataset.frameChildType || block.dataset.type)) return;
+  if (infiniteTextEditingBlock !== block) {
+    finishInfiniteTextEditing();
+    infiniteTextEditingBlock = block;
+    block.classList.add("is-text-editing");
+    selectBlock(block);
+  }
+  editable?.focus();
+}
+
+document.addEventListener("mousedown", (event) => {
+  if (!window.isInfiniteCanvasPage?.() || event.button !== 0) return;
+  const block = event.target.closest?.('.frame-item, #grid > .block:not(.ghost)');
+  if (block && typeof placing !== "undefined" && placing) stopPlacing(true);
+  if (infiniteTextEditingBlock && (block !== infiniteTextEditingBlock || event.target.closest('.frame-object-drag-handle, .block-resize-handle'))) {
+    // Keep editing available while using the formatting toolbar.
+    if (!event.target.closest('#editorDock, .topbar-dropdown, .canvas-color-popover, .canvas-slash-menu')) finishInfiniteTextEditing();
+  }
+}, true);
+
+document.addEventListener("dblclick", (event) => {
+  if (!window.isInfiniteCanvasPage?.()) return;
+  const editable = event.target.closest?.('#grid .frame-item-text-content, #grid > .block[data-type="text"] .block-body, #grid > .block[data-type="list"] .block-body');
+  if (!editable || event.target.closest('a, button, input, select, textarea')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  beginInfiniteTextEditing(editable.closest('.frame-item, .block'), editable);
+  const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+  if (caret && editable.contains(caret.startContainer)) {
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(caret);
+  }
+}, true);
+
+document.addEventListener("keydown", (event) => {
+  if (!window.isInfiniteCanvasPage?.()) return;
+  if (event.key === "Escape" && infiniteTextEditingBlock) {
+    finishInfiniteTextEditing();
+    event.preventDefault();
+  } else if (event.key === "Enter" && !infiniteTextEditingBlock && !event.target.closest?.('input, textarea, select, button, [contenteditable="true"]') && ["text", "list"].includes(selectedBlock?.dataset.type)) {
+    beginInfiniteTextEditing(selectedBlock);
+    event.preventDefault();
+  }
+}, true);
+
 document.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
   if (e.button !== 0) return;
 
   if (beginCanvasTableColumnResize(e)) return;
 
-  if (e.target.closest('[contenteditable="true"]')) return;
+  const pressedBlock = e.target.closest('#grid > .block:not(.ghost)');
+  const moveText = window.isInfiniteCanvasPage?.() && ["text", "list"].includes(pressedBlock?.dataset.type) && infiniteTextEditingBlock !== pressedBlock;
+  if (e.target.closest('[contenteditable="true"]') && !moveText) return;
+  if (e.target.closest('input, textarea, select, button, a') && !e.target.closest('.frame-object-drag-handle, .block-resize-handle')) return;
   if (e.target.closest(".page-database-block-shell input, .page-database-block-shell textarea, .page-database-block-shell button, .page-database-block-shell select, .page-database-block-shell [data-db-action], .page-database-cell, .page-database-row-shell, .page-database-gallery-card, .page-database-board-card, .page-calendar-event, .page-calendar-day, .page-database-table-scroll")) return;
   if (e.target.closest(".typing-drill-shell input, .typing-drill-shell button, .typing-drill-shell select, .typing-drill-shell textarea, .match-pairs-shell button, .match-pairs-shell input, .match-pairs-shell select, .match-pairs-shell textarea")) return;
   if (e.target.closest(".page-card-media-action")) return;
+  if (e.target.closest(".connections-block-shell button, .connections-block-shell input, .connections-block-shell select")) return;
 
   const media = e.target.closest(".page-card-media");
   const mediaBlock = getPageCardHost(media);
@@ -1066,6 +1131,7 @@ document.addEventListener("mousedown", (e) => {
   clearFrameSurfaceCarry();
 
   activeBlock = block;
+  activeBlockDidDrag = false;
 
   const rect = block.getBoundingClientRect();
   const scale = getCanvasInteractionScale();
@@ -1092,14 +1158,21 @@ document.addEventListener("mousedown", (e) => {
 });
 
 document.addEventListener("mousedown", (e) => {
+  // A fresh press is intentional; only suppress the click ending a drag.
+  suppressFrameDragClickUntil = 0;
   if (!document.body.classList.contains("editing")) return;
   if (e.button !== 0) return;
-  if (e.target.closest('[contenteditable="true"]')) return;
+  const frameText = e.target.closest('.frame-item[data-frame-child-type="text"]');
+  const moveFrameText = window.isInfiniteCanvasPage?.() && frameText && infiniteTextEditingBlock !== frameText;
+  if (e.target.closest('input, textarea, select, button, a') && !e.target.closest(".frame-item-drag-handle")) return;
+  if (e.target.closest('[contenteditable="true"]') && !moveFrameText) return;
   if (e.target.closest(".frame-item-delete, .frame-item-image-action, .container-insert-prompt")) return;
 
   const item = e.target.closest(".frame-item");
   const sourceBlock = item?.closest('.block[data-type="container"]');
   if (!item || !sourceBlock) return;
+  // The trailing typing prompt is not a movable item.
+  if (isFrameTextItemEmpty(item)) return;
 
   if (selectedBlock !== item) {
     selectBlock(item);
@@ -1120,17 +1193,40 @@ document.addEventListener("mousedown", (e) => {
   activeFrameDragSourceBlock = sourceBlock;
   activeFrameDragOffsetX = e.clientX - rect.left;
   activeFrameDragOffsetY = e.clientY - rect.top;
-
-  activeFrameDragGhost = item.cloneNode(true);
-  activeFrameDragGhost.classList.add("frame-item-drag-ghost");
-  activeFrameDragGhost.style.width = `${Math.round(rect.width)}px`;
-  activeFrameDragGhost.style.height = `${Math.round(rect.height)}px`;
-  document.body.appendChild(activeFrameDragGhost);
-
-  item.classList.add("frame-item-dragging-source");
-  positionFrameDragGhost(e.clientX, e.clientY);
+  activeFrameDragStartX = e.clientX;
+  activeFrameDragStartY = e.clientY;
   selectBlock(item);
-});
+}, true);
+
+document.addEventListener("click", (event) => {
+  if (Date.now() > suppressFrameDragClickUntil) return;
+  suppressFrameDragClickUntil = 0;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, true);
+
+// A completed click returns to typing, including after a blur. A drag's click
+// is suppressed above, so moving blocks never unexpectedly starts text editing.
+document.addEventListener("click", (event) => {
+  if (!window.isInfiniteCanvasPage?.() || event.button !== 0 || event.defaultPrevented) return;
+  if (event.target.closest('a, button, input, select, textarea, .block-resize-handle, .frame-item-drag-handle, .frame-object-drag-handle')) return;
+  const block = event.target.closest('#grid > .block[data-type="text"]:not(.ghost), #grid > .block[data-type="list"]:not(.ghost), #grid .frame-item[data-frame-child-type="text"]');
+  if (!block) return;
+  const editable = event.target.closest('[contenteditable="true"]') || block.querySelector('.frame-item-text-content, .block-body');
+  if (!editable) return;
+  const wasEditing = infiniteTextEditingBlock === block;
+  beginInfiniteTextEditing(block, editable);
+  if (wasEditing) return;
+  const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+  const range = caret && editable.contains(caret.startContainer) ? caret : document.createRange();
+  if (range !== caret) {
+    range.selectNodeContents(editable);
+    range.collapse(false);
+  }
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}, true);
 
 document.addEventListener("mousemove", (e) => {
   if (activeTableColumnResize) {
@@ -1165,6 +1261,16 @@ document.addEventListener("mousemove", (e) => {
   }
 
   if (activeFrameDragItem) {
+    if (!activeFrameDragGhost) {
+      if (Math.hypot(e.clientX - activeFrameDragStartX, e.clientY - activeFrameDragStartY) < 5) return;
+      const rect = activeFrameDragItem.getBoundingClientRect();
+      activeFrameDragGhost = activeFrameDragItem.cloneNode(true);
+      activeFrameDragGhost.classList.add("frame-item-drag-ghost");
+      activeFrameDragGhost.style.width = `${Math.round(rect.width)}px`;
+      activeFrameDragGhost.style.height = `${Math.round(rect.height)}px`;
+      document.body.appendChild(activeFrameDragGhost);
+      activeFrameDragItem.classList.add("frame-item-dragging-source");
+    }
     positionFrameDragGhost(e.clientX, e.clientY);
 
     const frameDropTarget = getFrameDropTargetAtPoint(e.clientX, e.clientY, activeFrameDragItem);
@@ -1178,6 +1284,8 @@ document.addEventListener("mousemove", (e) => {
   }
 
   if (!activeBlock || !mode) return;
+  if (!activeBlockDidDrag && Math.hypot(e.clientX - startX, e.clientY - startY) < 5) return;
+  activeBlockDidDrag = true;
   const pointer = getPointerPositionOnGrid(e.clientX, e.clientY);
   if (!pointer.rect) return;
   const gridWidth = getGridViewportWidth();
@@ -1265,31 +1373,38 @@ document.addEventListener("mouseup", (e) => {
   }
 
   if (activeFrameDragItem) {
+    if (!activeFrameDragGhost) {
+      clearFrameItemDragState();
+      return;
+    }
+    suppressFrameDragClickUntil = Date.now() + 250;
+    let moved = false;
     const frameDropTarget = getFrameDropTargetAtPoint(e.clientX, e.clientY, activeFrameDragItem);
-    if (frameDropTarget) {
-      const movedItem = moveFrameItemToContainer(activeFrameDragItem, frameDropTarget, getFrameDropPlacement(frameDropTarget, e.clientY, e.clientX, activeFrameDragItem));
-      selectBlock(movedItem || frameDropTarget);
-    } else {
+    {
       const block = placeFrameItemOnGrid(activeFrameDragItem, e.clientX, e.clientY, activeFrameDragOffsetX, activeFrameDragOffsetY);
       if (block) {
+        if (frameDropTarget) dropBlockIntoFrame(frameDropTarget, block);
+        moved = true;
         selectBlock(block);
       }
     }
 
     clearFrameDropPreview();
     clearFrameItemDragState();
+    if (moved && typeof saveState === "function") saveState();
     return;
   }
 
+  if (activeBlock && !activeBlockDidDrag) {
+    activeBlock = null;
+    mode = null;
+    clearFrameSurfaceCarry();
+    return;
+  }
+  if (activeBlockDidDrag) suppressFrameDragClickUntil = Date.now() + 250;
   if (activeBlock && mode === "move") {
-    const frameDropTarget = null;
-    if (frameDropTarget) {
-      dropBlockIntoFrame(frameDropTarget, activeBlock, getFrameDropPlacement(frameDropTarget, e.clientY, e.clientX));
-      clearFrameDropPreview();
-      activeBlock = null;
-      mode = null;
-      return;
-    }
+    const frameDropTarget = getExplicitFrameTargetForBlock(activeBlock);
+    if (frameDropTarget) dropBlockIntoFrame(frameDropTarget, activeBlock);
   }
 
   if (activeBlock && mode === "resize") {
@@ -1302,6 +1417,7 @@ document.addEventListener("mouseup", (e) => {
   clearFrameDropPreview();
   clearFrameSurfaceCarry();
   activeBlock = null;
+  activeBlockDidDrag = false;
   mode = null;
 });
 
@@ -1369,6 +1485,7 @@ toolText.addEventListener("click", (e) => { e.preventDefault(); startPlacingPres
 toolList.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("list"); });
 toolImage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("image"); });
 toolPage.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("page"); });
+document.getElementById("toolConnections")?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("connections"); });
 toolDomain.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("domain"); });
 toolDataCallout?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("data-callout"); });
 toolLiveDatabaseCard?.addEventListener("click", (e) => { e.preventDefault(); startPlacingPreset("live-database-card"); });
@@ -1405,6 +1522,9 @@ let ghostBlock = null;
 let placePreset= "text"; //"text" | "image" | etc (future use)
 
 function getDefaultBlockDimensions(type = "text") {
+  if (type === "canvas-preview") return { width: GRID_SIZE * 28, height: GRID_SIZE * 18 };
+  if (type === "page-tags" || type === "mood-board") return { width: GRID_SIZE * 12, height: GRID_SIZE * 6 };
+  if (type === "connections") return { width: snap(GRID_SIZE * 15), height: snap(GRID_SIZE * 7) };
   if (type === "list") {
     return { width: snap(GRID_SIZE * 12), height: snap(GRID_SIZE * 4) };
   }
@@ -1566,11 +1686,11 @@ function getLinkedPageCardDimensions(titleText = "", blockOrOptions = null) {
   if (view === "gallery") {
     const currentWidth = parseInt(block?.style?.width || blockOrOptions?.w || blockOrOptions?.width || "0", 10);
     const currentHeight = parseInt(block?.style?.height || blockOrOptions?.h || blockOrOptions?.height || "0", 10);
-    const minWidth = Math.max(192, snap(GRID_SIZE * 8));
+    const minWidth = snap(GRID_SIZE * 6);
     const resolvedWidth = Math.max(currentWidth || 0, minWidth);
     const minHeight = block
       ? getGalleryCardMinHeight(block, resolvedWidth)
-      : Math.max(168, snap(GRID_SIZE * 7));
+      : (blockOrOptions?.pageCardGalleryStyle === "compact" ? GRID_SIZE * 6 : Math.max(168, snap(GRID_SIZE * 7)));
 
     return {
       width: resolvedWidth,
@@ -1610,12 +1730,13 @@ function getLinkedPageCardDimensions(titleText = "", blockOrOptions = null) {
 }
 
 function getGalleryCardMinHeight(block, widthOverride = 0) {
+  if (block?.dataset?.pageCardGalleryStyle === "compact") return GRID_SIZE * 6;
   if (!block) {
     return Math.max(168, snap(GRID_SIZE * 7));
   }
 
   const previousWidth = block.style.width || "";
-  const nextWidth = Math.max(widthOverride || parseInt(previousWidth || block.getBoundingClientRect().width || "0", 10), 192);
+  const nextWidth = Math.max(widthOverride || parseInt(previousWidth || block.getBoundingClientRect().width || "0", 10), snap(GRID_SIZE * 6));
 
   if (widthOverride) {
     block.style.width = `${nextWidth}px`;
@@ -1668,6 +1789,7 @@ function getMinResizeDimensionsForBlock(block, widthOverride = 0) {
   }
 
   const type = block.dataset.type || "";
+  if (type === "canvas-preview") return { width: GRID_SIZE * 12, height: GRID_SIZE * 10 };
   if (isVerticalDividerType(type)) {
     return {
       width: snap(GRID_SIZE * 1),
@@ -1683,7 +1805,7 @@ function getMinResizeDimensionsForBlock(block, widthOverride = 0) {
   }
 
   if ((type === "page" || type === "domain") && getPageCardView(block) === "gallery") {
-    const minWidth = Math.max(192, snap(GRID_SIZE * 8));
+    const minWidth = snap(GRID_SIZE * 6);
     const resolvedWidth = Math.max(widthOverride || parseInt(block.style.width || block.getBoundingClientRect().width || "0", 10), minWidth);
 
     return {
@@ -2148,7 +2270,8 @@ function applyImageFrameStyle(target, frameStyle = "none", options = {}) {
 }
 
 function promptImageUploadForBlock(block) {
-  if (!block || block.dataset.type !== "image") return;
+  if (!block || getCanvasTargetType(block) !== "image") return;
+  selectBlock(block);
 
   const input = document.createElement("input");
   input.type = "file";
@@ -2166,6 +2289,7 @@ function promptImageUploadForBlock(block) {
       const storedSrc = await prepareImageFileForStorage(file);
       body.innerHTML = `<img src="${storedSrc}" class="canvas-cropped-image" draggable="false" />`;
       applyImageCropShape(block, block.dataset.imageCropShape || "original", { resize: false, skipSave: true });
+      refreshCanvasDockToolState();
 
       const ownerBlock = block.classList.contains("block") ? block : block.closest(".block");
       if (ownerBlock && typeof autoGrowBlock === "function") {
@@ -2379,33 +2503,24 @@ function hasFrameItems(containerBlock) {
 function syncContainerInsertPrompt(containerBlock) {
   const prompt = containerBlock?.querySelector(".container-insert-prompt");
   if (!prompt) return;
-  prompt.hidden = hasFrameItems(containerBlock);
+  prompt.hidden = true;
 }
 
 function ensureFrameTypingLine(containerBlock, options = {}) {
   const host = getContainerItemsHost(containerBlock);
   if (!host) return null;
 
-  const items = Array.from(host.querySelectorAll(":scope > .frame-item"));
-  const lastItem = items[items.length - 1] || null;
-  const lastEditable = getFrameItemTextContent(lastItem);
-
-  if (lastEditable && isFrameTextItemEmpty(lastItem)) {
-    if (options.focus) focusFrameTextItem(lastItem, !!options.placeAtEnd);
-    syncContainerInsertPrompt(containerBlock);
-    return lastItem;
-  }
-
-  const item = buildFrameItemElement({ type: "text" });
-  host.appendChild(item);
+  // Frames group objects; they must not manufacture editable placeholder rows.
+  host.querySelectorAll(":scope > .frame-typing-placeholder").forEach(item => {
+    if (isFrameTextItemEmpty(item)) item.remove();
+  });
   syncContainerInsertPrompt(containerBlock);
-
-  if (options.focus) focusFrameTextItem(item, !!options.placeAtEnd);
-  return item;
+  return null;
 }
 
 function applyStoredFrameItemStyles(item, data = {}) {
   if (!item) return;
+  window.applyBlockAppearance?.(item, window.getSavedBlockAppearance?.(data) || {});
 
   item.dataset.bgState = data.bg ? "alt" : "default";
   item.dataset.borderState = data.borderColor ? "alt" : "default";
@@ -2497,6 +2612,7 @@ function getContainerLegacyBodyHTML(containerBlock) {
 
 function buildFrameItemElement(data = {}) {
   const type = data.type || "text";
+  const dragHandleHTML = `<button type="button" class="frame-item-drag-handle" aria-label="Move item" title="Drag to rearrange or move out of frame" contenteditable="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></button>`;
   const item = document.createElement("div");
 
   item.className = `frame-item frame-item-${type}`;
@@ -2505,6 +2621,7 @@ function buildFrameItemElement(data = {}) {
 
   if (type === "text") {
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       <div class="frame-item-text-content" contenteditable="true" spellcheck="false"></div>
     `;
@@ -2525,8 +2642,9 @@ function buildFrameItemElement(data = {}) {
     item.dataset.imageCropShape = normalizeImageCropShape(data.imageCropShape);
     item.dataset.imageFrameStyle = normalizeImageFrameStyle(data.imageFrameStyle);
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
-      <div class="block-body block-image-body">${data.bodyHTML || '<div class="image-placeholder">🖼 Click replace to add image</div>'}</div>
+      <div class="block-body block-image-body">${data.bodyHTML || '<button type="button" class="image-placeholder" data-upload-canvas-image>Upload image</button>'}</div>
       <button type="button" class="frame-item-image-action">Replace</button>
     `;
     applyStoredFrameItemStyles(item, data);
@@ -2538,6 +2656,7 @@ function buildFrameItemElement(data = {}) {
   if (type === "table") {
     item.dataset.type = "table";
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       ${makeBlockHTML("table")}
     `;
@@ -2563,6 +2682,7 @@ function buildFrameItemElement(data = {}) {
     item.dataset.type = "button";
     item.dataset.buttonConfig = data.buttonConfig || "{}";
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       <div class="button-block-shell"></div>
     `;
@@ -2573,6 +2693,7 @@ function buildFrameItemElement(data = {}) {
 
   if (isDividerType(type)) {
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       <div class="frame-item-divider-line block-divider" aria-hidden="true"></div>
     `;
@@ -2583,6 +2704,7 @@ function buildFrameItemElement(data = {}) {
   if (type === "page" || type === "domain") {
     item.dataset.type = type;
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       ${makeFrameLinkedCardHTML(type)}
     `;
@@ -2592,6 +2714,7 @@ function buildFrameItemElement(data = {}) {
     if (data.pageCardIcon) item.dataset.pageCardIcon = data.pageCardIcon;
     item.dataset.pageCardIconScale = String(normalizeIconImageScale(data.pageCardIconScale, 1));
     if (getPageCardView(data) === "gallery") item.dataset.pageCardView = "gallery";
+    if (data.pageCardGalleryStyle === "compact") item.dataset.pageCardGalleryStyle = "compact";
     item.dataset.pageCardImageMode = getPageCardImageMode(data);
     if (data.pageCardImageSrc) item.dataset.pageCardImageSrc = data.pageCardImageSrc;
     item.dataset.pageCardImagePos = String(getPageCardImagePosition(data));
@@ -2635,6 +2758,7 @@ function buildFrameItemElement(data = {}) {
   if (type === "weblink") {
     item.dataset.type = "weblink";
     item.innerHTML = `
+      ${dragHandleHTML}
       <button type="button" class="frame-item-delete" aria-label="Remove item">×</button>
       ${makeWebLinkCardHTML()}
     `;
@@ -2656,6 +2780,7 @@ function serializeFrameItemElement(item) {
   const payload = {
     id: item.dataset.frameChildId || createFrameChildId(),
     type,
+    appearance: item.dataset.appearance || "{}",
     bg: item.style.backgroundColor || "",
     borderColor: item.style.borderColor || "",
     textColor: item.style.color || "",
@@ -2700,6 +2825,7 @@ function serializeFrameItemElement(item) {
     payload.pageCardImageMode = getPageCardImageMode(item);
     payload.pageCardImagePos = getPageCardImagePosition(item);
     payload.pageCardView = getPageCardView(item);
+    payload.pageCardGalleryStyle = item.dataset.pageCardGalleryStyle || "standard";
     payload.pageCardHideIcon = isPageCardIconHidden(item) ? 1 : 0;
     payload.cardStyle = item.dataset.cardStyle || "";
     return payload;
@@ -2886,6 +3012,7 @@ function moveFrameItemToContainer(item, containerBlock, placement = {}) {
 }
 
 function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
+  if (isFrameTextItemEmpty(item)) return null;
   const itemData = serializeFrameItemElement(item);
   if (!itemData) return null;
 
@@ -2897,6 +3024,7 @@ function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
       type: blockType,
       pageCardHideIcon: itemData.pageCardHideIcon || 0,
       pageCardView: itemData.pageCardView || "default",
+    pageCardGalleryStyle: itemData.pageCardGalleryStyle || "standard",
       padding: ""
     });
   }
@@ -2911,6 +3039,7 @@ function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
     z: topZIndex + 1,
     titleHTML: "",
     bodyHTML: itemData.bodyHTML || "",
+    appearance: itemData.appearance || "{}",
     containerTitle: "",
     containerBody: "",
     containerItems: [],
@@ -2935,9 +3064,15 @@ function buildBlockDataFromFrameItem(item, x = 0, y = 0) {
     pageCardImageMode: itemData.pageCardImageMode || "none",
     pageCardImagePos: getPageCardImagePosition(itemData),
     pageCardView: itemData.pageCardView || "default",
+    pageCardGalleryStyle: itemData.pageCardGalleryStyle || "standard",
     pageCardHideIcon: itemData.pageCardHideIcon || 0,
     cardStyle: itemData.cardStyle || ""
   };
+
+  if (blockType === "weblink") {
+    blockData.titleHTML = itemData.titleHTML || "";
+    blockData.externalUrl = itemData.externalUrl || "";
+  }
 
   return blockData;
 }
@@ -3005,6 +3140,7 @@ function buildFrameItemDataFromBlock(block) {
 
   if (nextType === "text") {
     return {
+      appearance: serialized.appearance || "{}",
       type: "text",
       bodyHTML: serialized.bodyHTML || "",
       bg: serialized.bg || "",
@@ -3017,6 +3153,7 @@ function buildFrameItemDataFromBlock(block) {
 
   if (nextType === "image") {
     return {
+      appearance: serialized.appearance || "{}",
       type: "image",
       bodyHTML: serialized.bodyHTML || "",
       bg: "",
@@ -3031,6 +3168,7 @@ function buildFrameItemDataFromBlock(block) {
 
   if (nextType === "table") {
     return {
+      appearance: serialized.appearance || "{}",
       type: "table",
       tableHTML: serialized.tableHTML || "",
       bg: serialized.bg || "",
@@ -3043,6 +3181,7 @@ function buildFrameItemDataFromBlock(block) {
 
   if (nextType === "button") {
     return {
+      appearance: serialized.appearance || "{}",
       type: "button",
       buttonConfig: serialized.buttonConfig || "{}",
       bg: serialized.bg || "",
@@ -3055,6 +3194,7 @@ function buildFrameItemDataFromBlock(block) {
 
   if (isDividerType(nextType)) {
     return {
+      appearance: serialized.appearance || "{}",
       type: nextType,
       bg: serialized.bg || "",
       borderColor: serialized.borderColor || "",
@@ -3065,6 +3205,7 @@ function buildFrameItemDataFromBlock(block) {
   }
 
   return {
+    appearance: serialized.appearance || "{}",
     type: nextType,
     linkedPageId: serialized.linkedPageId || "",
     pageCardTitle: serialized.pageCardTitle || "",
@@ -3076,6 +3217,7 @@ function buildFrameItemDataFromBlock(block) {
     pageCardImageMode: serialized.pageCardImageMode || "none",
     pageCardImagePos: getPageCardImagePosition(serialized),
     pageCardView: serialized.pageCardView || "default",
+    pageCardGalleryStyle: serialized.pageCardGalleryStyle || "standard",
     pageCardHideIcon: serialized.pageCardHideIcon || 0,
     cardStyle: serialized.cardStyle || "",
     bg: serialized.bg || "",
@@ -3088,27 +3230,15 @@ function buildFrameItemDataFromBlock(block) {
 
 function dropBlockIntoFrame(containerBlock, block, placement = {}) {
   if (!containerBlock || !block) return null;
-
-  const itemData = buildFrameItemDataFromBlock(block);
-  if (!itemData) return null;
-
-  const inserted = insertFrameItemIntoContainer(containerBlock, itemData.type, {
-    data: itemData,
-    beforeItem: placement.beforeItem || null,
-    afterItem: placement.afterItem || null,
-    focus: false,
-    skipSave: true
-  });
-  if (!inserted) return null;
-
-  if (selectedBlock === block) {
-    clearSelection();
+  // Keep the original object, its identity, dimensions, and position. Frame
+  // movement carries objects whose centers are inside its bounds.
+  if (block === containerBlock || block.dataset.type === "container") return null;
+  if (getCanvasBlockZ(block) <= getCanvasBlockZ(containerBlock)) {
+    topZIndex = Math.max(topZIndex, getCanvasBlockZ(containerBlock)) + 1;
+    block.style.zIndex = String(topZIndex);
   }
-
-  block.remove();
-  selectBlock(inserted);
   if (typeof expandGrid === "function") expandGrid();
-  return inserted;
+  return block;
 }
 
 function getSerializedBlockReferenceHTML(blockData) {
@@ -3193,6 +3323,7 @@ function normalizeBlockAppearanceForType(block, type) {
 
 function convertCanvasBlockType(block, nextType, options = {}) {
   if (!block || !nextType) return null;
+  if (block === infiniteTextEditingBlock) finishInfiniteTextEditing();
 
   const sourceBodyHTML = block.querySelector(".block-body")?.innerHTML || "";
   const sourceContainerBodyHTML = block.dataset.type === "container"
@@ -3223,6 +3354,10 @@ function convertCanvasBlockType(block, nextType, options = {}) {
   delete block.dataset.dataCalloutShowIcon;
   delete block.dataset.dataCalloutIcon;
   delete block.dataset.dataCalloutShowProjectImage;
+  delete block.dataset.dataCalloutShowDateTime;
+  delete block.dataset.dataCalloutDateStyle;
+  delete block.dataset.dashboardWidget;
+  delete block.dataset.dataCalloutCompact;
   delete block.dataset.dataCalloutProjectImageLayout;
   delete block.dataset.dataCalloutProjectImageSize;
   delete block.dataset.progressTitle;
@@ -3346,6 +3481,29 @@ window.convertCanvasBlockType = convertCanvasBlockType;
 window.promptImageUploadForBlock = promptImageUploadForBlock;
 
 function makeBlockHTML(type = "text") {
+  if (type === "canvas-preview") return '<section class="canvas-preview-shell"></section><div class="block-resize-handle" title="Resize"></div>';
+  if (type === "page-tags" || type === "mood-board") {
+    return '<section class="dashboard-widget-shell"></section><div class="block-resize-handle" title="Resize"></div>';
+  }
+  if (type === "live-database-card") {
+    return `
+      <section class="live-database-card-shell">
+        <div class="live-database-card-head">
+          <span class="live-database-card-title">Live database card</span>
+          <div class="live-database-card-actions">
+            <button type="button" data-live-db-action="connect">Connect database</button>
+            <button type="button" data-live-db-action="add-line">+ Add line</button>
+          </div>
+        </div>
+        <div class="live-database-card-lines"><div class="live-database-card-empty">Connect a database, then add the pieces you want to see here.</div></div>
+      </section>
+      <div class="block-resize-handle" title="Resize"></div>
+    `;
+  }
+
+  if (type === "connections") {
+    return `<div class="connections-block-shell"><div class="connections-block-heading"><div class="block-title" contenteditable="true" spellcheck="false">Connections</div><select class="connections-field-select" aria-label="Information to display"></select></div><div class="connections-content"></div></div><div class="block-resize-handle" title="Resize"></div>`;
+  }
   if (type === "button") {
     return `
       <div class="button-block-shell"></div>
@@ -3356,7 +3514,7 @@ function makeBlockHTML(type = "text") {
  if (type === "image") {
     return `
       <div class="block-body block-image-body">
-        <div class="image-placeholder">🖼 Click replace to add image</div>
+        <button type="button" class="image-placeholder" data-upload-canvas-image>Upload image</button>
       </div>
       <div class="block-resize-handle" title="Resize"></div>
     `;
@@ -3496,15 +3654,15 @@ function makeBlockHTML(type = "text") {
             <div class="page-database-block-title is-empty">Untitled</div>
             <button type="button" class="page-database-view-pill page-database-block-view-btn" data-db-action="open-inline-view-menu" aria-haspopup="menu">Table</button>
             <button type="button" class="page-database-settings-btn page-database-block-settings-btn" data-db-action="open-database-settings-menu" aria-haspopup="menu" aria-label="Open database settings">
-              <span class="page-database-settings-btn-icon" aria-hidden="true">⚙</span>
+              ${getUIIcon("settings-2")}
             </button>
           </div>
           <div class="page-database-toolbar-actions page-database-block-toolbar-actions" hidden>
-            <button type="button" class="page-database-toolbar-btn" data-db-action="open-filter-menu">Filter</button>
-            <button type="button" class="page-database-toolbar-btn" data-db-action="open-sort-menu">Sort</button>
-            <button type="button" class="page-database-toolbar-btn" data-db-action="open-group-menu">Group</button>
+            <button type="button" class="page-database-toolbar-btn" data-db-action="open-filter-menu">${getUIIcon('filter')}<span>Filter</span></button>
+            <button type="button" class="page-database-toolbar-btn" data-db-action="open-sort-menu">${getUIIcon('arrow-up-down')}<span>Sort</span></button>
+            <button type="button" class="page-database-toolbar-btn" data-db-action="open-group-menu">${getUIIcon('layers')}<span>Group</span></button>
             <button type="button" class="page-database-toolbar-btn page-database-folder-btn" data-db-action="connect-folder">Connect Folder</button>
-            <button type="button" class="page-database-toolbar-btn" data-db-action="open-database-menu">More</button>
+            <button type="button" class="page-database-toolbar-btn" data-db-action="open-database-menu">${getUIIcon('ellipsis')}<span>More</span></button>
             <button type="button" class="page-database-toolbar-new-btn" data-db-action="add-row">New</button>
           </div>
           <button type="button" class="page-database-block-collapse-btn" data-db-action="toggle-inline-collapse" aria-label="Collapse inline toolbar">&gt;&gt;</button>
@@ -4012,6 +4170,16 @@ function getPageActivityLastOpenedLabel(pageId = "") {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function formatRelativeOpenedDate(timestamp, now = new Date()) {
+  const date = new Date(timestamp);
+  if (!timestamp || !Number.isFinite(date.getTime())) return "Never";
+  const day = value => Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+  const days = Math.max(0, Math.round((day(now) - day(date)) / 86400000));
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return days < 30 ? days + "d ago" : date.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
+
 function getPageActivityLastOpenedTime(pageId = "") {
   const safePageId = String(pageId || "").trim();
   if (!safePageId) return 0;
@@ -4111,7 +4279,7 @@ function getDataCalloutScopeForTarget(targetPageId = "") {
 function getDataCalloutProjectImage(project = {}) {
   if (!project?.id) return "";
   const rowPeekData = typeof window.getDatabaseRowPeekData === "function"
-    ? window.getDatabaseRowPeekData(project.id)
+    ? window.getDatabaseRowPeekData(project.id, { summaryOnly: true })
     : null;
   if (rowPeekData?.coverSource) return rowPeekData.coverSource;
 
@@ -4138,7 +4306,7 @@ function getDataCalloutProjectImage(project = {}) {
 function getDataCalloutItemTitle(item = {}, fallback = "Untitled") {
   if (!item?.id) return String(item?.title || fallback).trim() || fallback;
   const rowPeekData = typeof window.getDatabaseRowPeekData === "function"
-    ? window.getDatabaseRowPeekData(item.id)
+    ? window.getDatabaseRowPeekData(item.id, { summaryOnly: true })
     : null;
   return String(rowPeekData?.title || item.title || fallback).trim() || fallback;
 }
@@ -4155,6 +4323,7 @@ function normalizeDataCalloutImageSize(value = "") {
 
 function renderDataCalloutLastOpenedItems(items = [], config = {}, fallbackTitle = "Untitled") {
   const limit = Math.max(1, Math.min(5, Number(config.systemFormat) || items.length || 1));
+  const showDateTime = config.showDateTime !== false;
   const showImages = !!config.showProjectImage && limit <= 3;
   const imageLayout = normalizeDataCalloutImageLayout(config.projectImageLayout || "side");
   const imageSize = normalizeDataCalloutImageSize(config.projectImageSize || "md");
@@ -4162,7 +4331,7 @@ function renderDataCalloutLastOpenedItems(items = [], config = {}, fallbackTitle
   if (showImages) {
     const layoutClass = imageLayout === "top" ? " top-image" : "";
     return `
-      <span class="data-callout-project-card-list image-size-${escapeDataCalloutHTML(imageSize)}${layoutClass}">
+      <span class="data-callout-project-card-list image-size-${escapeDataCalloutHTML(imageSize)}${layoutClass}${config.dateStyle === "relative" && showDateTime ? " relative-dates" : ""}">
         ${items.map((item) => {
           const title = getDataCalloutItemTitle(item, fallbackTitle);
           const image = getDataCalloutProjectImage(item);
@@ -4171,7 +4340,7 @@ function renderDataCalloutLastOpenedItems(items = [], config = {}, fallbackTitle
               ${image ? `<img src="${escapeDataCalloutHTML(image)}" alt="" />` : ""}
               <span>
                 <strong>${escapeDataCalloutHTML(title)}</strong>
-                <small>${escapeDataCalloutHTML(getPageActivityLastOpenedLabel(item.id))}</small>
+                ${showDateTime ? `<small>${escapeDataCalloutHTML(config.dateStyle === "relative" ? formatRelativeOpenedDate(getPageActivityLastOpenedTime(item.id)) : getPageActivityLastOpenedLabel(item.id))}</small>` : ""}
               </span>
             </button>
           `;
@@ -4181,13 +4350,13 @@ function renderDataCalloutLastOpenedItems(items = [], config = {}, fallbackTitle
   }
 
   return `
-    <span class="data-callout-project-list">
+    <span class="data-callout-project-list${config.dateStyle === "relative" && showDateTime ? " relative-dates" : ""}">
       ${items.map((item) => {
         const title = getDataCalloutItemTitle(item, fallbackTitle);
         return `
           <button type="button" class="data-callout-project-row" data-callout-open-page="${escapeDataCalloutHTML(item.id)}">
             <strong>${escapeDataCalloutHTML(title)}</strong>
-            <small>${escapeDataCalloutHTML(getPageActivityLastOpenedLabel(item.id))}</small>
+            ${showDateTime ? `<small>${escapeDataCalloutHTML(config.dateStyle === "relative" ? formatRelativeOpenedDate(getPageActivityLastOpenedTime(item.id)) : getPageActivityLastOpenedLabel(item.id))}</small>` : ""}
           </button>
         `;
       }).join("")}
@@ -4501,7 +4670,7 @@ function normalizeDataCalloutShowIcon(value = "") {
 }
 
 function normalizeDataCalloutShowProjectImage(value = "") {
-  const safe = String(value || "").trim().toLowerCase();
+  const safe = String(value ?? "").trim().toLowerCase();
   if (safe === "false" || safe === "0" || safe === "off") return false;
   return true;
 }
@@ -5175,6 +5344,8 @@ function normalizeDataCalloutConfig(raw = {}) {
     showIcon: normalizeDataCalloutShowIcon(raw?.showIcon || ""),
     icon: String(raw?.icon || "").trim(),
     showProjectImage: normalizeDataCalloutShowProjectImage(raw?.showProjectImage ?? "true"),
+    showDateTime: String(raw?.showDateTime ?? "true").trim().toLowerCase() !== "false",
+    dateStyle: raw?.dateStyle === "relative" ? "relative" : "absolute",
     projectImageLayout: normalizeDataCalloutImageLayout(raw?.projectImageLayout || "side"),
     projectImageSize: normalizeDataCalloutImageSize(raw?.projectImageSize || "md")
   };
@@ -5203,6 +5374,8 @@ function readDataCalloutConfig(block) {
     showIcon: block.dataset.dataCalloutShowIcon || "",
     icon: block.dataset.dataCalloutIcon || "",
     showProjectImage: block.dataset.dataCalloutShowProjectImage || "true",
+    showDateTime: block.dataset.dataCalloutShowDateTime ?? "true",
+    dateStyle: block.dataset.dataCalloutDateStyle || "absolute",
     projectImageLayout: block.dataset.dataCalloutProjectImageLayout || "side",
     projectImageSize: block.dataset.dataCalloutProjectImageSize || "md"
   });
@@ -5233,6 +5406,8 @@ function writeDataCalloutConfig(block, config) {
   block.dataset.dataCalloutShowIcon = normalized.showIcon ? "true" : "false";
   block.dataset.dataCalloutIcon = normalized.icon;
   block.dataset.dataCalloutShowProjectImage = normalized.showProjectImage ? "true" : "false";
+  block.dataset.dataCalloutShowDateTime = normalized.showDateTime ? "true" : "false";
+  block.dataset.dataCalloutDateStyle = normalized.dateStyle;
   block.dataset.dataCalloutProjectImageLayout = normalized.projectImageLayout;
   block.dataset.dataCalloutProjectImageSize = normalized.projectImageSize;
 }
@@ -5261,22 +5436,6 @@ function ensureDataCalloutStructure(block) {
     if (labelEl) contentEl.appendChild(labelEl);
     const configBtn = shellEl.querySelector(".data-callout-config-btn");
     shellEl.insertBefore(contentEl, configBtn || null);
-  }
-
-  if (type === "live-database-card") {
-    return `
-      <section class="live-database-card-shell">
-        <div class="live-database-card-head">
-          <span class="live-database-card-title">Live database card</span>
-          <div class="live-database-card-actions">
-            <button type="button" data-live-db-action="connect">Connect database</button>
-            <button type="button" data-live-db-action="add-line">+ Add line</button>
-          </div>
-        </div>
-        <div class="live-database-card-lines"><div class="live-database-card-empty">Connect a database, then add the pieces you want to see here.</div></div>
-      </section>
-      <div class="block-resize-handle" title="Resize"></div>
-    `;
   }
 
   let secondaryValueEl = contentEl.querySelector(".data-callout-secondary-value");
@@ -5859,7 +6018,8 @@ function renderDataCalloutBlock(block) {
   } else {
     valueEl.textContent = result.configured ? result.valueText : "—";
   }
-  refs.iconEl.textContent = config.icon || "✦";
+  if (typeof setIconElementContent === "function") setIconElementContent(refs.iconEl, config.icon, "✦");
+  else refs.iconEl.textContent = config.icon || "✦";
   const secondaryValue = computeDataCalloutSecondaryValue(sourcePayload, config, result);
   refs.secondaryValueEl.textContent = secondaryValue;
   refs.secondaryValueEl.hidden = !secondaryValue;
@@ -5870,6 +6030,17 @@ function renderDataCalloutBlock(block) {
   refs.shellEl.dataset.size = config.size;
   refs.shellEl.dataset.labelPos = config.labelPos;
   refs.shellEl.dataset.showIcon = config.showIcon ? "true" : "false";
+
+  const wasCompact = block.dataset.dataCalloutCompact === "true";
+  const compact = config.sourceType === "system"
+    && ["scope-last-opened-items", "domain-last-opened-projects"].includes(config.systemKey)
+    && config.systemFormat === "1" && !config.showDateTime
+    && config.labelPos === "hidden" && !config.showIcon
+    && !secondaryValue && !valueEl.querySelector("img");
+  block.dataset.dataCalloutCompact = compact ? "true" : "false";
+  if (compact && !wasCompact) {
+    block.style.height = `${getMinHeightForBlock(block)}px`;
+  }
 }
 
 function fitStructuredDataCalloutBlock(block, mode = "") {
@@ -6116,6 +6287,17 @@ function openDataCalloutPicker(block, anchorEl = null) {
       <span>Format</span>
       <select data-callout-input="systemFormat"></select>
     </label>
+      <label class="data-callout-picker-field" data-callout-date-time-wrap hidden>
+        <span>Show date and time</span>
+        <select data-callout-input="showDateTime">
+          <option value="true">On</option>
+          <option value="false">Off</option>
+        </select>
+      </label>
+      <label class="data-callout-picker-field" hidden>
+        <span>Date style</span>
+        <select data-callout-input="dateStyle"><option value="absolute">Date and time</option><option value="relative">Relative, right aligned</option></select>
+      </label>
       <label class="data-callout-picker-field" data-callout-project-image-wrap hidden>
         <span>Item image</span>
         <select data-callout-input="showProjectImage">
@@ -6176,7 +6358,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
     </label>
     <label class="data-callout-picker-field">
       <span>Icon</span>
-      <input type="text" data-callout-input="icon" maxlength="8" placeholder="✦" />
+      <input type="text" data-callout-input="icon" placeholder="✦" />
+      <button type="button" data-choose-icon-for="[data-callout-input='icon']">Choose icon…</button>
     </label>
     <div class="data-callout-picker-actions">
       <button type="button" class="topbar-dropdown-btn" data-callout-action="save">Save</button>
@@ -6228,6 +6411,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const systemFormatSelect = picker.querySelector('[data-callout-input="systemFormat"]');
   const projectImageWrap = picker.querySelector('[data-callout-project-image-wrap]');
   const showProjectImageSelect = picker.querySelector('[data-callout-input="showProjectImage"]');
+  const dateTimeWrap = picker.querySelector('[data-callout-date-time-wrap]');
+  const dateStyleSelect = picker.querySelector('[data-callout-input="dateStyle"]');
+  const showDateTimeSelect = picker.querySelector('[data-callout-input="showDateTime"]');
   const projectImageLayoutWrap = picker.querySelector('[data-callout-project-image-layout-wrap]');
   const projectImageLayoutSelect = picker.querySelector('[data-callout-input="projectImageLayout"]');
   const projectImageSizeWrap = picker.querySelector('[data-callout-project-image-size-wrap]');
@@ -6254,6 +6440,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
   if (labelPosSelect) labelPosSelect.value = normalizeDataCalloutLabelPos(config.labelPos || "below");
   showIconSelect.value = config.showIcon ? "true" : "false";
   showProjectImageSelect.value = config.showProjectImage ? "true" : "false";
+  showDateTimeSelect.value = config.showDateTime ? "true" : "false";
+  dateStyleSelect.value = config.dateStyle;
   projectImageLayoutSelect.value = normalizeDataCalloutImageLayout(config.projectImageLayout || "side");
   projectImageSizeSelect.value = normalizeDataCalloutImageSize(config.projectImageSize || "md");
   iconInput.value = config.icon || "";
@@ -6346,6 +6534,7 @@ function openDataCalloutPicker(block, anchorEl = null) {
   const syncIconInputs = () => {
     const isEnabled = showIconSelect.value === "true";
     iconInput.disabled = !isEnabled;
+    picker.querySelector('[data-choose-icon-for]').disabled = !isEnabled;
     if (!isEnabled) {
       iconInput.blur();
     }
@@ -6403,6 +6592,9 @@ function openDataCalloutPicker(block, anchorEl = null) {
     const systemKey = normalizeDataCalloutSystemKey(systemKeySelect.value || "current-date");
     fillSystemFormatOptions(systemKey, systemFormatSelect.value || config.systemFormat || "");
     const isLastOpened = systemKey === "domain-last-opened-projects" || systemKey === "scope-last-opened-items";
+    dateTimeWrap.hidden = !isLastOpened;
+    showDateTimeSelect.disabled = !isLastOpened;
+    dateStyleSelect.closest("label").hidden = !isLastOpened;
     const imageEligible = isLastOpened && Number(systemFormatSelect.value || 0) <= 3;
     projectImageWrap.hidden = !imageEligible;
     showProjectImageSelect.disabled = !imageEligible;
@@ -6522,6 +6714,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
         showIcon: showIconSelect.value === "true",
         icon: iconInput.value || "",
         showProjectImage: showProjectImageSelect.value !== "false",
+        showDateTime: showDateTimeSelect.value !== "false",
+        dateStyle: dateStyleSelect.value,
         projectImageLayout: projectImageLayoutSelect.value || "side",
         projectImageSize: projectImageSizeSelect.value || "md"
       });
@@ -6580,6 +6774,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
       showIcon: showIconSelect.value === "true",
       icon: iconInput.value || "",
       showProjectImage: showProjectImageSelect.value !== "false",
+      showDateTime: showDateTimeSelect.value !== "false",
+      dateStyle: dateStyleSelect.value,
       projectImageLayout: projectImageLayoutSelect.value || "side",
       projectImageSize: projectImageSizeSelect.value || "md"
     });
@@ -6613,6 +6809,8 @@ function openDataCalloutPicker(block, anchorEl = null) {
       showIcon: showIconSelect.value === "true",
       icon: iconInput.value || "",
       showProjectImage: showProjectImageSelect.value !== "false",
+      showDateTime: showDateTimeSelect.value !== "false",
+      dateStyle: dateStyleSelect.value,
       projectImageLayout: projectImageLayoutSelect.value || "side",
       projectImageSize: projectImageSizeSelect.value || "md"
     });
@@ -11489,6 +11687,10 @@ function serializeBlockElement(b) {
   return {
     id: b.id || `block-${Date.now()}`,
     type: blockType,
+    dashboardRole: b.dataset.dashboardRole || "",
+    characterSection: b.dataset.characterSection || "",
+    characterLayout: window.SanctumCharacterSheetData?.readLayout(b.dataset.characterLayout),
+    appearance: b.dataset.appearance || "{}",
     x: parseInt(b.style.left || "0", 10),
     y: parseInt(b.style.top || "0", 10),
     w: parseInt(b.style.width || b.getBoundingClientRect().width, 10),
@@ -11512,6 +11714,8 @@ function serializeBlockElement(b) {
     imageFrameStyle: blockType === "image" ? normalizeImageFrameStyle(b.dataset.imageFrameStyle) : "none",
     hasNote: b.classList.contains("has-note") ? 1 : 0,
     linkedPageId: isLinkedCardBlock ? (b.dataset.linkedPageId || "") : "",
+    connectionPropertyId: blockType === "connections" ? (b.dataset.connectionPropertyId || "") : "",
+    connectionSourcePageId: blockType === "connections" ? (b.dataset.connectionSourcePageId || "") : "",
     pageCardTitle: isLinkedCardBlock ? (b.querySelector(".page-card-title")?.textContent || "") : "",
     pageCardMeta: isLinkedCardBlock ? (b.querySelector(".page-card-meta")?.textContent || "") : "",
     pageCardIcon: isLinkedCardBlock ? (b.dataset.pageCardIcon || b.querySelector(".page-card-icon")?.textContent || "") : "",
@@ -11522,6 +11726,9 @@ function serializeBlockElement(b) {
     pageCardImageMode: isLinkedCardBlock ? getPageCardImageMode(b) : "none",
     pageCardImagePos: isLinkedCardBlock ? getPageCardImagePosition(b) : 50,
     pageCardView: isLinkedCardBlock ? getPageCardView(b) : "default",
+    pageCardGalleryStyle: isLinkedCardBlock ? (b.dataset.pageCardGalleryStyle || "standard") : "",
+    dashboardWidget: ["page-tags", "mood-board"].includes(blockType) ? (b.dataset.dashboardWidget || "{}") : "",
+    canvasPreview: blockType === "canvas-preview" ? (b.dataset.canvasPreview || "{}") : "",
     pageCardHideIcon: isLinkedCardBlock && isPageCardIconHidden(b) ? 1 : 0,
     cardStyle: isLinkedCardBlock ? (b.dataset.cardStyle || "") : "",
     calendarTitle: blockType === "calendar" ? (b.dataset.calendarTitle || "") : "",
@@ -11571,6 +11778,8 @@ function serializeBlockElement(b) {
     dataCalloutShowIcon: blockType === "data-callout" ? (b.dataset.dataCalloutShowIcon || "") : "",
     dataCalloutIcon: blockType === "data-callout" ? (b.dataset.dataCalloutIcon || "") : "",
     dataCalloutShowProjectImage: blockType === "data-callout" ? (b.dataset.dataCalloutShowProjectImage || "") : "",
+    dataCalloutShowDateTime: blockType === "data-callout" ? (b.dataset.dataCalloutShowDateTime ?? "true") : "",
+    dataCalloutDateStyle: blockType === "data-callout" ? (b.dataset.dataCalloutDateStyle || "absolute") : "",
     dataCalloutProjectImageLayout: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageLayout || "") : "",
     dataCalloutProjectImageSize: blockType === "data-callout" ? (b.dataset.dataCalloutProjectImageSize || "") : "",
     liveDatabaseCard: blockType === "live-database-card" ? (b.dataset.liveDatabaseCard || "") : "",
@@ -12044,9 +12253,7 @@ document.getElementById("docContent")?.addEventListener("click", (e) => {
 
 
 // == Page card / Domain card click (outside edit mode) ==
-gridEl.addEventListener("click", (e) => {
-  if (document.body.classList.contains("editing")) return;
-
+function openCanvasLinkedCard(e) {
   const card = e.target.closest(".block-page-card");
   if (!card) return;
 
@@ -12092,8 +12299,16 @@ gridEl.addEventListener("click", (e) => {
   } else {
     openPage(linkedRecord.id);
   }
-});
+}
 
+gridEl.addEventListener("click", (e) => {
+  if (!document.body.classList.contains("editing")) openCanvasLinkedCard(e);
+});
+gridEl.addEventListener("dblclick", (e) => {
+  if (!window.isInfiniteCanvasPage?.() || !e.target.closest('.block-page-card') || e.target.closest('button, input, select')) return;
+  e.preventDefault();
+  openCanvasLinkedCard(e);
+});
 
 gridEl.addEventListener("click", (e) => {
   const openBtn = e.target.closest(".weblink-open-btn");
@@ -12331,6 +12546,7 @@ function placePresetAtPointer(preset, clientX, clientY) {
     frameTypingLine.focus();
     placeCaretInsideEditable(frameTypingLine);
   } else if (body) {
+    beginInfiniteTextEditing(real, body);
     body.focus();
   }
 
@@ -12390,6 +12606,11 @@ gridEl.addEventListener("mousedown", (e) => {
   if (!placing || !ghostBlock) return;
   if (!document.body.classList.contains("editing")) return;
 
+  if (e.target.closest(".frame-item, .container-title, .block-resize-handle, .block:not(.ghost):not([data-type='container'])")) {
+    stopPlacing(true);
+    return;
+  }
+
   // While placing, the ghost position is the source of truth.
   // Allow dropping over existing blocks so larger presets still place reliably.
   e.stopPropagation();
@@ -12406,6 +12627,7 @@ gridEl.addEventListener("mousedown", (e) => {
     frameTypingLine.focus();
     placeCaretInsideEditable(frameTypingLine);
   } else if (body) {
+    beginInfiniteTextEditing(real, body);
     body.focus();
   }
 
@@ -12431,6 +12653,9 @@ gridEl.addEventListener("mousedown", (e) => {
     sel.addRange(r);
   }
 
+  if (["page-tags", "mood-board"].includes(placePreset)) window.mountDashboardWidget?.(real);
+  if (placePreset === "canvas-preview") window.mountCanvasPreview?.(real);
+
   if (placePreset === "button") {
     window.mountButtonBlock?.(real, { openPicker: true });
   }
@@ -12441,6 +12666,10 @@ gridEl.addEventListener("mousedown", (e) => {
 
   if (placePreset === "live-database-card") {
     window.mountLiveDatabaseCardBlock?.(real);
+  }
+
+  if (placePreset === "connections") {
+    window.mountConnectionsBlock?.(real);
   }
 
   if (placePreset === "progress") {
@@ -12468,12 +12697,15 @@ gridEl.addEventListener("mousedown", (e) => {
   }
 
   const shouldOpenClockPicker = placePreset === "clock";
+  const shouldOpenImagePicker = placePreset === "image";
 
   if (typeof autoGrowBlock === "function") autoGrowBlock(real);
   if (typeof expandGrid === "function") expandGrid();
   if (typeof saveState === "function") saveState();
 
   stopPlacing(false);
+
+  if (shouldOpenImagePicker) promptImageUploadForBlock(real);
 
   if (shouldOpenClockPicker) {
     setTimeout(() => {
@@ -12666,7 +12898,6 @@ function moveSelectedLayer(action) {
 
 function getExplicitFrameTargetForBlock(block) {
   if (!block || isFrameItemTarget(block) || block.dataset.type === "container") return null;
-  if (!getFrameDropTypeForBlock(block)) return null;
 
   const blockRect = block.getBoundingClientRect();
   const centerX = blockRect.left + (blockRect.width / 2);
@@ -12721,6 +12952,7 @@ function selectBlock(block) {
       setTableSelectionMode(false);
     }
     if (type === "button") document.body.classList.add("block-type-button");
+    if (type === "connections") document.body.classList.add("block-type-text");
     if (type === "text" || type === "data-callout" || type === "progress" || type === "clock" || type === "flashcards" || type === "typing-drill" || type === "fill-blank" || type === "match-pairs" || type === "session-progress" || type === "daily-streak" || type === "recent-answers" || isDividerType(type)) document.body.classList.add("block-type-text");
     if (type === "list") document.body.classList.add("block-type-list");
     if (type === "image") document.body.classList.add("block-type-image");
@@ -12736,6 +12968,7 @@ function selectBlock(block) {
   }
 
   refreshCanvasDockToolState();
+  window.syncCanvasTextFormat?.();
 }
 
 function clearSelection() {
@@ -12750,6 +12983,7 @@ function clearSelection() {
   document.body.classList.remove("block-selected");
   clearDockTypeClasses();
   refreshCanvasDockToolState();
+  window.syncCanvasTextFormat?.();
 }
 
 window.selectCanvasBlock = selectBlock;
@@ -12988,6 +13222,13 @@ function refreshCanvasDockToolState() {
   const ui = typeof getUIState === "function" ? getUIState() : { openOverlay: null };
   const cropButton = document.getElementById("imageCropBtn");
   const frameButton = document.getElementById("imageFrameBtn");
+  const uploadButton = document.getElementById("imageReplaceBtn");
+  if (uploadButton && selectedBlock && getCanvasTargetType(selectedBlock) === "image") {
+    const hasImage = !!selectedBlock.querySelector('.block-image-body img');
+    uploadButton.setAttribute('aria-label', hasImage ? 'Replace image' : 'Upload image');
+    uploadButton.title = hasImage ? 'Replace image' : 'Upload image';
+    uploadButton.dataset.label = hasImage ? 'Replace' : 'Upload';
+  }
   const imageShape = selectedBlock && getCanvasTargetType(selectedBlock) === "image"
     ? normalizeImageCropShape(selectedBlock.dataset.imageCropShape)
     : "original";
@@ -13080,9 +13321,9 @@ function applyCanvasSelectedColor(mode, color, options = {}) {
       applyBlockBorderTone(block, nextColor);
       block.dataset.borderState = nextColor ? "custom" : "default";
     } else if (mode === "title") {
-      applyBlockTitleTone(block, nextColor);
+      applyBlockTitleTone(block, nextColor, { clearInline: true });
     } else {
-      applyBlockTextTone(block, nextColor);
+      applyBlockTextTone(block, nextColor, { clearInline: true });
       block.dataset.textState = nextColor ? "custom" : "default";
     }
 
@@ -13554,7 +13795,7 @@ function applyBlockBorderTone(block, value = "") {
   }
 }
 
-function applyBlockTextTone(block, value = "") {
+function applyBlockTextTone(block, value = "", options = {}) {
   if (!block) return;
 
   block.style.color = value;
@@ -13565,6 +13806,11 @@ function applyBlockTextTone(block, value = "") {
   if (type === "button") {
     window.mountButtonBlock?.(block);
     return;
+  }
+  if (type === "text" && options.clearInline) {
+    // A block color applies to pasted/nested text too, not only its outer box.
+    block.querySelectorAll('.block-body [style], .frame-item-text-content [style]').forEach(part => part.style.removeProperty('color'));
+    block.querySelectorAll('.block-body font[color], .frame-item-text-content font[color]').forEach(part => part.removeAttribute('color'));
   }
   const textParts = block.querySelectorAll([
     ".canvas-rich-heading",
@@ -13650,6 +13896,7 @@ function applyBlockTextTone(block, value = "") {
     const text = block.querySelector(".frame-item-text-content");
     if (body) body.style.color = value || "";
     if (text) text.style.color = value || "";
+    if (block.dataset.titleColor) applyBlockTitleTone(block, block.dataset.titleColor);
     return;
   }
 
@@ -13664,6 +13911,8 @@ function applyBlockTextTone(block, value = "") {
 }
 
 const CANVAS_TITLE_COLOR_SELECTOR = [
+  ".block-body h1", ".block-body h2", ".block-body h3",
+  ".frame-item-text-content h1", ".frame-item-text-content h2", ".frame-item-text-content h3",
   ".data-callout-label",
   ".progress-block-title",
   ".study-widget-title",
@@ -13680,7 +13929,7 @@ function getCanvasTitleColorElements(block) {
   return block ? Array.from(block.querySelectorAll(CANVAS_TITLE_COLOR_SELECTOR)) : [];
 }
 
-function applyBlockTitleTone(block, value = "") {
+function applyBlockTitleTone(block, value = "", options = {}) {
   if (!block) return;
   const nextColor = value ? (normalizeHexColor(value) || value) : "";
   if (nextColor) {
@@ -13693,6 +13942,10 @@ function applyBlockTitleTone(block, value = "") {
 
   const fallbackColor = block.style.color || "";
   getCanvasTitleColorElements(block).forEach((part) => {
+    if (options.clearInline) {
+      part.querySelectorAll('[style]').forEach(child => child.style.removeProperty('color'));
+      part.querySelectorAll('font[color]').forEach(child => child.removeAttribute('color'));
+    }
     part.style.color = nextColor || fallbackColor;
     if (part.matches(".page-card-title")) {
       part.style.textDecorationColor = nextColor || fallbackColor;
@@ -13712,10 +13965,12 @@ function getExpandedPaddingValue(block) {
   return "18px";
 }
 
-function applyBlockPaddingTone(block, value = "") {
+function applyBlockPaddingTone(block, value = "", options = {}) {
   if (!block) return;
 
   block.style.padding = value;
+  // Restored blocks are not mounted yet; measuring them would erase saved sizes.
+  if (options.resize === false) return;
 
   const type = getCanvasTargetType(block);
 
@@ -13914,6 +14169,16 @@ if (listNoteBtn)    listNoteBtn.addEventListener("click", () => withSelectedBloc
 }));
 
 // == Image block dock buttons ==
+gridEl.addEventListener('click', (event) => {
+  const upload = event.target.closest('[data-upload-canvas-image]');
+  if (!upload || !document.body.classList.contains('editing')) return;
+  const block = upload.closest('.frame-item, .block');
+  if (getCanvasTargetType(block) !== 'image') return;
+  event.preventDefault();
+  event.stopPropagation();
+  promptImageUploadForBlock(block);
+});
+
 const imageDeleteBtn  = document.getElementById("imageDeleteBtn");
 const imageReplaceBtn = document.getElementById("imageReplaceBtn");
 const imageCropBtn    = document.getElementById("imageCropBtn");
@@ -14359,6 +14624,7 @@ gridEl.addEventListener("click", (e) => {
   dropdown.innerHTML = `
     <div class="topbar-dropdown-btn" data-action="relink">${relinkActionLabel}</div>
     <div class="topbar-dropdown-btn" data-action="toggle-card-view">${viewActionLabel}</div>
+    <div class="topbar-dropdown-btn" data-action="compact-gallery">${block.dataset.pageCardGalleryStyle === "compact" ? "Use Tall Gallery" : "Use Short Gallery"}</div>
     <div class="topbar-dropdown-btn" data-action="set-card-image">${imageActionLabel}</div>
     ${hasLinkedHeaderImage && currentImageMode !== "linked" ? '<div class="topbar-dropdown-btn" data-action="use-linked-card-image">Use Page Header Image</div>' : ''}
     ${resolvedImageSrc ? '<div class="topbar-dropdown-btn" data-action="reset-card-image-position">Center Card Image</div>' : ''}
@@ -14392,6 +14658,13 @@ gridEl.addEventListener("click", (e) => {
         initialQuery: block.querySelector(".page-card-title")?.textContent || "",
         hideCardIcon: isPageCardIconHidden(block)
       });
+    }
+    if (action === "compact-gallery") {
+      block.dataset.pageCardGalleryStyle = block.dataset.pageCardGalleryStyle === "compact" ? "standard" : "compact";
+      if (block.dataset.pageCardGalleryStyle === "compact") block.style.height = (GRID_SIZE * 6) + "px";
+      setPageCardView(block, "gallery");
+      expandGrid();
+      saveState();
     }
     if (action === "set-card-image") {
       promptPageCardImageUpload(block);
@@ -14437,6 +14710,33 @@ gridEl.addEventListener("click", (e) => {
 
 
 // click on a block selects it (edit mode only)
+function ensureObjectDragHandle(block) {
+  if (!block || block.classList.contains("ghost") || block.dataset.type === "container") return;
+  const isText = ["text", "list"].includes(block.dataset.type);
+  if (!isText && !getExplicitFrameTargetForBlock(block)) return;
+  if (block.querySelector(":scope > .frame-object-drag-handle")) return;
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "frame-object-drag-handle";
+  handle.contentEditable = "false";
+  handle.setAttribute("aria-label", isText ? "Move text block" : "Move object");
+  handle.title = "Drag to move this whole block";
+  handle.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>';
+  block.appendChild(handle);
+}
+
+document.querySelectorAll('#grid > .block[data-type="text"], #grid > .block[data-type="list"]').forEach(ensureObjectDragHandle);
+new MutationObserver(records => {
+  for (const record of records) for (const node of record.addedNodes) {
+    if (node.nodeType === 1 && node.matches('.block[data-type="text"], .block[data-type="list"]')) ensureObjectDragHandle(node);
+  }
+}).observe(gridEl, { childList: true });
+
+document.addEventListener("mouseover", (event) => {
+  if (!document.body.classList.contains("editing")) return;
+  ensureObjectDragHandle(event.target.closest?.("#grid > .block:not(.ghost)"));
+});
+
 document.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
 
@@ -14465,7 +14765,7 @@ gridEl.addEventListener("mousedown", (e) => {
   if (!document.body.classList.contains("editing")) return;
 
   // only clear when you click the empty grid background
-  if (e.target === gridEl) {
+  if (e.target === gridEl && !e.defaultPrevented) {
     clearSelection();
   }
 });
@@ -14511,8 +14811,8 @@ function expandGrid(options = {}) {
 
   const metrics = readCanvasLayoutMetrics();
   if (metrics?.isInfinite) {
-    grid.style.removeProperty("minWidth");
-    grid.style.removeProperty("minHeight");
+    grid.style.removeProperty("min-width");
+    grid.style.removeProperty("min-height");
     window.syncInfiniteCanvasGridBounds?.();
     return;
   }
@@ -14520,7 +14820,8 @@ function expandGrid(options = {}) {
   const { maxRight, maxBottom } = getGridContentBounds(grid);
   const canvas = document.querySelector(".page-canvas");
   const viewportWidth = Math.max(0, Math.floor(canvas?.clientWidth || window.innerWidth || 0));
-  const stableWidth = Math.max(viewportWidth, maxRight + 200, GRID_SIZE * 50);
+  const characterBoard = !!grid.querySelector('[data-character-section]');
+  const stableWidth = Math.max(viewportWidth, maxRight + (characterBoard ? 24 : 200), characterBoard ? 0 : GRID_SIZE * 50);
 
   const minHeight = window.innerHeight - 70;
   grid.style.minWidth = `${stableWidth}px`;
@@ -14533,9 +14834,21 @@ window.addEventListener("resize", () => {
 
 // == Auto-grow block height while typing ==
 function autoGrowBlock(block, options = {}) {
+  // Uploading/replacing an image must preserve its manually chosen box.
+  // Setting height:auto would size it from the image's intrinsic dimensions.
+  if (block?.dataset?.type === "image") {
+    enforceMinHeight(block);
+    return;
+  }
   const allowShrink = !!options.allowShrink;
-  const minH = block?.dataset?.type === "text" ? GRID_SIZE : 48;
+  const minH = ["text", "list"].includes(block?.dataset?.type) || block?.dataset?.dataCalloutCompact === "true" ? GRID_SIZE : 48;
   const currentH = parseInt(block.style.height || "0", 10);
+
+  if (block?.dataset?.dataCalloutCompact === "true") {
+    const needed = getMinHeightForBlock(block);
+    block.style.height = `${allowShrink ? needed : Math.max(currentH || GRID_SIZE, needed)}px`;
+    return;
+  }
 
   if (block?.dataset?.type === "match-pairs") {
     enforceMinHeight(block);

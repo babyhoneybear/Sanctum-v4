@@ -1,0 +1,26 @@
+.context-preview {
+  position: fixed; z-index: 18000; width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(520px, calc(100dvh - 24px)); overflow: auto; box-sizing: border-box;
+  padding: 18px; background: var(--panel-bg, #202020); color: var(--text-main, #eee);
+  border: 1px solid var(--panel-border-strong, #414141); border-radius: 12px;
+  box-shadow: 0 12px 40px var(--shadow-strong, #0005); font: 13px/1.5 var(--ui-font, system-ui, sans-serif);
+  text-align: left; cursor: default; user-select: text; overflow-wrap: anywhere;
+}
+.context-preview[hidden] { display: none; }
+.context-preview-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+.context-preview h2 { margin: 5px 0 0; font-size: 17px; font-weight: 600; line-height: 1.35; }
+.context-preview-type, .context-preview-path, .context-preview-label, .context-preview-empty, .context-preview-more { color: var(--muted2, #aaa); font-size: 11px; }
+.context-preview-type { text-transform: capitalize; }
+.context-preview-path { margin: 8px 0 0; }
+.context-preview-summary, .context-preview-excerpt { margin: 14px 0 0; }
+.context-preview-label { display: block; margin-bottom: 5px; }
+.context-preview p { margin: 0; white-space: pre-line; }
+.context-preview dl { display: grid; grid-template-columns: minmax(70px, 0.7fr) minmax(0, 1.5fr); gap: 9px 12px; margin: 16px 0 0; }
+.context-preview dt { color: var(--muted2, #aaa); }
+.context-preview dd { margin: 0; }
+.context-preview footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--panel-border, #333); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.context-preview button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--panel-border-strong, #444); border-radius: 6px; background: var(--subtle-fill, #ffffff08); padding: 6px 10px; }
+.context-preview button:hover { background: var(--subtle-fill-hover, #ffffff15); }
+.context-preview .context-preview-close { flex-shrink: 0; border: 0; padding: 2px 6px; font-size: 18px; background: none; }
+.context-preview button:focus-visible, .inline-link:focus-visible { outline: 2px solid var(--accent, #8fa99a); outline-offset: 3px; }
+.context-preview-empty { margin-top: 14px !important; }

@@ -45,7 +45,8 @@ body.infinite-canvas-page #editToggle {
   flex: 1 1 auto;
   flex-direction: column;
   gap: 0;
-  min-height: calc(100vh - 62px);
+  min-height: 0;
+  overflow: hidden;
   background: var(--mainpage-bg);
   isolation: isolate;
 }
@@ -53,7 +54,7 @@ body.infinite-canvas-page #editToggle {
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport {
   position: relative;
   flex: 1 1 auto;
-  min-height: calc(100vh - 62px);
+  min-height: 0;
   max-height: none;
   overflow: auto;
   border: 0;
@@ -62,7 +63,7 @@ body.infinite-canvas-page #editToggle {
     linear-gradient(180deg, color-mix(in srgb, var(--mainpage-bg) 96%, var(--surface-bg-raised)) 0%, var(--mainpage-bg) 100%);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-main) 4%, transparent);
   overscroll-behavior: contain;
-  scrollbar-color: color-mix(in srgb, var(--surface-border-strong) 82%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
 }
 
@@ -72,16 +73,16 @@ body.infinite-canvas-page #editToggle {
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--surface-border-strong) 82%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text-main) 24%, var(--surface-border-strong));
+  background: var(--scrollbar-thumb-hover);
 }
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-viewport.is-pan-mode {
@@ -94,8 +95,18 @@ body.infinite-canvas-page #editToggle {
 
 .page-board-surface.is-infinite-canvas .infinite-canvas-stage {
   position: relative;
+  width: var(--infinite-stage-width, 4800px);
+  height: var(--infinite-stage-height, 3200px);
   min-width: var(--infinite-stage-width, 4800px);
   min-height: var(--infinite-stage-height, 3200px);
+  overflow: hidden;
+}
+
+.page-board-surface.is-infinite-canvas #pageCanvas {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: var(--infinite-grid-width, 4800px);
+  height: var(--infinite-grid-height, 3200px);
 }
 
 .page-board-surface.is-infinite-canvas .grid {
@@ -103,7 +114,10 @@ body.infinite-canvas-page #editToggle {
   width: var(--infinite-grid-width, 4800px);
   min-width: var(--infinite-grid-width, 4800px);
   min-height: var(--infinite-grid-height, 3200px);
-  padding-bottom: 0;
+  height: var(--infinite-grid-height, 3200px);
+  max-width: none;
+  box-sizing: border-box;
+  padding: 0;
   border-radius: 0;
   background: transparent !important;
   background-image: none !important;
@@ -163,10 +177,29 @@ body.infinite-canvas-page #editToggle {
     0 12px 32px color-mix(in srgb, var(--shadow-strong) 58%, transparent);
 }
 
+body.infinite-canvas-page #grid > .block[data-type="text"]:not(.is-text-editing) .block-body,
+body.infinite-canvas-page #grid > .block[data-type="list"]:not(.is-text-editing) .block-body,
+body.infinite-canvas-page #grid .frame-item:not(.is-text-editing) .frame-item-text-content {
+  cursor: grab;
+  user-select: none;
+}
+body.infinite-canvas-page #grid > .block.is-text-editing,
+body.infinite-canvas-page #grid .frame-item.is-text-editing {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body.infinite-canvas-page #grid > .block.is-text-editing .block-body { cursor: text; }
+
 .page-canvas.is-infinite-canvas .block[data-type="text"],
 .page-canvas.is-infinite-canvas .block[data-type="list"] {
-  min-height: 76px;
-  padding: 12px 14px;
+  min-height: 24px;
+  padding: 2px 8px;
+}
+
+body.infinite-canvas-page.editing #grid > .block[data-type="text"] > .frame-object-drag-handle,
+body.infinite-canvas-page.editing #grid > .block[data-type="list"] > .frame-object-drag-handle {
+  top: 1px;
+  height: 20px;
 }
 
 .page-canvas.is-infinite-canvas .block[data-type="page"],
@@ -219,17 +252,17 @@ body.infinite-canvas-page #editToggle {
 }
 
 body.infinite-canvas-page .edit-dock {
-  top: 58px;
+  top: calc(var(--app-workspace-header-height) + 12px);
   right: 14px;
   bottom: 80px;
   left: auto;
   width: 50px;
   max-width: 50px;
-  max-height: none;
+  max-height: calc(100dvh - var(--app-workspace-header-height) - 92px);
   padding: 4px 4px;
-  border: 1px solid var(--infinite-tool-border);
+  border: 1px solid var(--infinite-tool-border, var(--surface-border));
   border-radius: 2px;
-  background: var(--infinite-tool-bg);
+  background: var(--infinite-tool-bg, var(--topbar));
   box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow-strong) 80%, transparent);
   opacity: 1;
   pointer-events: auto;
@@ -238,6 +271,16 @@ body.infinite-canvas-page .edit-dock {
   align-items: center;
   overflow: hidden;
   z-index: 78;
+}
+
+/* Keep tools beside the row editor instead of covering its inputs and cover. */
+body.infinite-canvas-page:has(#peekDrawer.open) .edit-dock {
+  right: calc(360px + 14px);
+}
+
+body.infinite-canvas-page:has(#peekDrawer.open) .soundbar {
+  left: calc((100% - 360px) / 2);
+  width: min(670px, calc(100vw - 360px - 44px));
 }
 
 body.infinite-canvas-page .dock-tools-scroll {
@@ -257,33 +300,46 @@ body.infinite-canvas-page .dock-tools-scroll::-webkit-scrollbar {
   display: none;
 }
 
-body.infinite-canvas-page .edit-dock .dock-mode {
+/* Match the editing selectors in style.css: selected-block groups must also
+   stay vertical, and buttons must not shrink or disappear in the narrow rail. */
+body.infinite-canvas-page.editing .edit-dock .dock-mode {
   display: none;
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
+  flex-shrink: 0;
+  width: 100%;
 }
 
-body.infinite-canvas-page .edit-dock .dock-mode-create {
+body.infinite-canvas-page.editing .edit-dock .dock-mode-create {
   display: flex;
 }
 
-body.infinite-canvas-page.block-selected .edit-dock .dock-mode-create,
-body.infinite-canvas-page.block-selected.dock-study-open .edit-dock .dock-mode-create {
+body.infinite-canvas-page.editing.block-selected .edit-dock .dock-mode-create,
+body.infinite-canvas-page.editing.dock-study-open .edit-dock .dock-mode-create {
   display: none;
 }
 
-body.infinite-canvas-page.dock-study-open .edit-dock .dock-mode-study,
-body.infinite-canvas-page.block-selected.block-type-text .edit-dock .dock-mode-text,
-body.infinite-canvas-page.block-selected.block-type-list .edit-dock .dock-mode-list,
-body.infinite-canvas-page.block-selected.block-type-image .edit-dock .dock-mode-image,
-body.infinite-canvas-page.block-selected.block-type-container .edit-dock .dock-mode-container,
-body.infinite-canvas-page.block-selected.block-type-table .edit-dock .dock-mode-table,
-body.infinite-canvas-page.block-selected.block-type-button .edit-dock .dock-mode-button {
+body.infinite-canvas-page.editing.dock-study-open .edit-dock .dock-mode-study,
+body.infinite-canvas-page.editing.block-selected:not(.dock-study-open) .edit-dock .dock-mode-layer,
+body.infinite-canvas-page.editing.block-selected:not(.block-type-image):not(.block-type-button):not(.dock-study-open) .edit-dock .dock-mode-text,
+body.infinite-canvas-page.editing.block-selected.block-type-list:not(.dock-study-open) .edit-dock .dock-mode-list,
+body.infinite-canvas-page.editing.block-selected.block-type-image:not(.dock-study-open) .edit-dock .dock-mode-image,
+body.infinite-canvas-page.editing.block-selected.block-type-container:not(.dock-study-open) .edit-dock .dock-mode-container,
+body.infinite-canvas-page.editing.block-selected.block-type-table:not(.dock-study-open) .edit-dock .dock-mode-table,
+body.infinite-canvas-page.editing.block-selected.block-type-button:not(.dock-study-open) .edit-dock .dock-mode-button {
   display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+body.infinite-canvas-page .edit-dock .dock-mode-image {
+  order: -1;
 }
 
 body.infinite-canvas-page .edit-dock .dock-btn {
+  flex: 0 0 30px;
   width: 38px;
   min-width: 38px;
   height: 30px;
@@ -292,6 +348,18 @@ body.infinite-canvas-page .edit-dock .dock-btn {
   border-radius: 2px;
   color: var(--muted);
   font-size: 14px;
+}
+
+body.infinite-canvas-page #canvasHeadingSelect {
+  box-sizing: border-box;
+  flex: 0 0 30px;
+  width: 38px;
+  max-width: 38px;
+  min-height: 30px;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 11px;
 }
 
 body.infinite-canvas-page .edit-dock .dock-btn:hover,
@@ -306,6 +374,7 @@ body.infinite-canvas-page .edit-dock .dock-btn[data-label]::after {
 }
 
 body.infinite-canvas-page .edit-dock .dock-divider {
+  flex-shrink: 0;
   width: 28px;
   min-width: 28px;
   height: 1px;
@@ -561,7 +630,6 @@ body.canvas-line-mode #toolLine {
 
 @media (max-width: 860px) {
   body.infinite-canvas-page .edit-dock {
-    top: 58px;
     right: 10px;
     bottom: 80px;
     left: auto;
@@ -572,5 +640,30 @@ body.canvas-line-mode #toolLine {
   .page-board-surface.is-infinite-canvas .infinite-canvas-toolbar {
     right: 10px;
     bottom: 82px;
+  }
+}
+
+@media (max-width: 1050px) {
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: 0 8px;
+  }
+
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-track-info {
+    padding-right: 6px;
+  }
+
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-cover,
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-track-meta,
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-volume-icon {
+    display: none;
+  }
+
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-bar-right {
+    padding-left: 6px;
+  }
+
+  body.infinite-canvas-page:has(#peekDrawer.open) .soundbar-volume {
+    width: 46px;
   }
 }

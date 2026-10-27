@@ -6,11 +6,18 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "setup:writing-check": "pwsh -NoProfile -File scripts/setup-writing-check.ps1",
+    "test": "node --test test/*.test.js",
+    "mcp:chatgpt": "node scripts/sanctum-mcp.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "en-inflectors": "1.0.12",
+    "express": "^4.19.2",
+    "html-to-image": "1.11.13",
+    "wink-eng-lite-web-model": "1.8.1",
+    "wink-nlp": "2.4.0"
   }
 }

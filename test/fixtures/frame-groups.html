@@ -1,0 +1,46 @@
+<!doctype html><meta charset="utf-8"><title>Frame object groups</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px;display:flex;gap:12px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 80px)}pre{white-space:pre-wrap}</style>
+<nav><button id="seed" disabled>Load object group</button><button id="run" disabled>Check frame groups</button><span id="status">Loading</span></nav><details><summary>Results</summary><pre id="results"></pre></details><iframe id="app" title="Frame object test"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('app'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';const tick=()=>new Promise(r=>w.requestAnimationFrame(()=>w.requestAnimationFrame(r)));
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(r=>w.addEventListener('sanctum:scripts-ready',r,{once:true}));for(const id of ['seed','run'])document.getElementById(id).disabled=false;status.textContent='Ready'};
+async function seed(){w.stopPlacing(true);w.openPage('home');if(!w.userPages.some(p=>p.id==='frame-object-test'))w.SanctumAssistantPageRegistryStore.create({pageId:'frame-object-test',title:'Frames group real objects',parentId:'home',layout:'board-canvas'});
+ w.setPageBlocks('frame-object-test',[
+ {id:'group-frame',type:'container',containerTitle:'Magic research',containerItems:[],x:48,y:24,w:480,h:360,z:1},
+ {id:'group-note',type:'text',bodyHTML:'<b>Mana flows through living things.</b><br>This is the original object.',x:96,y:96,w:288,h:96,z:2},
+ {id:'group-image',type:'image',bodyHTML:'<img alt="Original green artwork" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22100%22%3E%3Crect width=%22200%22 height=%22100%22 fill=%22%23557c67%22/%3E%3C/svg%3E">',x:96,y:240,w:240,h:96,z:3},
+ {id:'outside-note',type:'text',bodyHTML:'Outside the frame',x:650,y:180,w:240,h:72,z:4},
+ {id:'legacy-frame',type:'container',containerTitle:'Previously saved frame',containerItems:[{id:'legacy-text',type:'text',bodyHTML:'<i>Previously saved text stays intact.</i>'}],x:48,y:460,w:480,h:200,z:1}]);
+ w.openPage('frame-object-test');w.document.body.classList.add('editing');await tick();status.textContent='Sample ready';}
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n'};
+const mouse=(target,type,x,y)=>target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,button:0,clientX:x,clientY:y}));
+function drag(block,dx,dy,handle=block){const r=handle.getBoundingClientRect(),x=r.left+3,y=r.top+3;mouse(handle,'mousedown',x,y);mouse(w.document,'mousemove',x+dx,y+dy);mouse(w.document,'mouseup',x+dx,y+dy);mouse(w.document,'click',x+dx,y+dy);}
+document.getElementById('seed').onclick=seed;
+document.getElementById('run').onclick=async()=>{await seed();results.textContent='';try{
+ const d=w.document,grid=d.getElementById('grid'),note=d.getElementById('group-note'),image=d.getElementById('group-image'),f=d.getElementById('group-frame'),outside=d.getElementById('outside-note'),html=note.querySelector('.block-body').innerHTML;
+ check(!d.querySelector('.frame-typing-placeholder')&&!Array.from(d.querySelectorAll('.frame-item-text-content')).some(e=>!e.textContent.trim()),'No automatic text row or typing prompt');
+ const count=grid.querySelectorAll(':scope>.block').length;
+ check([note,outside].every(b=>{const h=b.querySelector('.frame-object-drag-handle');return h&&w.getComputedStyle(h).display!=='none'}),'Text grips appear before hover, both inside and outside frames');
+ w.startPlacingPreset('text');drag(note,48,24,note.querySelector('.frame-object-drag-handle'));
+ check(grid.querySelectorAll(':scope>.block:not(.ghost)').length===count&&d.getElementById(note.id)===note&&note.style.left==='144px','Reposition an original object while an add tool is armed without making a blank box');
+ check(note.querySelector('.block-body').innerHTML===html,'Reposition retains the exact original text');
+ drag(note,480,0);check(parseInt(note.style.left)>528&&note.querySelector('.block-body').innerHTML===html,'Drag the same object out of the frame');
+ drag(note,-480,0);check(w.getExplicitFrameTargetForBlock(note)===f&&d.getElementById(note.id)===note,'Drag back into the frame without conversion or duplication');
+ const nx=parseInt(note.style.left),ix=parseInt(image.style.left),ox=parseInt(outside.style.left);
+ w.startPlacingPreset('text');drag(f,96,48,f.querySelector('.container-title'));
+ check(parseInt(note.style.left)===nx+96&&parseInt(image.style.left)===ix+96&&parseInt(outside.style.left)===ox,'Moving the frame carries its objects and leaves outside objects alone');
+ check(grid.querySelectorAll(':scope>.block:not(.ghost)').length===count,'Moving a frame with an add tool armed creates no blank object');
+ drag(note,480,0);const detachedX=parseInt(note.style.left);drag(f,24,24,f.querySelector('.container-title'));
+ check(parseInt(note.style.left)===detachedX,'Objects moved out no longer follow the frame');
+ const legacy=d.querySelector('[data-frame-child-id="legacy-text"]'),legacyHTML=legacy.querySelector('.frame-item-text-content').innerHTML;
+ const lr=legacy.getBoundingClientRect();mouse(legacy.querySelector('.frame-item-drag-handle'),'mousedown',lr.left+3,lr.top+3);mouse(d,'mousemove',lr.left+600,lr.top+3);mouse(d,'mouseup',lr.left+600,lr.top+3);
+ check(!d.querySelector('[data-frame-child-id="legacy-text"]')&&Array.from(grid.querySelectorAll(':scope>.block[data-type="text"]')).some(b=>b.querySelector('.block-body').innerHTML===legacyHTML),'Old embedded items move out with original contents exactly once');
+ w.selectBlock(image);w.deleteSelectedBlock();check(!d.getElementById('group-image'),'Deleting a grouped object removes that object');
+ await new Promise(r=>setTimeout(r,30));w.undo();check(!!d.getElementById('group-image'),'Undo restores deleted grouped artwork');
+ w.saveState();const saved=w.getPageBlocks('frame-object-test');w.openPage('home');w.openPage('frame-object-test');await tick();
+ check(w.serializeBlocks().length===saved.length&&d.getElementById('group-note').querySelector('.block-body').innerHTML===html,'Reopen retains object identity, content and group layout');
+ status.textContent='All frame group checks passed';
+ }catch(e){status.textContent='FAILED';results.textContent+=e.stack;document.querySelector('details').open=true}};
+</script>

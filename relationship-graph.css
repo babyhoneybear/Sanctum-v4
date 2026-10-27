@@ -1,0 +1,124 @@
+/* Relationship graph: readable at every zoom, with a reserved inspector column. */
+.relationship-graph-modal {
+  --relationship-graph-bg: #151719;
+  --relationship-graph-panel: #1b1d20;
+  --rg-text: #e7e4df;
+  --rg-muted: #aaa9a5;
+  color: var(--rg-text);
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+.relationship-graph-head { min-height: 68px; padding: 12px 20px; gap: 18px; box-sizing: border-box; }
+.relationship-graph-title { font-size: 16px; color: var(--rg-text); font-weight: 600; }
+.relationship-graph-count { font-size: 11px; color: var(--rg-muted); margin-top: 5px; }
+.relationship-graph-body { display: flex; }
+.relationship-graph-surface { flex: 1; min-width: 0; min-height: 0; width: auto; background-image: radial-gradient(ellipse at 40% 40%, #ffffff03, transparent 70%); }
+.relationship-graph-viewport { will-change: auto; transform: none; }
+.relationship-graph-svg { width: 100%; height: 100%; }
+/* Widths below already compensate for SVG zoom. Do not compensate twice. */
+.relationship-graph-line, .relationship-graph-node-dot { vector-effect: none; }
+.relationship-graph-side { position: relative; inset: auto; flex: 0 0 256px; width: 256px; max-height: 100%; border: 0; border-left: 1px solid #ffffff10; box-shadow: none; background: var(--relationship-graph-panel); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); color: var(--rg-muted); }
+.rg-panel-section { padding: 18px; }
+.rg-panel-heading, .relationship-graph-field > span { color: var(--rg-muted); font-size: 10px; letter-spacing: .1em; }
+.rg-detail-empty { color: var(--rg-muted); text-align: left; padding: 4px 0; font-size: 12px; line-height: 1.6; }
+.rg-search-wrap { position: relative; max-width: 440px; }
+.rg-graph-search { height: 36px; border-radius: 7px; color: var(--rg-text); font-size: 12px; }
+.rg-graph-search::placeholder { color: #97999d; }
+.relationship-graph-modal button { transition: background 120ms, color 120ms; }
+.relationship-graph-modal button:focus-visible, .relationship-graph-modal input:focus-visible, .relationship-graph-modal select:focus-visible { outline: 2px solid #b6c9c7; outline-offset: 3px; }
+.relationship-graph-node:focus { outline: none; }
+.relationship-graph-segment { border-radius: 7px; }
+.relationship-graph-segment button { min-height: 30px; border-radius: 5px; color: var(--rg-muted); }
+.relationship-graph-segment button.active { color: #f8f4ed; background: #ffffff15; }
+.relationship-graph-close, .rg-panel-toggle, .rg-fit-button { height: 34px; border-radius: 6px; color: #c7c9cb; }
+.rg-panel-toggle { width: auto; padding: 0 10px; font: 500 12px system-ui; border-color: #ffffff16; }
+.rg-panel-x { color: var(--rg-muted); }
+.relationship-graph-toggle { color: #c6c7c9; font-size: 12px; line-height: 1.4; padding: 3px 0; }
+.relationship-graph-toggle input { accent-color: #8caeaa; }
+.relationship-graph-field { margin-top: 14px; }
+.relationship-graph-field select { min-height: 34px; border-radius: 5px; font-weight: 500; font-size: 12px; }
+.rg-type-colors { gap: 10px; }
+.rg-type-colors label, .rg-node-color-field, .rg-node-color-clear, .rg-node-conns, .rg-node-badge, .rg-val { color: var(--rg-muted); }
+.rg-node-name { color: var(--rg-text); font-size: 16px; line-height: 1.4; }
+.rg-node-meta { margin-top: 8px; }
+.rg-hint-label { display: none; }
+.relationship-graph-controls { color: #c6c7c9; font-size: 11px; gap: 14px; }
+.relationship-graph-controls label { grid-template-columns: 64px minmax(0, 1fr) 25px; gap: 5px; }
+.rg-reset-layout { margin: 0 0 16px; color: #c3d4d0; background: transparent; border: 1px solid #ffffff20; border-radius: 5px; padding: 7px 10px; cursor: pointer; font: 11px system-ui; }
+.relationship-graph-hint { color: #a6a9ae; background: #151719db; bottom: 13px; max-width: calc(100% - 36px); line-height: 1.5; font-size: 10px; }
+.rg-map-controls { position: absolute; left: 18px; top: 14px; z-index: 2; display: flex; align-items: center; gap: 2px; border: 1px solid #ffffff18; border-radius: 8px; padding: 3px; background: #1b1d20ed; box-shadow: 0 3px 12px #0002; }
+.rg-map-controls button { min-width: 29px; height: 29px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: #d7dadf; font-size: 16px; cursor: pointer; }
+.rg-map-controls button:hover { background: #ffffff12; }
+.rg-map-controls .rg-pause { font: 11px system-ui; border-left: 1px solid #ffffff18; margin-left: 4px; }
+.rg-zoom-value { min-width: 38px; text-align: center; font-size: 10px; color: #aeb4bd; font-variant-numeric: tabular-nums; }
+/* Keep the user's palette in charge, including hovered and selected connections. */
+.relationship-graph-line, .relationship-graph-line.edge-contains { stroke: var(--edge-color, var(--relationship-graph-accent)); opacity: .48; stroke-width: calc(1px * var(--link-thickness, .9) / var(--relationship-graph-zoom, 1)); }
+.relationship-graph-line.is-active, .relationship-graph-line.is-hover-active { stroke: var(--edge-color, var(--relationship-graph-accent)); opacity: .95; stroke-width: calc(1.65px * var(--link-thickness, .9) / var(--relationship-graph-zoom, 1)); }
+.relationship-graph-line.is-dim, .relationship-graph-line.is-hover-dim { opacity: .14; }
+.relationship-graph-node,
+.relationship-graph-node:is(.node-domain, .node-hub, .node-home, .is-focus, .is-hover-related, .is-selected, .is-search-match, :hover) { filter: none; }
+.relationship-graph-node .relationship-graph-node-dot {
+  filter: drop-shadow(0 0 calc(3px / var(--relationship-graph-zoom, 1)) color-mix(in srgb, var(--node-color) 42%, transparent));
+}
+.relationship-graph-node-dot,
+.relationship-graph-node.node-domain .relationship-graph-node-dot,
+.relationship-graph-node.node-hub .relationship-graph-node-dot,
+.relationship-graph-node.node-home .relationship-graph-node-dot {
+  fill: var(--node-color, var(--relationship-graph-accent));
+  stroke: color-mix(in srgb, var(--node-color, var(--relationship-graph-accent)) 90%, #aaa6a0);
+  stroke-width: calc(.65px / var(--relationship-graph-zoom, 1));
+}
+.relationship-graph-node:hover .relationship-graph-node-dot,
+.relationship-graph-node.is-selected .relationship-graph-node-dot,
+.relationship-graph-node.is-focus .relationship-graph-node-dot,
+.relationship-graph-node.is-search-match .relationship-graph-node-dot {
+  stroke: color-mix(in srgb, var(--node-color, var(--relationship-graph-accent)) 78%, #aaa6a0);
+  stroke-width: calc(.85px / var(--relationship-graph-zoom, 1));
+}
+.relationship-graph-node:focus-visible .relationship-graph-node-dot { stroke: var(--node-color, var(--relationship-graph-accent)); stroke-width: calc(2px / var(--relationship-graph-zoom, 1)); stroke-dasharray: 2 2; }
+.relationship-graph-node.is-focus .relationship-graph-node-dot, .relationship-graph-node.is-hover-related .relationship-graph-node-dot {
+  filter: drop-shadow(0 0 calc(4px / var(--relationship-graph-zoom, 1)) color-mix(in srgb, var(--node-color) 55%, transparent));
+}
+.relationship-graph-node:hover .relationship-graph-node-dot, .relationship-graph-node.is-selected .relationship-graph-node-dot, .relationship-graph-node.is-search-match .relationship-graph-node-dot {
+  filter: drop-shadow(0 0 calc(4px / var(--relationship-graph-zoom, 1)) color-mix(in srgb, var(--node-color) 85%, transparent))
+    drop-shadow(0 0 calc(10px / var(--relationship-graph-zoom, 1)) color-mix(in srgb, var(--node-color) 25%, transparent));
+}
+.relationship-graph-line.is-active, .relationship-graph-line.is-hover-active {
+  filter: drop-shadow(0 0 calc(2px / var(--relationship-graph-zoom, 1)) color-mix(in srgb, var(--edge-color) 35%, transparent));
+}
+.relationship-graph-node.is-dim .relationship-graph-node-dot, .relationship-graph-node.is-hover-dim .relationship-graph-node-dot, .relationship-graph-node.is-search-dim .relationship-graph-node-dot { filter: none; }
+.relationship-graph-node-title { font-size: calc(11px / var(--relationship-graph-zoom, 1)); fill: #b8b7b6; stroke: var(--relationship-graph-bg); stroke-width: calc(2px / var(--relationship-graph-zoom, 1)); font-weight: 400; transition: none; }
+.relationship-graph-node.is-labelled .relationship-graph-node-title { opacity: .74; }
+.relationship-graph-node.is-selected .relationship-graph-node-title, .relationship-graph-node.is-search-match .relationship-graph-node-title, .relationship-graph-node:hover .relationship-graph-node-title, .relationship-graph-node:focus-visible .relationship-graph-node-title { opacity: .95; fill: #c4c1bd; font-weight: 500; }
+.relationship-graph-node.is-dim, .relationship-graph-node.is-hover-dim { opacity: .3; }
+.relationship-graph-node.is-search-hidden, .relationship-graph-line.is-search-hidden { display: none; }
+.rg-node-inner, .relationship-graph-edge-layer { animation: none; }
+.rg-search-results { position: absolute; top: calc(100% + 8px); left: 0; right: 0; max-height: 320px; overflow: auto; z-index: 12; padding: 8px; background: #23262a; border: 1px solid #ffffff24; border-radius: 8px; box-shadow: 0 12px 30px #0006; }
+.rg-search-summary { color: #b0b7c0; font: 11px/1.5 system-ui; padding: 5px 7px 9px; }
+.rg-search-results button, .rg-connections button { display: flex; flex-direction: column; gap: 4px; text-align: left; width: 100%; background: transparent; border: 0; border-radius: 5px; padding: 9px 8px; color: #e2e4e7; cursor: pointer; font: 12px/1.3 system-ui; overflow-wrap: anywhere; }
+.rg-search-results button:hover, .rg-connections button:hover { background: #ffffff0c; }
+.rg-search-results small, .rg-connections small { font-size: 10px; color: #a0acb8; }
+.rg-connections { max-height: 240px; overflow: auto; margin: 0 -8px; scrollbar-width: thin; }
+.rg-connections-heading { margin-top: 20px; margin-bottom: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: #aaaeb5; }
+.rg-explore-node, .relationship-graph-open-node { display: block; width: 100%; margin-top: 8px; padding: 9px; border: 1px solid #ffffff20; border-radius: 5px; background: #ffffff07; color: #d4e1db; font: 12px system-ui; cursor: pointer; }
+.relationship-graph-legend { color: var(--rg-muted); }
+@media (max-width: 1000px) {
+  .relationship-graph-head { flex-wrap: wrap; gap: 10px 14px; padding: 14px 16px; }
+  .relationship-graph-head-main { flex: 1; }
+  .rg-search-wrap { order: 3; flex: 1 0 100%; max-width: none; }
+  .relationship-graph-side { flex-basis: 230px; width: 230px; }
+}
+@media (max-width: 560px) {
+  .relationship-graph-head { padding: 10px; }
+  .relationship-graph-title { font-size: 14px; }
+  .relationship-graph-count { font-size: 10px; }
+  .relationship-graph-actions { gap: 3px; }
+  .relationship-graph-segment button { padding: 5px 8px; }
+  .relationship-graph-body { flex-direction: column; }
+  .relationship-graph-surface { height: auto; min-height: 150px; }
+  .relationship-graph-side { flex: 0 0 38%; width: auto; border-left: 0; border-top: 1px solid #ffffff15; }
+  .relationship-graph-hint { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .relationship-graph-modal *, .relationship-graph-modal *::before { animation: none !important; transition: none !important; }
+}

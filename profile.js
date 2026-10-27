@@ -122,10 +122,10 @@ function renderProfilePage(pageId) {
   const header = document.createElement("div");
   header.className = "profile-header";
   header.innerHTML = `
-    <div class="profile-header-icon">${escapeProfileHTML(icon)}</div>
+    ${getIconMarkup(icon, "📄", "profile-header-icon")}
     <div class="profile-header-meta">
       <div class="profile-header-title">${escapeProfileHTML(title)}</div>
-      ${category !== "none" ? `<div class="profile-header-category">${escapeProfileHTML(category)}</div>` : ""}
+      ${category !== "none" ? `<div class="profile-header-category">${escapeProfileHTML(window.SanctumCustomTypes?.label(category) || category)}</div>` : ""}
     </div>
     <button class="profile-edit-btn" id="profileEditBtn" type="button">
       ${isEditing ? "Done" : "Edit"}

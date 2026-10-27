@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Canvas text checks</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px;display:flex;gap:12px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 80px)}pre{white-space:pre-wrap}</style>
+<nav><button id="seed" disabled>Load text sample</button><button id="run" disabled>Check text sizes and headings</button><span id="status">Loading</span></nav>
+<details><summary>Results</summary><pre id="results"></pre></details><iframe id="sample" title="Isolated canvas text"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('sample'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';const tick=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n';};
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(resolve=>w.addEventListener('sanctum:scripts-ready',resolve,{once:true}));for(const id of ['seed','run'])document.getElementById(id).disabled=false;status.textContent='Ready';};
+async function seed(){w.stopPlacing(true);w.closeAllOverlays();w.openPage('home');
+ if(!w.userPages.some(page=>page.id==='canvas-text-sample'))w.SanctumAssistantPageRegistryStore.create({pageId:'canvas-text-sample',title:'One row · text and headings',parentId:'home',layout:'infinite-canvas'});
+ w.setPageBlocks('canvas-text-sample',[
+  {id:'text-empty',type:'text',x:720,y:480,w:288,h:24,bodyHTML:''},
+  {id:'text-one-row',type:'text',x:720,y:552,w:288,h:24,bodyHTML:'One grid row'},
+  {id:'text-list-row',type:'list',x:1224,y:600,w:288,h:24,bodyHTML:'• One list row'},
+  {id:'text-heading',type:'text',x:720,y:648,w:432,h:24,bodyHTML:'<b>Mana flows through living things.</b>'},
+  {id:'text-scoped',type:'text',x:1224,y:480,w:432,h:96,bodyHTML:'<p>Keep this paragraph</p><p><b>Change this line</b></p>'},
+  {id:'text-slash',type:'text',x:1224,y:672,w:432,h:24,bodyHTML:''}
+ ]);w.openPage('canvas-text-sample');await tick();w.document.querySelector('[data-infinite-canvas-action="reset"]').click();await tick();w.document.querySelector('[data-infinite-canvas-action="center"]').click();await tick();status.textContent='Sample ready';}
+const fail=error=>{status.textContent='FAILED';results.textContent+=error.stack;document.querySelector('details').open=true;};
+document.getElementById('seed').onclick=()=>seed().catch(fail);
+function format(block,tag){w.selectCanvasBlock(block);const select=w.document.getElementById('canvasHeadingSelect');select.value=tag;select.dispatchEvent(new w.Event('change',{bubbles:true}));}
+document.getElementById('run').onclick=async()=>{results.textContent='';document.querySelector('details').open=false;try{await seed();const d=w.document;
+ for(const id of ['text-empty','text-one-row','text-list-row']){const block=d.getElementById(id);w.autoGrowBlock(block,{allowShrink:true});check(block.offsetHeight===24,id+' occupies one 24px grid row');check(w.getMinResizeDimensionsForBlock(block).height<=24,id+' can resize to one row');}
+ for(let i=0;i<6;i++)d.querySelector('[data-infinite-canvas-action="zoom-in"]').click();await tick();for(const id of ['text-empty','text-one-row','text-list-row']){const block=d.getElementById(id);w.autoGrowBlock(block,{allowShrink:true});check(block.offsetHeight===24,id+' stays one logical row while zoomed in');}d.querySelector('[data-infinite-canvas-action="reset"]').click();await tick();
+ const mouse=(target,type,x,y)=>target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,button:0,clientX:x,clientY:y}));
+ const click=target=>{const r=target.getBoundingClientRect(),x=r.left+Math.min(12,r.width/2),y=r.top+Math.min(6,r.height/2);mouse(target,'mousedown',x,y);mouse(d,'mouseup',x,y);mouse(target,'click',x,y);};
+ for(const id of ['text-empty','text-one-row','text-list-row','text-heading']){const block=d.getElementById(id),body=block.querySelector('.block-body'),original=body.innerHTML;for(let i=0;i<3;i++){click(d.getElementById('grid'));click(body);check(block.classList.contains('is-text-editing')&&d.activeElement===body,id+' resumes editing after clicking away '+i);}check(body.innerHTML===original,id+' preserves content while refocusing');}
+ const block=d.getElementById('text-heading'),body=block.querySelector('.block-body'),sizes=[];
+ for(const tag of ['h1','h2','h3','p']){format(block,tag);await tick();const part=body.querySelector(tag);check(!!part&&part.textContent==='Mana flows through living things.','Toolbar applies '+tag+' without losing text');check(!!part.querySelector('b'),'Toolbar preserves bold text for '+tag);sizes.push(parseFloat(w.getComputedStyle(part).fontSize));check(d.getElementById('canvasHeadingSelect').value===tag,'Toolbar reports '+tag);}
+ check(sizes[0]>sizes[1]&&sizes[1]>sizes[2]&&sizes[2]>sizes[3],'All three heading levels and paragraph have distinct sizes');
+ const select=d.getElementById('canvasHeadingSelect'),sr=select.getBoundingClientRect(),rail=d.getElementById('editorDock').getBoundingClientRect();check(sr.left>=rail.left&&sr.right<=rail.right,'Heading selector fits inside the toolbar');
+ const scoped=d.getElementById('text-scoped'),paragraph=scoped.querySelectorAll('p')[1];w.selectCanvasBlock(scoped);paragraph.parentElement.focus();const range=d.createRange();range.selectNodeContents(paragraph);const selection=w.getSelection();selection.removeAllRanges();selection.addRange(range);d.dispatchEvent(new w.Event('selectionchange'));format(scoped,'h2');await tick();check(scoped.querySelector('p')?.textContent==='Keep this paragraph'&&scoped.querySelector('h2')?.textContent==='Change this line','Formatting changes only the selected paragraph');
+ for(const level of [1,2,3]){const slash=d.getElementById('text-slash'),edit=slash.querySelector('.block-body');w.beginInfiniteTextEditing(slash,edit);edit.textContent='/h'+level;const r=d.createRange();r.setStart(edit.firstChild,edit.firstChild.length);r.collapse(true);selection.removeAllRanges();selection.addRange(r);edit.dispatchEvent(new w.Event('input',{bubbles:true}));edit.dispatchEvent(new w.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Enter'}));await tick();check(!!edit.querySelector('h'+level),'Slash command applies Heading '+level);edit.innerHTML='';}
+ format(block,'h1');w.saveState();const saved=w.getPageBlocks('canvas-text-sample').find(item=>item.id==='text-heading');check(saved.bodyHTML.includes('<h1'),'Heading markup is saved');w.openPage('home');w.openPage('canvas-text-sample');await tick();check(!!d.querySelector('#text-heading h1'),'Heading survives reopening');check(d.getElementById('text-one-row').offsetHeight===24,'One-row height survives reopening');status.textContent='All text and heading checks passed';
+}catch(error){fail(error);}};
+</script></html>

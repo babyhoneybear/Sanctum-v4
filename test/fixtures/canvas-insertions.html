@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Canvas slash menu and image checks</title>
+<style>body{margin:0;background:#181818;color:#ddd;font:13px system-ui}nav{padding:8px;display:flex;gap:12px}button{padding:6px}iframe{border:0;width:100%;height:calc(100vh - 80px)}pre{white-space:pre-wrap}</style>
+<nav><button id="seed" disabled>Load insertion sample</button><button id="run" disabled>Check slash menu and images</button><span id="status">Loading</span></nav>
+<details><summary>Results</summary><pre id="results"></pre></details><iframe id="sample" title="Isolated insertion sample"></iframe>
+<script>
+if(location.port!=='3037')throw Error('Use isolated port 3037');
+const frame=document.getElementById('sample'),status=document.getElementById('status'),results=document.getElementById('results');let w;
+frame.src='/';const tick=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
+const check=(ok,label)=>{if(!ok)throw Error(label);results.textContent+='PASS '+label+'\n';};
+const fail=error=>{status.textContent='FAILED';results.textContent+=error.stack;document.querySelector('details').open=true;};
+frame.onload=async()=>{w=frame.contentWindow;await w.SanctumStorageReady;if(!w.SanctumChatGPTConnection)await new Promise(resolve=>w.addEventListener('sanctum:scripts-ready',resolve,{once:true}));for(const id of ['seed','run'])document.getElementById(id).disabled=false;status.textContent='Ready';};
+async function seed(){w.stopPlacing(true);w.closeAllOverlays();w.openPage('home');
+ if(!w.userPages.some(page=>page.id==='canvas-insertions-sample'))w.SanctumAssistantPageRegistryStore.create({pageId:'canvas-insertions-sample',title:'Slash headings and image tools',parentId:'home',layout:'infinite-canvas'});
+ w.setPageBlocks('canvas-insertions-sample',[
+ {id:'insert-heading-1',type:'text',x:720,y:480,w:432,h:24,bodyHTML:''},
+ {id:'insert-heading-2',type:'text',x:720,y:576,w:432,h:24,bodyHTML:''},
+ {id:'insert-heading-3',type:'text',x:720,y:672,w:432,h:24,bodyHTML:''},
+ {id:'insert-image',type:'text',x:1224,y:480,w:432,h:24,bodyHTML:''},
+ {id:'insert-frame',type:'container',x:720,y:840,w:720,h:300,containerTitle:'Frame image',containerItems:[{id:'frame-image-source',type:'text',bodyHTML:''}]}
+ ]);w.openPage('canvas-insertions-sample');await tick();w.document.querySelector('[data-infinite-canvas-action="fit"]').click();await tick();status.textContent='Sample ready';}
+document.getElementById('seed').onclick=()=>seed().catch(fail);
+function mouse(target,type,x,y){target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,button:0,clientX:x,clientY:y}));}
+function click(target){const r=target.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;mouse(target,'mousedown',x,y);mouse(w.document,'mouseup',x,y);mouse(target,'click',x,y);}
+function query(block,text){const edit=block.querySelector('.frame-item-text-content,.block-body');click(edit);const range=w.document.createRange();range.selectNodeContents(edit);range.collapse(false);const selection=w.getSelection();selection.removeAllRanges();selection.addRange(range);w.document.execCommand('insertText',false,text);edit.dispatchEvent(new w.Event('input',{bubbles:true}));return edit;}
+function pick(menuId,label){const button=[...w.document.querySelectorAll('#'+menuId+' .canvas-slash-item')].find(button=>button.querySelector('.canvas-slash-label')?.textContent===label);check(!!button,'Menu offers '+label);click(button);}
+const visible=el=>!!el&&w.getComputedStyle(el).display!=='none'&&el.getBoundingClientRect().height>0;
+function imageTools(block,label){const d=w.document;check(block.classList.contains('selected')&&d.body.classList.contains('block-type-image'),label+': image remains selected');check(visible(d.querySelector('.dock-mode-image'))&&!visible(d.querySelector('.dock-mode-text')),label+': toolbar switches to image controls');const rail=d.getElementById('editorDock').getBoundingClientRect();for(const id of ['imageReplaceBtn','imageCropBtn','imageFrameBtn']){const r=d.getElementById(id).getBoundingClientRect();check(r.top>=rail.top&&r.bottom<=rail.bottom&&r.left>=rail.left&&r.right<=rail.right,label+': '+id+' is visible without scrolling');}}
+document.getElementById('run').onclick=async()=>{results.textContent='';document.querySelector('details').open=false;try{await seed();const d=w.document;
+ for(const [level,text] of [[1,'/heading'],[2,'/ heading 2'],[3,'/']]){const block=d.getElementById('insert-heading-'+level),edit=query(block,text);if(text==='/')pick('canvasSlashMenu','Text');pick(text==='/'?'canvasSlashSubmenu':'canvasSlashMenu','Heading '+level);check(block.classList.contains('is-text-editing'),'Heading '+level+' keeps editing active');d.execCommand('insertText',false,'Heading '+level+' from slash');edit.dispatchEvent(new w.Event('input',{bubbles:true}));check(edit.querySelector('h'+level)?.textContent==='Heading '+level+' from slash','Typing after menu click stays in Heading '+level);}
+ const fileClicks=[],originalClick=w.HTMLInputElement.prototype.click;w.HTMLInputElement.prototype.click=function(){if(this.type==='file'){fileClicks.push(this);return;}return originalClick.call(this);};
+ try{
+  const imageBlock=d.getElementById('insert-image');query(imageBlock,'/image');pick('canvasSlashMenu','Image');await tick();imageTools(imageBlock,'Slash image');check(fileClicks.length===1,'Slash Image opens upload picker');
+  const blob=await (await fetch('/assets/worldbuilding/nature.jpg')).blob();const upload=async input=>{Object.defineProperty(input,'files',{value:[new w.File([blob],'sample.jpg',{type:'image/jpeg'})]});await input.onchange();await tick();};await upload(fileClicks[0]);check(!!imageBlock.querySelector('img'),'Image upload renders actual picture');check(d.getElementById('imageReplaceBtn').getAttribute('aria-label')==='Replace image','Upload control becomes Replace after loading');
+  d.getElementById('imageCropBtn').click();check(visible(d.getElementById('imageCropPopover')),'Image crop menu opens');d.querySelector('#imageCropPopover [data-image-crop-shape="circle"]').click();check(imageBlock.dataset.imageCropShape==='circle','Crop selection applies to uploaded image');
+  d.getElementById('imageFrameBtn').click();check(visible(d.getElementById('imageFramePopover')),'Image frame menu opens');const frameOption=d.querySelector('#imageFramePopover [data-image-frame-style="polaroid"]')||[...d.querySelectorAll('#imageFramePopover [data-image-frame-style]')].find(el=>el.dataset.imageFrameStyle!=='none');const frameStyle=frameOption.dataset.imageFrameStyle;frameOption.click();check(imageBlock.dataset.imageFrameStyle===frameStyle,'Frame selection applies to uploaded image');
+  w.clearCanvasSelection();const viewport=d.getElementById('infiniteCanvasViewport').getBoundingClientRect(),grid=d.getElementById('grid'),x=viewport.left+100,y=viewport.top+110;d.getElementById('toolImage').click();mouse(grid,'mousemove',x,y);mouse(grid,'mousedown',x,y);mouse(d,'mouseup',x,y);mouse(grid,'click',x,y);await tick();const placed=d.querySelector('#grid > .block[data-type="image"].selected');check(!!placed,'Toolbar image placement retains selection after full pointer sequence');imageTools(placed,'Toolbar image');check(fileClicks.length===2,'Placing toolbar image opens upload picker');await upload(fileClicks[1]);
+  const frameText=d.querySelector('[data-frame-child-id="frame-image-source"]');query(frameText,'/image');pick('canvasSlashMenu','Image');await new Promise(resolve=>setTimeout(resolve,30));const nested=d.querySelector('#insert-frame .frame-item-image');check(!!nested&&fileClicks.length===3,'Frame slash Image opens upload picker');imageTools(nested,'Frame image');await upload(fileClicks[2]);check(!!nested.querySelector('img'),'Frame image upload renders actual picture');
+  w.saveState();w.openPage('home');w.openPage('canvas-insertions-sample');await tick();check([1,2,3].every(level=>d.querySelector('#insert-heading-'+level+' h'+level)),'All slash headings survive reopening');const restored=d.getElementById('insert-image');check(!!restored.querySelector('img')&&restored.dataset.imageCropShape==='circle'&&restored.dataset.imageFrameStyle===frameStyle,'Image, crop and frame survive reopening');w.selectCanvasBlock(restored);imageTools(restored,'Reopened image');
+ }finally{w.HTMLInputElement.prototype.click=originalClick;}
+ status.textContent='All slash menu and image checks passed';
+}catch(error){fail(error);}};
+</script></html>

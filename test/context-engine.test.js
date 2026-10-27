@@ -2,6 +2,77 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const engine = require("../context-engine.js");
 
+test("page relationship details reach assistant context without becoming properties of the target", () => {
+  const catalog = engine.buildCatalog({ pages: [{ id: "elias", title: "Elias" }, { id: "wards", title: "Wards" }],
+    pageProps: { elias: { properties: [{ id: "magic", type: "relation", label: "Magic", linkedPageIds: ["wards"], linkDetails: { wards: "Level 2" } }] } }
+  });
+  const elias = engine.getRecord(catalog, engine.pageRef("elias"));
+  assert.equal(elias.properties[0].displayValue, "Wards · Level 2");
+  assert.equal(elias.relations[0].label, "Magic · Level 2");
+  assert.equal(engine.getRecord(catalog, engine.pageRef("wards")).properties.length, 0);
+});
+
+test("page aliases and the default Aliases field resolve existing pages", () => {
+  const catalog = engine.buildCatalog({
+    domains: [{ id: "world", title: "World" }],
+    pages: [
+      { id: "elias", title: "Elias", parent: "world", aliases: ["Ash", "The Warden"] },
+      { id: "bri", title: "Bri", parent: "world", alias: "Bree" },
+      { id: "sol", title: "Solvenne", parent: "world" }
+    ],
+    pageProps: { sol: { properties: [{ id: "aliases", label: "Aliases", type: "text", value: "The Coast, Silver City" }] } }
+  });
+  for (const [query, pageId] of [["Ash", "elias"], ["The Warden", "elias"], ["Bree", "bri"], ["Silver City", "sol"]]) {
+    const result = engine.resolveEntities(catalog, query);
+    assert.equal(result.status, "resolved", query);
+    assert.ok(result.candidates.some((candidate) => candidate.pageId === pageId), query);
+    assert.ok(engine.search(catalog, query).some((record) => record.pageId === pageId), query);
+  }
+});
+
+test("explicit project scope opt-out agrees with the shared UI boundary rule", () => {
+  const catalog = engine.buildCatalog({
+    domains: [{ id: "workshop", title: "Workshop" }],
+    pages: [
+      { id: "hub", title: "Writing", parent: "workshop" },
+      { id: "story", title: "Seven Seats", parent: "hub", containerType: "project", isScopeBoundary: false },
+      { id: "elias", title: "Elias", parent: "story" },
+      { id: "other", title: "Other story", parent: "hub", containerType: "project" },
+      { id: "other-elias", title: "Elias", parent: "other" }
+    ]
+  });
+  assert.equal(engine.getRecord(catalog, engine.pageRef("elias")).scopeId, "workshop");
+  assert.equal(engine.getRecord(catalog, engine.pageRef("other-elias")).scopeId, "other");
+  assert.equal(engine.resolveEntities(catalog, "Elias").status, "ambiguous");
+});
+
+test("shared nicknames across stories remain ambiguous", () => {
+  const catalog = engine.buildCatalog({
+    domains: [{ id: "workshop", title: "Workshop" }],
+    pages: [
+      { id: "a", title: "Story A", parent: "workshop", containerType: "project" },
+      { id: "b", title: "Story B", parent: "workshop", containerType: "project" },
+      { id: "ea", title: "Elias", parent: "a", aliases: ["Ash"] },
+      { id: "eb", title: "Elian", parent: "b", aliases: ["Ash"] }
+    ]
+  });
+  assert.equal(engine.resolveEntities(catalog, "Ash").status, "ambiguous");
+});
+
+test("canonical references alone do not collapse separately editable recipe variants", () => {
+  const catalog = engine.buildCatalog({
+    domains: [{ id: "recipes", title: "Recipes" }],
+    pages: [
+      { id: "mine", title: "Lasagna", parent: "recipes", summary: "My vegetarian recipe" },
+      { id: "moms", title: "Lasagna", parent: "recipes", canonicalId: "mine", summary: "Mom's meat recipe" }
+    ]
+  });
+  const result = engine.resolveEntities(catalog, "Lasagna");
+  assert.equal(result.status, "ambiguous");
+  assert.ok(result.candidates.some((candidate) => candidate.pageId === "mine"));
+  assert.ok(result.candidates.some((candidate) => candidate.pageId === "moms"));
+});
+
 function makeSnapshot() {
   return {
     domains: [

@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Writing Check test · Sanctum</title>
+<link rel="stylesheet" href="/writing-check.css"><style>body{margin:50px;background:#1e1e1e;color:#eee;font:16px/1.6 system-ui;--panel-bg:#242424;--panel-border:#555;--text-main:#eee;--muted2:#aaa}#docPagesHost{max-width:680px;margin-top:24px}.doc-content{min-height:140px;border:1px solid #666;padding:20px;margin:10px 0;background:#292929}textarea{width:620px;height:100px;background:#292929;color:#eee;font:inherit;padding:16px}button{padding:8px;cursor:pointer}label{display:block}</style>
+<h1>Local Writing Check</h1><p>Isolated sample text and dictionary. Changes stay in this preview.</p>
+<button id="docWritingCheck">Writing Check</button><button id="restoreSample">Restore sample</button><button id="lexiconProof">Show original Lexicon</button><p id="lexiconStatus"></p>
+<button id="openEvent">Open event dialog</button><dialog id="eventDialog"><h2>Event details</h2><label>Description<textarea>Kovaeth is a beutiful city.</textarea></label><button id="closeEvent">Close event dialog</button></dialog>
+<div id="docPagesHost"><div class="doc-content" contenteditable="true" spellcheck="false"><p>Kovaeth is a <strong>beutiful</strong> city. She <em>go</em> to the market yesterday.</p><p>The ancient relic was <strong>mispelled</strong>. 🌙 Kovaeht remembers.</p></div><div class="doc-content" contenteditable="true" spellcheck="false"><p>This is a seperate page with the the same story.</p></div></div>
+<label>Event details<textarea spellcheck="false">Kovaeth is a beutiful city.</textarea></label>
+<label>Event title<input type="text" value="A beutiful city" style="font:inherit;padding:12px;width:300px;height:24px;background:#292929;color:#eee"></label>
+<label>Punctuation example<textarea spellcheck="false">If it rains we will stay home. I was tired, I went home.</textarea></label>
+<script>
+const memory={sanctumLexicon:[{id:'original',title:'Original Lexicon',sections:[{title:'Saved phrase',entries:[{text:'A light above the cliffs.'}]}]}]};
+window.STORAGE_KEYS={writingDictionary:'sanctum_writing_dictionary_v1',writingSettings:'sanctum_writing_settings_v1'};
+window.readStorageJSON=(key,fallback)=>memory[key]??fallback;
+window.writeStorageJSON=(key,value)=>{memory[key]=structuredClone(value);return true;};
+const initial=document.getElementById('docPagesHost').innerHTML;
+document.getElementById('restoreSample').onclick=()=>{document.getElementById('docPagesHost').innerHTML=initial;};
+document.getElementById('lexiconProof').onclick=()=>{document.getElementById('lexiconStatus').textContent=memory.sanctumLexicon[0].title+': '+memory.sanctumLexicon[0].sections[0].entries[0].text;};
+document.getElementById('openEvent').onclick=()=>document.getElementById('eventDialog').showModal();
+document.getElementById('closeEvent').onclick=()=>document.getElementById('eventDialog').close();
+</script><script src="/writing-check-data.js"></script><script src="/writing-check-ui.js"></script></html>

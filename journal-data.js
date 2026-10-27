@@ -7,7 +7,7 @@
 
   const VERSION = 2;
   const PAPER_TYPES = ["plain", "ruled", "grid", "dotted", "warm", "kraft"];
-  const ELEMENT_TYPES = ["text", "image", "shape", "sticker", "tape"];
+  const ELEMENT_TYPES = ["text", "image", "shape", "sticker", "tape", "ink"];
   const MIN_TEXT_SIZE = 10;
   const MAX_TEXT_SIZE = 72;
   const DEFAULT_TEXT_SIZE = 14;
@@ -57,7 +57,15 @@
       rotation: clamp(element.rotation, -180, 180, 0),
       z: clamp(element.z, 0, 9999, 1)
     };
-    if (type === "text") {
+    if (type === "ink") {
+      normalized.brush = ["pen", "pencil", "highlighter"].includes(element.brush) ? element.brush : "pen";
+      normalized.color = /^#[0-9a-f]{6}$/i.test(element.color || "") ? element.color : "#352d26";
+      normalized.strokeWidth = clamp(element.strokeWidth, .5, 80, 4);
+      normalized.points = (Array.isArray(element.points) ? element.points : []).slice(0, 12000)
+        .filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+        .map(point => ({ x: clamp(point.x, 0, 1), y: clamp(point.y, 0, 1), pressure: clamp(point.pressure, .1, 1, .5) }));
+      if (!normalized.points.length) return null;
+    } else if (type === "text") {
       normalized.text = cleanText(element.text, "Write something…");
       normalized.font = ["serif", "sans", "hand"].includes(element.font) ? element.font : "serif";
       normalized.fontSize = clamp(element.fontSize, MIN_TEXT_SIZE, MAX_TEXT_SIZE, DEFAULT_TEXT_SIZE);
@@ -81,7 +89,7 @@
         ? element.frameStyle
         : "none";
     } else if (type === "shape") {
-      normalized.shape = ["rectangle", "ellipse", "triangle", "diamond", "line"].includes(element.shape)
+      normalized.shape = ["rectangle", "ellipse", "triangle", "diamond", "line", "arrow"].includes(element.shape)
         ? element.shape
         : "rectangle";
       normalized.fill = /^#[0-9a-f]{6}$/i.test(element.fill || "") ? element.fill : "#f1dfbd";
@@ -94,6 +102,8 @@
       normalized.label = cleanText(element.label);
       normalized.color = /^#[0-9a-f]{6}$/i.test(element.color || "") ? element.color : "#e3c99e";
     } else if (type === "tape") {
+      normalized.study = element.study === true;
+      normalized.revealed = element.revealed === true;
       normalized.color = /^#[0-9a-f]{6}$/i.test(element.color || "") ? element.color : "#d6b58d";
       normalized.pattern = ["solid", "stripe", "grid", "dots"].includes(element.pattern) ? element.pattern : "solid";
       normalized.opacity = clamp(element.opacity, 0.2, 1, 0.82);
@@ -101,6 +111,68 @@
     normalized.x = Math.min(normalized.x, Math.max(0, 1000 - normalized.w));
     normalized.y = Math.min(normalized.y, Math.max(0, 1400 - normalized.h));
     return normalized;
+  }
+
+  function inkFromPoints(points, options = {}) {
+    if (!points.length) return null;
+    const pad = (Number(options.strokeWidth) || 4) / 2 + 2;
+    const xs = points.map(p => p.x), ys = points.map(p => p.y);
+    const x = Math.max(0, Math.min(960, Math.min(...xs) - pad));
+    const y = Math.max(0, Math.min(1360, Math.min(...ys) - pad));
+    const w = Math.min(1000 - x, Math.max(40, Math.max(...xs) - x + pad));
+    const h = Math.min(1400 - y, Math.max(40, Math.max(...ys) - y + pad));
+    return normalizeElement({ ...options, type: "ink", x, y, w, h,
+      points: points.map(p => ({ x: (p.x - x) / w, y: (p.y - y) / h, pressure: p.pressure })) });
+  }
+
+  function elementPoint(element, x, y) {
+    const angle = element.rotation * Math.PI / 180;
+    const dx = x - element.w / 2, dy = y - element.h / 2;
+    return { x: element.x + element.w / 2 + dx * Math.cos(angle) - dy * Math.sin(angle),
+      y: element.y + element.h / 2 + dx * Math.sin(angle) + dy * Math.cos(angle) };
+  }
+
+  function elementCorners(element) {
+    return [[0,0], [element.w,0], [element.w,element.h], [0,element.h]].map(([x,y]) => elementPoint(element,x,y));
+  }
+
+  function selectionBounds(elements) {
+    const points = elements.flatMap(elementCorners);
+    if (!points.length) return null;
+    const x = Math.min(...points.map(p=>p.x)), y = Math.min(...points.map(p=>p.y));
+    return { x, y, w: Math.max(...points.map(p=>p.x)) - x, h: Math.max(...points.map(p=>p.y)) - y };
+  }
+
+  function segmentDistance(point, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((point.x-a.x)*dx + (point.y-a.y)*dy) / (dx*dx+dy*dy || 1)));
+    return Math.hypot(point.x-a.x-t*dx, point.y-a.y-t*dy);
+  }
+
+  function inkHit(element, point, radius = 12) {
+    if (element.type !== "ink") return false;
+    const points = element.points.map(p => elementPoint(element, p.x * element.w, p.y * element.h));
+    return points.some((p,i) => segmentDistance(point, points[Math.max(0,i-1)], p) <= radius + element.strokeWidth / 2);
+  }
+
+  function insidePolygon(point, polygon) {
+    let inside = false;
+    for (let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+      const a=polygon[i],b=polygon[j];
+      if ((a.y>point.y)!==(b.y>point.y) && point.x < (b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+    }
+    return inside;
+  }
+
+  function selectInPolygon(elements, polygon) {
+    if (polygon.length < 3) return [];
+    // Full containment avoids accidentally picking the paper or a large photo
+    // behind a small note. Ink uses its actual points, not its padded box.
+    return elements.filter(element => {
+      const points = element.type === "ink"
+        ? element.points.map(p=>elementPoint(element,p.x*element.w,p.y*element.h)) : elementCorners(element);
+      return points.every(point=>insidePolygon(point,polygon));
+    }).map(element=>element.id);
   }
 
   function normalizePage(page = {}, index = 0) {
@@ -299,6 +371,10 @@
     createPage,
     createJournal,
     normalizeElement,
+    inkFromPoints,
+    inkHit,
+    selectInPolygon,
+    selectionBounds,
     normalizeJournal,
     addPage,
     duplicatePage,

@@ -9,6 +9,63 @@ let activeSounds = {};
 const SOUNDBAR_LIBRARY_KEY = 'sanctum_soundbar_library_v1';
 const UPLOADED_TRACK_KEY_PREFIX = 'soundbar-track:';
 const DEFAULT_PLAYER_VOLUME = 1;
+const MusicData = window.SanctumMusicData;
+let musicLibrary = MusicData.normalize();
+let musicSelection = { playlistId: 'all', scope: null, following: true };
+let soundbarPageId = 'home';
+let soundbarReady = false;
+const musicEsc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+function musicTrackMetadata() {
+  return playlist.filter(track => track?.source === 'uploaded' && track.blobKey).map(track => ({
+    id: track.id, blobKey: track.blobKey, name: track.name, fileName: track.fileName || '',
+    mimeType: track.mimeType || '', size: Number(track.size) || 0,
+  }));
+}
+
+function musicRecords() {
+  return window.getVaultRecords?.() || [...(window.userDomains || []).map(record => ({ ...record, type: 'domain', parent: 'home' })), ...(window.userPages || [])];
+}
+
+function musicPlaylistName(id = musicSelection.playlistId) {
+  return id === 'all' ? 'Master library' : musicLibrary.playlists.find(list => list.id === id)?.name || 'Master library';
+}
+
+function musicQueueIndices() {
+  const indices = new Map(playlist.map((track, index) => [track.id, index]));
+  return MusicData.trackIds({ ...musicLibrary, tracks: musicTrackMetadata() }, musicSelection.playlistId)
+    .map(id => indices.get(id)).filter(index => index !== undefined && playlist[index].url);
+}
+
+function reconcileMusicQueue(resumePlaying = !musicPlayer.paused) {
+  musicSelection = MusicData.resolve({ ...musicLibrary, tracks: musicTrackMetadata() }, musicRecords(), soundbarPageId);
+  const queue = musicQueueIndices();
+  if (!queue.includes(currentTrackIndex)) {
+    pauseMusic();
+    if (queue.length) { loadTrack(queue[0]); if (resumePlaying) playMusic(); }
+    else {
+      currentTrackIndex = -1; musicPlayer.removeAttribute('src'); musicPlayer.load();
+      const progress = document.getElementById('soundbarProgressBar'); if (progress) progress.style.width = '0%';
+      writeSoundbarLibrary();
+    }
+  }
+  syncSoundbarTrackPresentation(playlist[currentTrackIndex]);
+  renderPlaylist();
+}
+
+function commitMusicLibrary(next) {
+  const before = musicLibrary;
+  musicLibrary = MusicData.normalize({ ...next, tracks: musicTrackMetadata() });
+  if (writeSoundbarLibrary() === false) {
+    musicLibrary = before;
+    renderPlaylist();
+    window.showAppToast?.('Could not save the music library.', 'info');
+    return false;
+  }
+  reconcileMusicQueue();
+  void flushSoundbarLibrary();
+  return true;
+}
 
 const AMBIENT_SOUNDS = [
   { id: 'rain',        label: 'Rain',        icon: '🌧', src: 'sounds/rain.mp3' },
@@ -85,19 +142,12 @@ function readSoundbarLibrary() {
 }
 
 function writeSoundbarLibrary() {
+  if (!soundbarReady) return true;
   const storage = getSoundbarStorage();
   if (!storage?.writeJSON) return false;
   return storage.writeJSON(SOUNDBAR_LIBRARY_KEY, {
-    tracks: playlist
-      .filter((track) => track?.source === 'uploaded' && track.blobKey)
-      .map((track) => ({
-        id: track.id,
-        blobKey: track.blobKey,
-        name: track.name,
-        fileName: track.fileName || '',
-        mimeType: track.mimeType || '',
-        size: Number.isFinite(Number(track.size)) ? Number(track.size) : 0,
-      })),
+    ...musicLibrary,
+    tracks: musicTrackMetadata(),
     currentTrackId: playlist[currentTrackIndex]?.id || '',
     loopTrack,
     volume: musicPlayer.volume,
@@ -135,7 +185,7 @@ function syncSoundbarTrackPresentation(track = null) {
   const name = track ? getSafeTrackName(track.name) : 'No track loaded';
 
   if (trackNameEl) trackNameEl.textContent = name;
-  if (trackMetaEl) trackMetaEl.textContent = track ? 'Local track' : 'Your local music';
+  if (trackMetaEl) trackMetaEl.textContent = track ? `${musicPlaylistName()} · Local track` : musicPlaylistName();
   if (coverEl) {
     const fallback = track
       ? Array.from(name).find((character) => /[\p{L}\p{N}]/u.test(character)) || '♪'
@@ -158,7 +208,8 @@ async function restorePersistedPlaylist() {
     }
   }
 
-  const persisted = readSoundbarLibrary();
+  const persisted = MusicData.normalize(readSoundbarLibrary());
+  musicLibrary = persisted;
   const persistedVolume = Number(persisted?.volume);
   loopTrack = !!persisted?.loopTrack;
   if (Number.isFinite(persistedVolume)) {
@@ -170,19 +221,13 @@ async function restorePersistedPlaylist() {
   if (!storage?.getBlob) return;
 
   const restored = [];
-  let didPruneMissingTracks = false;
   for (const trackMeta of Array.isArray(persisted?.tracks) ? persisted.tracks : []) {
-    if (!trackMeta?.id) {
-      didPruneMissingTracks = true;
-      continue;
-    }
-
     const blobKey = typeof trackMeta.blobKey === 'string' && trackMeta.blobKey
       ? trackMeta.blobKey
       : getUploadedTrackBlobKey(trackMeta.id);
     const blob = await storage.getBlob(blobKey);
     if (!(blob instanceof Blob)) {
-      didPruneMissingTracks = true;
+      restored.push({ ...trackMeta, blobKey, source: 'uploaded', url: '', objectUrl: false });
       continue;
     }
 
@@ -193,22 +238,16 @@ async function restorePersistedPlaylist() {
   }
 
   playlist = restored;
-  if (!playlist.length) {
-    currentTrackIndex = -1;
-    syncSoundbarTrackPresentation();
-    return;
-  }
+  currentTrackIndex = playlist.findIndex(track => track.id === persisted.currentTrackId);
+  musicSelection = MusicData.resolve(musicLibrary, musicRecords(), soundbarPageId);
+  if (currentTrackIndex >= 0 && musicQueueIndices().includes(currentTrackIndex)) loadTrack(currentTrackIndex);
+  else currentTrackIndex = -1;
+  reconcileMusicQueue(false);
 
-  const restoredIndex = playlist.findIndex((track) => track.id === persisted.currentTrackId);
-  loadTrack(restoredIndex >= 0 ? restoredIndex : 0);
-
-  if (didPruneMissingTracks) {
-    writeSoundbarLibrary();
-    await flushSoundbarLibrary();
-  }
 }
 
 async function addUploadedTracks(files = []) {
+  if (!soundbarReady) { window.showAppToast?.('The music library is still loading.', 'info'); return; }
   const storage = getSoundbarStorage();
   const pendingFiles = Array.from(files || []);
   if (!pendingFiles.length) return;
@@ -218,7 +257,8 @@ async function addUploadedTracks(files = []) {
     return;
   }
 
-  const firstNewIndex = playlist.length;
+  const targetPlaylistId = musicSelection.playlistId;
+  const addedIds = [];
   let addedCount = 0;
   let failedCount = 0;
 
@@ -239,6 +279,7 @@ async function addUploadedTracks(files = []) {
       mimeType: file.type,
       size: file.size,
     }));
+    addedIds.push(trackId);
     addedCount += 1;
   }
 
@@ -247,14 +288,12 @@ async function addUploadedTracks(files = []) {
     return;
   }
 
+  const targetPlaylist = musicLibrary.playlists.find(list => list.id === targetPlaylistId);
+  if (targetPlaylist) targetPlaylist.trackIds.push(...addedIds);
   writeSoundbarLibrary();
   await flushSoundbarLibrary();
 
-  if (currentTrackIndex < 0) {
-    loadTrack(firstNewIndex);
-  } else {
-    renderPlaylist();
-  }
+  reconcileMusicQueue();
 
   if (failedCount) {
     showAppToast?.(`Saved ${addedCount} track${addedCount === 1 ? '' : 's'}, ${failedCount} failed.`, 'info');
@@ -428,29 +467,204 @@ function renderAmbientGrid() {
   });
 }
 
+function renderMusicLibraryControls() {
+  const host = document.getElementById('soundbarLibraryControls');
+  if (!host) return;
+  const source = musicSelection.scope;
+  const scopeLabel = source ? `${MusicData.scopeKind(source)}: ${source.title}` : '';
+  host.innerHTML = `<div class="soundbar-library-row"><select aria-label="Music playlist" ${!soundbarReady ? 'disabled' : ''}>
+    <option value="all">Master library · ${playlist.length}</option>${musicLibrary.playlists.map(list => `<option value="${musicEsc(list.id)}">${musicEsc(list.name)} · ${list.trackIds.length}</option>`).join('')}</select>
+    <label class="soundbar-follow"><input type="checkbox" ${musicLibrary.followPage ? 'checked' : ''} ${!soundbarReady ? 'disabled' : ''}>Follow page</label></div>
+    <div class="soundbar-library-status">${musicSelection.following ? source ? `Following ${musicEsc(scopeLabel)}` : 'Following page · no assignment, using master library' : 'Manual selection · stays on this playlist'}</div>
+    <div class="soundbar-library-buttons"><button type="button" data-music-action="new">New playlist</button>${musicSelection.playlistId !== 'all' ? '<button type="button" data-music-action="edit">Edit playlist</button>' : ''}<button type="button" data-music-action="assign">Assign to level</button></div>`;
+  host.querySelector('select').value = musicSelection.playlistId;
+  host.querySelector('select').onchange = e => {
+    commitMusicLibrary({ ...musicLibrary, manualPlaylistId: e.target.value, followPage: false });
+  };
+  host.querySelector('input').onchange = e => {
+    commitMusicLibrary({ ...musicLibrary, followPage: e.target.checked, manualPlaylistId: musicSelection.playlistId });
+  };
+  host.querySelectorAll('[data-music-action]').forEach(button => {
+    button.disabled = !soundbarReady;
+    button.onclick = () => button.dataset.musicAction === 'assign' ? openMusicAssignment() : openMusicPlaylistEditor(button.dataset.musicAction === 'edit' ? musicSelection.playlistId : '');
+  });
+}
+
+function musicScopeOptions() {
+  const records = musicRecords();
+  const current = records.find(record => record.id === soundbarPageId);
+  const groups = [['Domains', 'Domain'], ['Projects', 'Project'], ['Hubs', 'Hub'], ['Pages', 'Page'], ['Database pages', 'Database page']];
+  return `${current ? `<option value="${musicEsc(current.id)}">Current ${MusicData.scopeKind(current).toLowerCase()} · ${musicEsc(current.title)}</option>` : ''}<option value="home">Home · everywhere</option>${groups.map(([label, kind]) => {
+    const entries = records.filter(record => MusicData.scopeKind(record) === kind);
+    return entries.length ? `<optgroup label="${label}">${entries.sort((a,b) => String(a.title).localeCompare(String(b.title))).map(record => {
+    const parents = MusicData.path(records, record.id).slice(1).filter(p => p.id !== 'home').reverse().map(p => p.title).join(' / ');
+    return `<option value="${musicEsc(record.id)}">${musicEsc(record.title)}${parents ? ` — ${musicEsc(parents)}` : ''}</option>`;
+  }).join('')}</optgroup>` : '';
+  }).join('')}`;
+}
+
+function musicDialog(title, contents) {
+  document.querySelector('.soundbar-library-dialog')?.close();
+  const dialog = document.createElement('dialog');
+  dialog.className = 'soundbar-library-dialog';
+  dialog.setAttribute('aria-label', title);
+  dialog.innerHTML = `<header><h2>${musicEsc(title)}</h2><button type="button" data-close aria-label="Close music dialog">×</button></header>${contents}`;
+  dialog.querySelector('[data-close]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('keydown', e => e.stopPropagation());
+  document.body.append(dialog); dialog.showModal();
+  return dialog;
+}
+
+function openMusicPlaylistEditor(id = '') {
+  const list = musicLibrary.playlists.find(list => list.id === id), selected = new Set(list?.trackIds || []);
+  const dialog = musicDialog(list ? 'Edit playlist' : 'New playlist', `<form>
+    <label>Playlist name<input name="name" required maxlength="120" value="${musicEsc(list?.name || '')}" placeholder="e.g. Beneath the Veins"></label>
+    <label>Use for (optional)<select name="scope"><option value="">Choose a level…</option>${musicScopeOptions()}</select></label>
+    <p>Choose music from your master library. Tracks can belong to several playlists.</p>
+    <input class="soundbar-track-search" type="search" aria-label="Find music" placeholder="Find music…">
+    <div class="soundbar-track-picker">${playlist.length ? playlist.map(track => `<label><input type="checkbox" name="tracks" value="${musicEsc(track.id)}" ${selected.has(track.id) ? 'checked' : ''}><span>${musicEsc(track.name)}</span></label>`).join('') : '<p>Add music to the master library or upload it after creating this playlist.</p>'}</div>
+    <p role="alert"></p><footer>${list ? '<button type="button" data-delete>Delete playlist</button>' : '<span></span>'}<button type="submit">Save playlist</button></footer></form>`);
+  const form = dialog.querySelector('form');
+  form.querySelector('[type="search"]').oninput = e => {
+    const query = e.target.value.trim().toLowerCase();
+    form.querySelectorAll('.soundbar-track-picker label').forEach(label => { label.hidden = !label.textContent.toLowerCase().includes(query); });
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) { form.querySelector('[role="alert"]').textContent = 'Give the playlist a name.'; return; }
+    const chosen = [...form.querySelectorAll('input[name="tracks"]:checked')].map(input => input.value);
+    const trackIds = [...(list?.trackIds || []).filter(id => chosen.includes(id)), ...chosen.filter(id => !selected.has(id))];
+    const playlistId = id || `music-list-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const updated = { id: playlistId, name, trackIds };
+    const next = { ...musicLibrary, playlists: list ? musicLibrary.playlists.map(p => p.id === playlistId ? updated : p) : [...musicLibrary.playlists, updated],
+      assignments: { ...musicLibrary.assignments }, manualPlaylistId: list ? musicLibrary.manualPlaylistId : playlistId, followPage: list ? musicLibrary.followPage : false };
+    if (form.elements.scope.value) { next.assignments[form.elements.scope.value] = playlistId; next.followPage = true; }
+    if (commitMusicLibrary(next)) dialog.close();
+  };
+  form.querySelector('[data-delete]')?.addEventListener('click', () => {
+    if (!window.confirm(`Delete “${list.name}”? Its music stays in the master library.`)) return;
+    if (commitMusicLibrary(MusicData.removePlaylist(musicLibrary, id))) dialog.close();
+  });
+  form.elements.name.focus();
+}
+
+function openMusicAssignment() {
+  const dialog = musicDialog('Assign playlist to a level', `<form>
+    <label>Level<select name="scope">${musicScopeOptions()}</select></label>
+    <label>Playlist<select name="playlist"><option value="">Inherit from parent</option><option value="all">Master library</option>${musicLibrary.playlists.map(list => `<option value="${musicEsc(list.id)}">${musicEsc(list.name)}</option>`).join('')}</select></label>
+    <p>Applies to this level and everything under it. A more specific assignment takes priority.</p>
+    <footer><span></span><button type="submit">Save assignment</button></footer></form>`);
+  const form = dialog.querySelector('form');
+  form.elements.scope.value = [...form.elements.scope.options].some(option => option.value === soundbarPageId) ? soundbarPageId : 'home';
+  form.elements.playlist.value = musicSelection.playlistId;
+  form.elements.scope.onchange = () => { form.elements.playlist.value = musicLibrary.assignments[form.elements.scope.value] || ''; };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const assignments = { ...musicLibrary.assignments };
+    if (form.elements.playlist.value) assignments[form.elements.scope.value] = form.elements.playlist.value;
+    else delete assignments[form.elements.scope.value];
+    if (commitMusicLibrary({ ...musicLibrary, assignments, followPage: true })) dialog.close();
+  };
+  form.elements.scope.focus();
+}
+
+function bindMusicReordering(host, selector, ids, onMove) {
+  const clearIndicators = () => host.querySelectorAll('.music-drop-before, .music-drop-after').forEach(row => row.classList.remove('music-drop-before', 'music-drop-after'));
+  host.querySelectorAll(selector).forEach(row => {
+    const handle = row.querySelector('[data-music-reorder]'), id = row.dataset.musicOrderId;
+    let drag = null;
+    const destination = event => {
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(selector);
+      if (!target || !host.contains(target) || target === row) return null;
+      const rect = target.getBoundingClientRect();
+      return { row: target, id: target.dataset.musicOrderId, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' };
+    };
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      handle.focus({preventScroll:true});
+      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+      handle.setPointerCapture(event.pointerId);
+    });
+    handle.addEventListener('pointermove', event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      drag.moved ||= Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4;
+      if (!drag.moved) return;
+      clearIndicators();
+      const target = destination(event);
+      target?.row.classList.add(`music-drop-${target.position}`);
+    });
+    handle.addEventListener('pointerup', event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault(); event.stopPropagation();
+      const target = drag.moved ? destination(event) : null;
+      drag = null; clearIndicators();
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      if (target) onMove(id, target.id, target.position);
+    });
+    handle.addEventListener('lostpointercapture', () => { drag = null; clearIndicators(); });
+    handle.addEventListener('pointercancel', () => { drag = null; clearIndicators(); });
+    handle.addEventListener('keydown', event => {
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault(); event.stopPropagation();
+      const index = ids.indexOf(id), next = index + (event.key === 'ArrowUp' ? -1 : 1);
+      if (next < 0 || next >= ids.length) return;
+      onMove(id, ids[next], next < index ? 'before' : 'after');
+      [...host.querySelectorAll(selector)].find(row => row.dataset.musicOrderId === id)?.querySelector('[data-music-reorder]')?.focus({preventScroll:true});
+    });
+  });
+}
+
+function reorderMusicTrack(id, targetId, position) {
+  const next = MusicData.moveTrack({ ...musicLibrary, tracks: musicTrackMetadata() }, musicSelection.playlistId, id, targetId, position);
+  const before = playlist, oldIndex = currentTrackIndex, currentId = playlist[currentTrackIndex]?.id;
+  if (musicSelection.playlistId === 'all') {
+    const byId = new Map(playlist.map(track => [track.id, track]));
+    playlist = next.tracks.map(track => byId.get(track.id));
+    currentTrackIndex = playlist.findIndex(track => track.id === currentId);
+  }
+  if (!commitMusicLibrary(next)) {
+    playlist = before; currentTrackIndex = oldIndex; renderPlaylist(); return false;
+  }
+  return true;
+}
+
 // Music player
 function renderPlaylist() {
+  renderMusicLibraryControls();
   const el = document.getElementById('soundbarPlaylist');
   if (!el) return;
   el.innerHTML = '';
-  if (!playlist.length) {
-    el.innerHTML = '<div class="soundbar-empty">No tracks yet.</div>';
+  const trackIds = MusicData.trackIds({ ...musicLibrary, tracks: musicTrackMetadata() }, musicSelection.playlistId);
+  if (!trackIds.length) {
+    el.innerHTML = `<div class="soundbar-empty">${musicSelection.playlistId === 'all' ? 'No music yet. Add your first tracks.' : 'This playlist is empty. Edit it to choose music, or add new tracks.'}</div>`;
     return;
   }
-  playlist.forEach((track, i) => {
+  trackIds.forEach(id => {
+    const i = playlist.findIndex(track => track.id === id), track = playlist[i];
+    if (!track) return;
     const item = document.createElement('div');
     item.className = 'soundbar-playlist-item' + (i === currentTrackIndex ? ' active' : '');
+    item.dataset.musicOrderId = id;
     item.innerHTML = `
-      <span class="playlist-icon">♪</span>
-      <span class="playlist-name">${track.name}</span>
-      <button class="playlist-remove" data-idx="${i}">✕</button>
+      <button type="button" class="music-reorder-handle" data-music-reorder aria-label="Reorder song: ${musicEsc(track.name)}" title="Drag to reorder, or use ↑ and ↓">⠿</button>
+      <button type="button" class="playlist-name" ${!track.url ? 'disabled' : ''} aria-label="Play ${musicEsc(track.name)}" title="${track.url ? musicEsc(track.name) : 'Audio file unavailable'}">${musicEsc(track.name)}${!track.url ? ' · file unavailable' : ''}</button>
+      <button type="button" class="playlist-remove" data-idx="${i}" aria-label="${musicSelection.playlistId === 'all' ? 'Delete from master library' : 'Remove from playlist'}: ${musicEsc(track.name)}" title="${musicSelection.playlistId === 'all' ? 'Delete from master library' : 'Remove from this playlist'}">✕</button>
     `;
     item.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-music-reorder]')) return;
       if (e.target.classList.contains('playlist-remove')) {
         const idx = parseInt(e.target.dataset.idx, 10);
         if (!Number.isFinite(idx) || idx < 0 || idx >= playlist.length) return;
 
         const track = playlist[idx];
+        if (musicSelection.playlistId !== 'all') {
+          const lists = musicLibrary.playlists.map(list => list.id === musicSelection.playlistId ? { ...list, trackIds: list.trackIds.filter(id => id !== track.id) } : list);
+          commitMusicLibrary({ ...musicLibrary, playlists: lists }); return;
+        }
+        if (!window.confirm(`Delete “${track.name}” from the master library and all playlists?`)) return;
         const isCurrentTrack = idx === currentTrackIndex;
         const wasPlaying = isCurrentTrack && !musicPlayer.paused;
 
@@ -460,54 +674,32 @@ function renderPlaylist() {
           musicPlayer.load();
         }
 
-        revokeTrackObjectUrl(track);
-        if (track?.source === 'uploaded' && track.blobKey) {
-          await getSoundbarStorage()?.removeBlob?.(track.blobKey);
-        }
-
+        const before = [...playlist], oldIndex = currentTrackIndex, oldLibrary = musicLibrary;
         playlist.splice(idx, 1);
-
-        if (!playlist.length) {
-          currentTrackIndex = -1;
-          musicPlayer.src = '';
-          syncSoundbarTrackPresentation();
-          const playButton = document.getElementById('soundPlayBtn');
-          if (playButton) {
-            playButton.textContent = '▶';
-            playButton.setAttribute('aria-label', 'Play');
-          }
-          renderPlaylist();
-          writeSoundbarLibrary();
-          await flushSoundbarLibrary();
-          return;
+        musicLibrary = MusicData.removeTrack(musicLibrary, track.id);
+        currentTrackIndex = before[oldIndex]?.id === track.id ? -1 : playlist.findIndex(t => t.id === before[oldIndex]?.id);
+        if (writeSoundbarLibrary() === false) {
+          playlist = before; musicLibrary = oldLibrary; currentTrackIndex = oldIndex;
+          if (isCurrentTrack) { loadTrack(idx); if (wasPlaying) playMusic(); }
+          window.showAppToast?.('Could not save the music library.', 'info'); return;
         }
+        revokeTrackObjectUrl(track);
+        if (track?.source === 'uploaded' && track.blobKey) await getSoundbarStorage()?.removeBlob?.(track.blobKey);
+        reconcileMusicQueue(isCurrentTrack ? wasPlaying : !musicPlayer.paused);
+        await flushSoundbarLibrary(); return;
 
-        if (isCurrentTrack) {
-          const nextIndex = Math.min(idx, playlist.length - 1);
-          loadTrack(nextIndex);
-          if (wasPlaying) {
-            playMusic();
-          } else {
-            pauseMusic();
-          }
-        } else {
-          if (currentTrackIndex > idx) currentTrackIndex -= 1;
-          renderPlaylist();
-          writeSoundbarLibrary();
-        }
-
-        await flushSoundbarLibrary();
-        return;
       }
+      if (!track.url) return;
       loadTrack(i);
       playMusic();
     });
     el.appendChild(item);
   });
+  bindMusicReordering(el, '.soundbar-playlist-item', trackIds, reorderMusicTrack);
 }
 
 function loadTrack(index) {
-  if (index < 0 || index >= playlist.length) return;
+  if (index < 0 || index >= playlist.length || !playlist[index].url || !musicQueueIndices().includes(index)) return;
   currentTrackIndex = index;
   musicPlayer.src = playlist[index].url;
   syncSoundbarTrackPresentation(playlist[index]);
@@ -516,12 +708,14 @@ function loadTrack(index) {
 }
 
 function playMusic() {
-  if (!playlist.length) return;
-  if (currentTrackIndex < 0) loadTrack(0);
-  musicPlayer.play().catch(() => {});
+  const queue = musicQueueIndices();
+  if (!queue.length) return;
+  if (!queue.includes(currentTrackIndex)) loadTrack(queue[0]);
+  const playingIndex = currentTrackIndex;
+  musicPlayer.play().catch(() => { if (currentTrackIndex === playingIndex && musicPlayer.paused) pauseMusic(); });
   const playButton = document.getElementById('soundPlayBtn');
   if (playButton) {
-    playButton.textContent = '⏸';
+    playButton.innerHTML = getUIIcon('pause');
     playButton.setAttribute('aria-label', 'Pause');
   }
 }
@@ -530,7 +724,7 @@ function pauseMusic() {
   musicPlayer.pause();
   const playButton = document.getElementById('soundPlayBtn');
   if (playButton) {
-    playButton.textContent = '▶';
+    playButton.innerHTML = getUIIcon('play');
     playButton.setAttribute('aria-label', 'Play');
   }
 }
@@ -539,13 +733,13 @@ musicPlayer.addEventListener('ended', () => {
   if (loopTrack) {
     musicPlayer.currentTime = 0;
     playMusic();
-  } else if (playlist.length > 1) {
-    loadTrack((currentTrackIndex + 1) % playlist.length);
+  } else if (musicQueueIndices().length > 1) {
+    advanceMusicTrack(1);
     playMusic();
   } else {
     const playButton = document.getElementById('soundPlayBtn');
     if (playButton) {
-      playButton.textContent = '▶';
+      playButton.innerHTML = getUIIcon('play');
       playButton.setAttribute('aria-label', 'Play');
     }
   }
@@ -569,14 +763,12 @@ document.getElementById('soundPlayBtn')?.addEventListener('click', () => {
 });
 
 document.getElementById('soundPrevBtn')?.addEventListener('click', () => {
-  if (!playlist.length) return;
-  loadTrack((currentTrackIndex - 1 + playlist.length) % playlist.length);
+  advanceMusicTrack(-1);
   playMusic();
 });
 
 document.getElementById('soundNextBtn')?.addEventListener('click', () => {
-  if (!playlist.length) return;
-  loadTrack((currentTrackIndex + 1) % playlist.length);
+  advanceMusicTrack(1);
   playMusic();
 });
 
@@ -613,8 +805,9 @@ document.getElementById('soundbarToggleBtn')?.addEventListener('click', () => {
 
   if (isOpen) {
     panel.classList.remove('open');
+    panel.setAttribute('aria-hidden', 'true'); panel.inert = true;
     bar?.classList.remove('panel-open');
-    btn.textContent = '⌃';
+    btn.innerHTML = getUIIcon('chevron-up');
     btn.setAttribute('aria-label', 'Open music controls');
     btn.setAttribute('aria-expanded', 'false');
     soundbarExpanded = false;
@@ -629,6 +822,7 @@ document.getElementById('soundbarToggleBtn')?.addEventListener('click', () => {
   }
 
   soundbarExpanded = true;
+  panel.setAttribute('aria-hidden', 'false'); panel.inert = false;
   bar?.classList.add('panel-open');
   btn.setAttribute('aria-label', 'Close music controls');
   btn.setAttribute('aria-expanded', 'true');
@@ -639,7 +833,7 @@ document.getElementById('soundbarToggleBtn')?.addEventListener('click', () => {
     panel.classList.add('open');
   }
 
-  btn.textContent = '⌄';
+  btn.innerHTML = getUIIcon('chevron-down');
 });
 
 document.querySelectorAll('.soundbar-tab').forEach(tab => {
@@ -653,10 +847,25 @@ document.querySelectorAll('.soundbar-tab').forEach(tab => {
 
 window.addEventListener('beforeunload', cleanupPlaylistObjectUrls);
 
+function advanceMusicTrack(direction) {
+  const queue = musicQueueIndices();
+  if (!queue.length) return;
+  const position = queue.indexOf(currentTrackIndex);
+  loadTrack(queue[(position + direction + queue.length) % queue.length]);
+}
+
+window.SanctumSoundbar = {
+  pageChanged(pageId) { soundbarPageId = pageId || 'home'; if (soundbarReady) reconcileMusicQueue(); },
+  refreshScopes() { if (soundbarReady) reconcileMusicQueue(); },
+};
+
 async function initSoundbar() {
   renderAmbientGrid();
   syncSoundbarTrackPresentation();
   await restorePersistedPlaylist();
+  soundbarReady = true;
+  reconcileMusicQueue(false);
+  writeSoundbarLibrary();
   renderPlaylist();
   syncLoopButtonUI();
   syncVolumeUI();

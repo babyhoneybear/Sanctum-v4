@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Compact inline timeline preview</title>
+<link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/timeline.css">
+<style>body{padding:40px;background:#191919;color:#eee}main{max-width:1120px;margin:auto}h1{font-size:26px}nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:30px}nav button{padding:6px 10px;background:#242424;color:#eee;border:1px solid #444;border-radius:4px}.dashboard{display:grid;grid-template-columns:280px minmax(0,1fr);gap:36px}.note{border:1px solid #444;padding:20px;height:220px;border-radius:4px}.note h2{font-size:16px}.note p{color:#aaa;line-height:2}.inline-title{font-size:13px;margin:0 0 8px}.below{border-top:1px solid #444;margin-top:30px;padding-top:24px;font-size:22px}.dashboard.narrow{grid-template-columns:280px 340px}.dashboard.full{display:block}.full .note{display:none}@media(max-width:760px){.dashboard{grid-template-columns:minmax(0,1fr)}.note{height:auto}}</style>
+<main><h1>Story &amp; writing</h1><nav><button id="inline">Inline</button><button id="full">Full page</button><button id="images">Show images</button><button id="spans">Spans</button><button id="narrow">Narrow width</button><button id="reset">Reset view sizes</button></nav>
+<div class="dashboard" id="dashboard"><aside class="note"><h2>Currently working on</h2><p>History &amp; Lore</p><h2>Next thing to do</h2><p>Continue the history of the coast.</p></aside><section><h2 class="inline-title">Master timeline</h2><div id="timeline"></div></section></div><div class="below">World compendium</div></main>
+<script src="/timeline-data.js"></script><script>
+const source={kind:'page',pageId:'inline-preview'}, fixtureKey='sanctum_timeline_inline_preview';
+const initial={sources:{'page:inline-preview':{calendar:{kind:'fiction',yearZero:true,eras:[{name:'PA',offset:-50000,fullName:'Primordial Age'},{name:'MPF',offset:-10000,fullName:'Mythic Pre-Fall'},{name:'AF',offset:0,fullName:'After the Fall'}]}}},views:{'block:inline-preview:embed':{spacing:'readable'},'page:inline-preview':{spacing:'readable'}}};
+window.readStorageJSON=()=>JSON.parse(localStorage.getItem(fixtureKey)||'null')||structuredClone(initial);
+window.writeStorageJSON=(_,value)=>{localStorage.setItem(fixtureKey,JSON.stringify(value));return true;};
+const db={properties:[{id:'name',name:'Event',type:'title'},{id:'when',name:'When',type:'text'},{id:'details',name:'Details',type:'text'},{id:'image',name:'Image',type:'text'}],rows:[
+{id:'children',values:{name:'The First Children of Mana',when:'5000 PA',details:'Elderkin are known to some as the first children of mana. Their origins are unknown, and even some of the oldest surviving traditions in humanity still preserve only fragments of their story.'}},
+{id:'flourish',values:{name:'The flourishing of Elderkin',when:'30000 PA',details:'The old cities flourish along the northern coast.'}},
+{id:'humanity',values:{name:'Earliest signs of Humanity',when:'1000 MPF',details:'Small settlements appear beyond the old forests.'}},
+{id:'fall',values:{name:'After the Fall',when:'0 AF',details:'Survivors scatter across the continent carrying the knowledge of a once prosperous land.'}}]};
+let options={source,database:db,viewKey:'block:inline-preview:embed',fullPage:false};
+window.SanctumTimelineDatabase={get:()=>db,visibleRows:db=>db.rows,refresh:()=>render(),sources:()=>[]};
+function render(){SanctumTimelineUI.mount(document.getElementById('timeline'),options);}
+function changeStyle(style){const all=readStorageJSON();all.views[options.viewKey]={...all.views[options.viewKey],style};writeStorageJSON('',all);render();}
+</script><script src="/timeline-ui.js"></script><script>
+document.getElementById('inline').onclick=()=>{options.fullPage=false;options.viewKey='block:inline-preview:embed';dashboard.classList.remove('full');render();};
+document.getElementById('full').onclick=()=>{options.fullPage=true;options.viewKey='page:inline-preview';dashboard.classList.add('full');render();};
+images.onclick=()=>{const show=!db.rows[0].values.image;db.rows.forEach((row,i)=>{row.values.image=show?'/assets/worldbuilding/'+['culture','castle','nature','scenes'][i]+'.jpg':'';});render();};
+spans.onclick=()=>changeStyle(readStorageJSON().views[options.viewKey]?.style==='spans'?'illustrated':'spans');
+narrow.onclick=()=>{dashboard.classList.toggle('narrow');render();};
+reset.onclick=()=>{localStorage.removeItem(fixtureKey);render();};
+render();
+</script></html>
